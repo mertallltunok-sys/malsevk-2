@@ -13,7 +13,8 @@
       "PowerShell(node \"C:\\\\Users\\\\merta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-merta-malsevk-2\\\\06cacc86-d7cb-4c88-922d-7dcdc2055a1e\\\\scratchpad\\\\verify-phone.mjs\")",
       "WebSearch",
       "WebFetch(domain:www.tcdd.gov.tr)",
-      "WebFetch(domain:tr.wikipedia.org)"
+      "WebFetch(domain:tr.wikipedia.org)",
+      "Bash(npm run *)"
     ]
   }
 }

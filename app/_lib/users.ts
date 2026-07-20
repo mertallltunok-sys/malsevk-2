@@ -205,12 +205,14 @@ async function upsertDevAccount(account: RegisterInput): Promise<void> {
 }
 
 /**
- * Yalnızca development ortamında çalışır; production'da (NODE_ENV=production)
- * hiçbir şey yapmaz. Idempotenttir — tekrar tekrar çağrılsa da hesapları
- * yinelemez, yalnızca güncel olmayan alanları senkronlar.
+ * Bilinçli olarak NODE_ENV'e göre kısıtlanmamıştır: gerçek bir backend/veritabanı
+ * olmadığından (localStorage her origin'de — localhost, Vercel preview/production —
+ * boş başlar), demo hesapların yalnızca `next dev` altında oluşup canlıda hiç
+ * oluşmaması login'i orada tamamen kırar. Bu yüzden her ortamda çalışır.
+ * Idempotenttir — tekrar tekrar çağrılsa da hesapları yinelemez, yalnızca
+ * güncel olmayan alanları senkronlar; mevcut kullanıcı kayıtlarına dokunmaz.
  */
 export async function seedDevAccountsIfNeeded(): Promise<void> {
-  if (process.env.NODE_ENV === "production") return;
   if (typeof window === "undefined") return;
 
   for (const account of DEV_ACCOUNTS) {
