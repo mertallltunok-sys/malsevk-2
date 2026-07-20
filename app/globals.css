@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+:root {
+  /* Marka - ana renk (koyu lacivert) */
+  --navy-900: #0f2138;
+  --navy-800: #17314f;
+
+  /* Destek renk (sakin mavi) */
+  --blue-600: #2f6690;
+  --blue-100: #e6eef4;
+
+  /* Durum renkleri (yumuşak tonlar) */
+  --success: #3f8f6c;
+  --success-soft: #e8f4ee;
+  --warning: #c17a34;
+  --warning-soft: #faf1e3;
+  --danger: #b3453f;
+  --danger-soft: #fbebea;
+
+  /* Yüzeyler */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #dde3ea;
+
+  /* Metin */
+  --fg: #10233f;
+  --muted-fg: #57647c;
+
+  --radius-lg: 0.875rem;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-foreground: var(--fg);
+  --color-muted-foreground: var(--muted-fg);
+
+  --color-primary: var(--navy-900);
+  --color-primary-hover: var(--navy-800);
+  --color-primary-foreground: #ffffff;
+
+  --color-accent: var(--blue-600);
+  --color-accent-soft: var(--blue-100);
+  --color-accent-foreground: #ffffff;
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --radius-card: var(--radius-lg);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}

@@ -1,0 +1,90 @@
+[
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-belde-port-dilovası-15738082",
+    "name": "Beldeport",
+    "aliases": ["BELDEPORT", "Belde Port", "Beldeport MED Lojistik"],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.beldeport.com.tr/",
+    "fullAddress": "Diliskelesi Mah. Liman Cad. No:13/8, 41455 Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Resmi işletme sitesi (beldeport.com.tr) ve TÜRKLİM üye kaydı — MED Lojistik A.Ş. tarafından işletilir"
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-tcdd-derince-limani",
+    "name": "TCDD Derince Limanı",
+    "type": "LIMAN",
+    "districtId": "derince",
+    "district": "Derince",
+    "latitude": 40.745556,
+    "longitude": 29.833333,
+    "officialWebsite": "https://www.tcdd.gov.tr/kurumsal/derince-limani",
+    "phone": "+902622397300",
+    "fullAddress": "TCDD Liman İşletmesi Kontrol Müdürlüğü, Derince/Kocaeli",
+    "aliases": ["Derince Limanı", "Derince Liman", "TCDD Derince Liman İşletmesi Müdürlüğü"],
+    "sourcePriority": "A",
+    "manualSource": "Resmi kamu kurumu sitesi (tcdd.gov.tr/kurumsal/derince-limani) — Overpass sorgusu bu tesisi bulamadı, iki 'Derince Liman' adayı gerçekte bir tren/feribot durağı (railway=buffer_stop) ve bir mahalle adıydı (place=quarter); classify.mjs bu tür idari/ulaşım etiketlerini artık dışlıyor"
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-gosb-gebze",
+    "name": "Gebze Organize Sanayi Bölgesi (GOSB)",
+    "type": "OSB",
+    "districtId": "gebze",
+    "district": "Gebze",
+    "officialWebsite": "https://www.gosb.com.tr/",
+    "phone": "+902626484848",
+    "fullAddress": "Şahabettin Bilgisu Caddesi No:605, Balçık Mah., Gebze/Kocaeli",
+    "aliases": ["GOSB", "Gebze OSB", "Gebze Organize Sanayi Bölgesi"],
+    "sourcePriority": "B",
+    "manualSource": "OSB'nin resmi sitesi (gosb.com.tr/iletisim) — OSM'de yalnızca bu bölge içindeki alt tesisler (Gebze OSB TM trafo merkezi, Gebze OSB Metro İnşaatı) ayrı adaylar olarak bulunuyor, ana OSB kaydı adayların arasında yoktu"
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-gebze-guzeller-osb",
+    "name": "Gebze Güzeller Organize Sanayi Bölgesi",
+    "type": "OSB",
+    "districtId": "gebze",
+    "district": "Gebze",
+    "officialWebsite": "https://www.ggosb.com.tr/",
+    "fullAddress": "İnönü Mah., Balçık Yolu, Gebze/Kocaeli",
+    "aliases": ["Güzeller OSB", "GGOSB", "Gebze Güzeller OSB"],
+    "sourcePriority": "B",
+    "manualSource": "OSB'nin resmi sitesi (ggosb.com.tr) — OSM'de yalnızca bölge içindeki bir alt tesis (Gebze Güzeller OSB Güneş Enerji Santrali) aday olarak bulunuyor, ana OSB kaydı adayların arasında yoktu"
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-yılport-konteyner-liman-isletmeleri-dilovası-15738083",
+    "name": "Yılport Gebze",
+    "aliases": [
+      "Yılport",
+      "Yilport",
+      "YILPORT",
+      "Yılport Gebze Terminali",
+      "Yılport Konteyner ve Liman İşletmeleri A.Ş."
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.yilport.com/tr/liman-terminaller/konum-detay/Bize-Ulasin/377/630/0",
+    "fullAddress": "Dilovası OSB 1. Kısım Göksu Cad. No: 18, 41455 Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Resmi işletme sitesi (yilport.com) ve TÜRKLİM üye kaydı (turklim.org/en/turklim-members/yilport-gebze) — marka adı tarihsel olarak 'Gebze' içerir (Dilovası, 2008'de Gebze'den ayrılan bağımsız ilçe oldu) ama resmi adres Dilovası OSB'dedir; OSM'de aynı tesisin iki ayrı poligon/relation kaydı (15738083, 15738087) vardı, biri mükerrer olarak reddedildi"
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-yılport-konteyner-liman-isletmeleri-dilovası-15738087",
+    "manualSource": "loc-...-15738083 ile aynı fiziksel tesisin (Yılport Gebze) mükerrer OSM relation kaydı (~750m arayla aynı isim, aynı ilçe) — kanonik kayıt olarak 15738083 seçildi, bu kopya kalıcı olarak pasifleştirildi"
+  }
+]

@@ -1,0 +1,2105 @@
+{
+  "province": "Kocaeli",
+  "provinceCode": "41",
+  "source": "overpass",
+  "generatedAt": "2026-07-20T05:40:45.392Z",
+  "totalRawElements": 757,
+  "totalFilteredCandidates": 80,
+  "candidates": [
+    {
+      "osm_type": "node",
+      "osm_id": 5579841426,
+      "name": "Global OSB Yönetim",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.7958641,
+      "lon": 29.5628083,
+      "address": {
+        "street": "Refik Oral Caddesi",
+        "province": "Kocaeli",
+        "district": "Dilovası",
+        "full": null
+      },
+      "website": "https://globalosb.org.tr",
+      "phone": "+902627541111",
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "addr:city": "Kocaeli",
+        "addr:district": "Dilovası",
+        "addr:housenumber": "11",
+        "addr:neighbourhood": "Global OSB Mahallesi",
+        "addr:street": "Refik Oral Caddesi",
+        "name": "Global OSB Yönetim",
+        "office": "company",
+        "opening_hours": "24/7",
+        "phone": "+902627541111",
+        "website": "https://globalosb.org.tr"
+      },
+      "checked_at": "2026-07-20T05:40:45.389Z"
+    },
+    {
+      "osm_type": "node",
+      "osm_id": 10841688311,
+      "name": "Çelikor Lojistik",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.8114651,
+      "lon": 29.5029628,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Çelikor Lojistik",
+        "office": "company"
+      },
+      "checked_at": "2026-07-20T05:40:45.389Z"
+    },
+    {
+      "osm_type": "node",
+      "osm_id": 11155791101,
+      "name": "Ak-taş Dış Tic. A.Ş. Derince Tank Terminali",
+      "alt_names": [],
+      "facility_type": "SIVI_YUK_TERMINALI",
+      "lat": 40.7542374,
+      "lon": 29.8641968,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Ak-taş Dış Tic. A.Ş. Derince Tank Terminali",
+        "waterway": "dock"
+      },
+      "checked_at": "2026-07-20T05:40:45.389Z"
+    },
+    {
+      "osm_type": "node",
+      "osm_id": 11155791104,
+      "name": "Petrol Ofisi A.Ş. Derince Terminal",
+      "alt_names": [],
+      "facility_type": "DIGER",
+      "lat": 40.7497256,
+      "lon": 29.8557013,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Petrol Ofisi A.Ş. Derince Terminal",
+        "waterway": "dock"
+      },
+      "checked_at": "2026-07-20T05:40:45.389Z"
+    },
+    {
+      "osm_type": "node",
+      "osm_id": 11253677846,
+      "name": "Horoz Lojistik",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.8673278,
+      "lon": 29.3874621,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "man_made": "works",
+        "name": "Horoz Lojistik"
+      },
+      "checked_at": "2026-07-20T05:40:45.389Z"
+    },
+    {
+      "osm_type": "node",
+      "osm_id": 12305229688,
+      "name": "Evyaport",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7735131,
+      "lon": 29.7058106,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Evyaport",
+        "natural": "bay"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "node",
+      "osm_id": 12816597744,
+      "name": "Yıldırımlar Konteyner Depoloma Sahası",
+      "alt_names": [],
+      "facility_type": "KONTEYNER_TERMINALI",
+      "lat": 40.7570661,
+      "lon": 29.8541866,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "depot",
+        "landuse": "industrial",
+        "name": "Yıldırımlar Konteyner Depoloma Sahası"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 149919051,
+      "name": "Ford Otosan Rıhtım",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.729182,
+      "lon": 29.8557829,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "man_made": "pier",
+        "name": "Ford Otosan Rıhtım",
+        "source": "Bing"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 150404707,
+      "name": "Hayat Kimya San. ve Limaş Liman İşletmeciliği",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7129393,
+      "lon": 29.8831398,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Hayat Kimya San. ve Limaş Liman İşletmeciliği",
+        "source": "Bing"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 190971135,
+      "name": "Gebze OSB TM",
+      "alt_names": [
+        "TEİAŞ"
+      ],
+      "facility_type": "OSB",
+      "lat": 40.8454413,
+      "lon": 29.4263623,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": "TEİAŞ",
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Gebze OSB TM",
+        "operator": "TEİAŞ",
+        "power": "switchgear",
+        "source": "bing",
+        "voltage": "154000"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 190971136,
+      "name": "Kroman Çelik TM - Gebze OSB TM EİH",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8253836,
+      "lon": 29.3993218,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Kroman Çelik TM - Gebze OSB TM EİH",
+        "power": "line",
+        "source": "bing",
+        "voltage": "154000"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 215300810,
+      "name": "Tepeören TM - Gebze OSB TM EİH",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8689465,
+      "lon": 29.411948,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Tepeören TM - Gebze OSB TM EİH",
+        "power": "line",
+        "source": "bing",
+        "voltage": "154000"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 221651275,
+      "name": "Köseköy Lojistik Merkezi",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7480032,
+      "lon": 30.0077953,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "railway",
+        "name": "Köseköy Lojistik Merkezi"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 226607369,
+      "name": "OPET Petrolcülük A.Ş, Körfez A Depolama ve Dağıtım Terminali",
+      "alt_names": [],
+      "facility_type": "FABRIKA",
+      "lat": 40.7610384,
+      "lon": 29.7738319,
+      "address": {
+        "street": "Funda Sokak",
+        "province": "Kocaeli",
+        "district": "Yarımca Körfez",
+        "full": null
+      },
+      "website": null,
+      "phone": "+90 262 527 83 60",
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "addr:city": "Kocaeli",
+        "addr:district": "Yarımca Körfez",
+        "addr:housenumber": "17",
+        "addr:neighbourhood": "Barbaros Mahallesi",
+        "addr:postcode": "41780",
+        "addr:street": "Funda Sokak",
+        "description": "Opet Terminalleri, ham petrolün distilasyonu sonucu üretilen akaryakıtın, Türkiye’de geniş hizmet ağımızı oluşturan istasyonlarımıza ulaşmadan önceki depolama ve dağıtım işlemlerinin yapıldığı tesislerdir.",
+        "email": "info@opet.com.tr",
+        "industrial": "petroleum_terminal",
+        "landuse": "industrial",
+        "name": "OPET Petrolcülük A.Ş, Körfez A Depolama ve Dağıtım Terminali",
+        "phone": "+90 262 527 83 60"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228283140,
+      "name": "Diler Demir Çelik Endüstri ve Ticaret A.Ş. Liman Tesisleri",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7783265,
+      "lon": 29.6007426,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Diler Demir Çelik Endüstri ve Ticaret A.Ş. Liman Tesisleri"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228283142,
+      "name": "Karayolları Tavşancıl Asfalt İskelesi",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7673739,
+      "lon": 29.5728734,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Karayolları Tavşancıl Asfalt İskelesi"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228283143,
+      "name": "Kroman Çelik Sanayii A.Ş. Liman",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7755894,
+      "lon": 29.5944894,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "http://www.kromancelik.com.tr/liman.html",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Kroman Çelik Sanayii A.Ş. Liman",
+        "website": "http://www.kromancelik.com.tr/liman.html"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228283147,
+      "name": "Nuh Çimento Sanayi A.Ş. Liman Tesisleri",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.780899,
+      "lon": 29.6076192,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Nuh Çimento Sanayi A.Ş. Liman Tesisleri"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228417578,
+      "name": "DP World Evyapport",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7745597,
+      "lon": 29.7123892,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "https://www.evyapport.com/",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "DP World Evyapport",
+        "website": "https://www.evyapport.com/"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228417588,
+      "name": "Marmara Tersanesi A.Ş.",
+      "alt_names": [],
+      "facility_type": "TERSANE",
+      "lat": 40.7711768,
+      "lon": 29.721551,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "http://www.marmarashipyard.com",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Marmara Tersanesi A.Ş.",
+        "website": "http://www.marmarashipyard.com"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 228417589,
+      "name": "Rota Liman Hizmetleri San. A.Ş.",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7704087,
+      "lon": 29.7251764,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Rota Liman Hizmetleri San. A.Ş."
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 229076694,
+      "name": "Safiport Derince Limanı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7510664,
+      "lon": 29.8346511,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "access": "private",
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Safiport Derince Limanı",
+        "parking": "surface",
+        "surface": "paved"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 229721940,
+      "name": "Kocaeli Gebze V Kimya İhtisas Organize Sanayi Bölgesi",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8160271,
+      "lon": 29.5551044,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "https://www.gebkim.org.tr/",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Kocaeli Gebze V Kimya İhtisas Organize Sanayi Bölgesi",
+        "website": "https://www.gebkim.org.tr/"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 229721941,
+      "name": "Makine İhtisas Organize Sanayi Bölgesi",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8388453,
+      "lon": 29.5668199,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "https://www.makineosb.org/",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Makine İhtisas Organize Sanayi Bölgesi",
+        "website": "https://www.makineosb.org/"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 230676826,
+      "name": "Arslanbey OSB TM EİH",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.728235,
+      "lon": 30.0277861,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Arslanbey OSB TM EİH",
+        "power": "line",
+        "source": "bing",
+        "voltage": "154000"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 304956393,
+      "name": "Arslanbey OSB TM",
+      "alt_names": [
+        "TEİAŞ"
+      ],
+      "facility_type": "OSB",
+      "lat": 40.7193997,
+      "lon": 30.0397439,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": "TEİAŞ",
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Arslanbey OSB TM",
+        "operator": "TEİAŞ",
+        "power": "substation",
+        "source": "bing",
+        "voltage": "154000"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 304956394,
+      "name": "Arslanbey Organize Sanayi Bölgesi",
+      "alt_names": [
+        "Arslanbey OSB"
+      ],
+      "facility_type": "OSB",
+      "lat": 40.7152626,
+      "lon": 30.0485453,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "https://arslanbeyosb.org/",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "alt_name": "Arslanbey OSB",
+        "landuse": "industrial",
+        "name": "Arslanbey Organize Sanayi Bölgesi",
+        "source": "bing",
+        "website": "https://arslanbeyosb.org/"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 422485664,
+      "name": "Dilovası OSB Trafo Merkezi",
+      "alt_names": [
+        "TEİAŞ"
+      ],
+      "facility_type": "OSB",
+      "lat": 40.7901781,
+      "lon": 29.5252891,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": "TEİAŞ",
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "frequency": "50",
+        "location": "outdoor",
+        "name": "Dilovası OSB Trafo Merkezi",
+        "operator": "TEİAŞ",
+        "power": "substation",
+        "substation": "transmission",
+        "voltage": "154000"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 422730383,
+      "name": "Dinçer Lojistik",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.8194212,
+      "lon": 29.4488024,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "warehouse",
+        "name": "Dinçer Lojistik"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 427777722,
+      "name": "Gebze Güzeller OSB Güneş Enerji Santrali",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8337842,
+      "lon": 29.4340999,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Gebze Güzeller OSB Güneş Enerji Santrali",
+        "plant:method": "photovoltaic",
+        "plant:output:electricity": "0.47 MW",
+        "plant:source": "solar",
+        "plant:type": "solar_photovoltaic_panel",
+        "power": "plant"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 490207961,
+      "name": "Birlik OSB",
+      "alt_names": [
+        "BOSB-Birlik Organize Sanayi Bölgesi"
+      ],
+      "facility_type": "OSB",
+      "lat": 40.8798874,
+      "lon": 29.3952971,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "alt_name": "BOSB-Birlik Organize Sanayi Bölgesi",
+        "landuse": "industrial",
+        "name": "Birlik OSB"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 541055314,
+      "name": "Global Karma OSB",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.7965879,
+      "lon": 29.566859,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "fixme": "Mahalle adı değişikliği oldu \nYeni adı : Global Karma OSB Mah. oldu.",
+        "landuse": "industrial",
+        "name": "Global Karma OSB"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 624359865,
+      "name": "İstanbul Deri Organize Sanayi Bölgesi",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8784105,
+      "lon": 29.3618506,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "https://www.ideriosb.org.tr/",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "İstanbul Deri Organize Sanayi Bölgesi",
+        "website": "https://www.ideriosb.org.tr/"
+      },
+      "checked_at": "2026-07-20T05:40:45.390Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 878128744,
+      "name": "DERTAS Multi Trans Lojistik Merkezi",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7909112,
+      "lon": 29.5209202,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "building:levels": "1",
+        "name": "DERTAS Multi Trans Lojistik Merkezi"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 896747328,
+      "name": "Efesanport Ro-Ro Terminali Kapalı Otopark",
+      "alt_names": [],
+      "facility_type": "RO_RO_TERMINALI",
+      "lat": 40.7746585,
+      "lon": 29.5461346,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "name": "Efesanport Ro-Ro Terminali Kapalı Otopark"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 901600947,
+      "name": "Gebze OSB Metro İnşaatı",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.8390032,
+      "lon": 29.431775,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "construction",
+        "name": "Gebze OSB Metro İnşaatı"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1066519231,
+      "name": "Asım Kibar OSB",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.7729516,
+      "lon": 30.0408388,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Asım Kibar OSB"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1083257732,
+      "name": "Değirmendere Vapur İskelesi",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7225074,
+      "lon": 29.7843304,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "area": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Vapur İskelesi"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1135681850,
+      "name": "Arkas Railport Terminal",
+      "alt_names": [
+        "Arkas Holding"
+      ],
+      "facility_type": "DIGER",
+      "lat": 40.722268,
+      "lon": 30.0646681,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": "Arkas Holding",
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "railway",
+        "name": "Arkas Railport Terminal",
+        "operator": "Arkas Holding"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1147762804,
+      "name": "Birsoy Elektrik Lojistik Merkezi",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7267948,
+      "lon": 30.0235638,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "www.birsoymuhendislik.com.tr",
+      "phone": "+90 262 371 51 02",
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "barrier": "fence",
+        "landuse": "commercial",
+        "name": "Birsoy Elektrik Lojistik Merkezi",
+        "phone": "+90 262 371 51 02",
+        "website": "www.birsoymuhendislik.com.tr"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1148366564,
+      "name": "Yıldırımlar Lojistik ve Taşımacılık",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7572272,
+      "lon": 29.8545133,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "name": "Yıldırımlar Lojistik ve Taşımacılık"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1160047012,
+      "name": "ANT Lojistik Araç Depolama Alanı",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7273683,
+      "lon": 30.1388801,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "barrier": "fence",
+        "landuse": "industrial",
+        "name": "ANT Lojistik Araç Depolama Alanı"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1185098403,
+      "name": "Port Yarımca Ro-Ro Terminali",
+      "alt_names": [],
+      "facility_type": "RO_RO_TERMINALI",
+      "lat": 40.7630979,
+      "lon": 29.7523025,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "automotive_industry_port",
+        "landuse": "industrial",
+        "name": "Port Yarımca Ro-Ro Terminali"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1192691083,
+      "name": "DP World Yarımca",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7635147,
+      "lon": 29.7498493,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "DP World Yarımca"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1197612690,
+      "name": "YILDIZ ENTEGRE PORT",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7151018,
+      "lon": 29.8883661,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "YILDIZ ENTEGRE PORT"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1198269058,
+      "name": "Batinak Lojistik",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.779366,
+      "lon": 29.6680099,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "depot",
+        "landuse": "industrial",
+        "name": "Batinak Lojistik"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1209470799,
+      "name": "Kandıra Gıda İhtisas Organize Sanayi Bölgesi (GİOSB)",
+      "alt_names": [],
+      "facility_type": "OSB",
+      "lat": 40.9292353,
+      "lon": 30.0860132,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "check_date": "2023-09-20",
+        "landuse": "industrial",
+        "name": "Kandıra Gıda İhtisas Organize Sanayi Bölgesi (GİOSB)",
+        "opening_date": "2024-01-01"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1211249679,
+      "name": "Hereke Vapur İskelesi",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.78233,
+      "lon": 29.6154363,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "area": "yes",
+        "floating": "yes",
+        "man_made": "pier",
+        "name": "Hereke Vapur İskelesi"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1217769289,
+      "name": "Kıyı Emniyeti",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 41.1957634,
+      "lon": 30.2585909,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "access": "no",
+        "area": "yes",
+        "covered": "no",
+        "floating": "no",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Kıyı Emniyeti"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1228716230,
+      "name": "Ereğli Sahil İskele",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7033775,
+      "lon": 29.6715262,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "area": "yes",
+        "floating": "yes",
+        "man_made": "pier",
+        "mooring": "yes",
+        "name": "Ereğli Sahil İskele",
+        "surface": "wood",
+        "width": "2"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1231394703,
+      "name": "KOCAELİ SERBEST BÖLGE",
+      "alt_names": [
+        "KOSBAŞ"
+      ],
+      "facility_type": "SERBEST_BOLGE",
+      "lat": 40.7236383,
+      "lon": 29.8676626,
+      "address": {
+        "street": "ARPALIK CADDESİ",
+        "province": "KOCAELİ",
+        "district": "BAŞİSKELE",
+        "full": null
+      },
+      "website": "https://www.kosbas.com.tr/",
+      "phone": "+90 262 341 38 41",
+      "operator": "KOSBAŞ",
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "addr:city": "KOCAELİ",
+        "addr:district": "BAŞİSKELE",
+        "addr:neighbourhood": "SEPETLİPINAR",
+        "addr:street": "ARPALIK CADDESİ",
+        "craft": "boatbuilder",
+        "email": "info@kosbas.com.tr",
+        "layer": "1",
+        "name": "KOCAELİ SERBEST BÖLGE",
+        "opening_hours": "24/7",
+        "operator": "KOSBAŞ",
+        "phone": "+90 262 341 38 41",
+        "website": "https://www.kosbas.com.tr/"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1307298629,
+      "name": "Kuru Yük Terminali",
+      "alt_names": [],
+      "facility_type": "KURU_YUK_TERMINALI",
+      "lat": 40.76706,
+      "lon": 29.524405,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "residential",
+        "name": "Kuru Yük Terminali"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1307301953,
+      "name": "Sıvı Yük Terminal Binası",
+      "alt_names": [],
+      "facility_type": "SIVI_YUK_TERMINALI",
+      "lat": 40.769806,
+      "lon": 29.527297,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "name": "Sıvı Yük Terminal Binası"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1307301954,
+      "name": "Sıvı Yük Terminal Operasyon Merkezi",
+      "alt_names": [],
+      "facility_type": "SIVI_YUK_TERMINALI",
+      "lat": 40.7695945,
+      "lon": 29.5272412,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "name": "Sıvı Yük Terminal Operasyon Merkezi"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1307501996,
+      "name": "Efesanport",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7733085,
+      "lon": 29.5453826,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "transport",
+        "landuse": "industrial",
+        "name": "Efesanport"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1307505086,
+      "name": "Poliport Kuru Yük Terminal İdari Binası Ve Operasyon Merkezi",
+      "alt_names": [],
+      "facility_type": "KURU_YUK_TERMINALI",
+      "lat": 40.7690764,
+      "lon": 29.5237335,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "name": "Poliport Kuru Yük Terminal İdari Binası Ve Operasyon Merkezi"
+      },
+      "checked_at": "2026-07-20T05:40:45.391Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1332082026,
+      "name": "Karınca Lojistik Garaj",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7586204,
+      "lon": 29.8541211,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Karınca Lojistik Garaj"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1332082027,
+      "name": "Karınca Lojistik",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7584878,
+      "lon": 29.8540671,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "building": "industrial",
+        "building:levels": "1",
+        "name": "Karınca Lojistik"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1346339097,
+      "name": "TCDD Derince Lojistik Müdürlüğü",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7553477,
+      "lon": 29.8354945,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "barrier": "fence",
+        "fence_type": "metal",
+        "height": "2",
+        "material": "metal",
+        "name": "TCDD Derince Lojistik Müdürlüğü",
+        "office": "government"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1381961448,
+      "name": "Safiport Derince Limanı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7498332,
+      "lon": 29.8349956,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "name": "Safiport Derince Limanı",
+        "natural": "water"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1383851420,
+      "name": "Arkas Lojistik Körfez Konteyner Depo Sahası",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7523219,
+      "lon": 29.7777287,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "warehouse",
+        "landuse": "industrial",
+        "name": "Arkas Lojistik Körfez Konteyner Depo Sahası"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1415915239,
+      "name": "Bağırganlı Limanı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 41.1369835,
+      "lon": 30.0012421,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "harbour",
+        "name": "Bağırganlı Limanı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1428949158,
+      "name": "Değirmendere Balıkçı Barınağı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7189073,
+      "lon": 29.7721384,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "floating": "yes",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Balıkçı Barınağı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1428949159,
+      "name": "Değirmendere Balıkçı Barınağı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7191005,
+      "lon": 29.7721182,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "floating": "yes",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Balıkçı Barınağı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1428949160,
+      "name": "Değirmendere Balıkçı Barınağı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7193035,
+      "lon": 29.7720984,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "floating": "yes",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Balıkçı Barınağı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1428949161,
+      "name": "Değirmendere Balıkçı Barınağı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.719476,
+      "lon": 29.7720819,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "floating": "yes",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Balıkçı Barınağı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1428949162,
+      "name": "Değirmendere Balıkçı Barınağı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7186742,
+      "lon": 29.7730454,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "floating": "yes",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Balıkçı Barınağı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "way",
+      "osm_id": 1428949163,
+      "name": "Değirmendere Balıkçı Barınağı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7186349,
+      "lon": 29.7728079,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "floating": "yes",
+        "lit": "yes",
+        "man_made": "pier",
+        "name": "Değirmendere Balıkçı Barınağı"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 8328724,
+      "name": "Autoport Limanı",
+      "alt_names": [
+        "AutoPort Limanı"
+      ],
+      "facility_type": "LIMAN",
+      "lat": 40.7165348,
+      "lon": 29.8646438,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": "AutoPort Limanı",
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "access": "private",
+        "barrier": "wall",
+        "industrial": "vehicle_depot",
+        "landuse": "industrial",
+        "lit": "yes",
+        "name": "Autoport Limanı",
+        "operator": "AutoPort Limanı",
+        "parking": "surface",
+        "source": "Digital Image 03-11-17;survey;local knowledge;aerial imagery;gps;streetlevel imagery",
+        "surface": "paved",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 8328725,
+      "name": "AutoPort Liman Rıhtımı",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7209977,
+      "lon": 29.873314,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "access": "private",
+        "barrier": "wall",
+        "landuse": "industrial",
+        "lit": "yes",
+        "name": "AutoPort Liman Rıhtımı",
+        "parking": "surface",
+        "source": "Digital Image 03-11-17",
+        "surface": "paved",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738082,
+      "name": "Belde Port",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7704231,
+      "lon": 29.5137141,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "man_made": "container_terminal",
+        "name": "Belde Port",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738083,
+      "name": "Yılport Konteyner ve Liman İşletmeleri A.Ş.",
+      "alt_names": [],
+      "facility_type": "KONTEYNER_TERMINALI",
+      "lat": 40.7743004,
+      "lon": 29.5346862,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "man_made": "container_terminal",
+        "name": "Yılport Konteyner ve Liman İşletmeleri A.Ş.",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738084,
+      "name": "Poliport",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7672033,
+      "lon": 29.5251384,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": "https://www.poliport.com/default-eng.php",
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "cargo:dry_bulk": "yes",
+        "cargo:liquid_bulk": "yes",
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Poliport",
+        "port": "cargo",
+        "type": "multipolygon",
+        "website": "https://www.poliport.com/default-eng.php"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738087,
+      "name": "Yılport Konteyner ve Liman İşletmeleri A.Ş.",
+      "alt_names": [],
+      "facility_type": "KONTEYNER_TERMINALI",
+      "lat": 40.7675555,
+      "lon": 29.5369414,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "man_made": "container_terminal",
+        "name": "Yılport Konteyner ve Liman İşletmeleri A.Ş.",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738110,
+      "name": "Solventas Teknik Depolama A.S.",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7685331,
+      "lon": 29.5439976,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Solventas Teknik Depolama A.S.",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738111,
+      "name": "Efesanport",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7698364,
+      "lon": 29.5467144,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Efesanport",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 15738113,
+      "name": "Altıntel Liman ve Terminal İşletmeleri A.Ş.",
+      "alt_names": [],
+      "facility_type": "LIMAN",
+      "lat": 40.7692827,
+      "lon": 29.5416706,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "industrial": "port",
+        "landuse": "industrial",
+        "name": "Altıntel Liman ve Terminal İşletmeleri A.Ş.",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 16162897,
+      "name": "Petrol Ofisi Derince Terminal",
+      "alt_names": [],
+      "facility_type": "FABRIKA",
+      "lat": 40.7527151,
+      "lon": 29.8505025,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "barrier": "fence",
+        "industrial": "oil",
+        "landuse": "industrial",
+        "name": "Petrol Ofisi Derince Terminal",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 17170725,
+      "name": "Shell Derince Terminal",
+      "alt_names": [],
+      "facility_type": "FABRIKA",
+      "lat": 40.7544184,
+      "lon": 29.8576208,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "barrier": "fence",
+        "industrial": "oil",
+        "landuse": "industrial",
+        "name": "Shell Derince Terminal",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    },
+    {
+      "osm_type": "relation",
+      "osm_id": 19349072,
+      "name": "Borusan Araç Lojistik Merkezi",
+      "alt_names": [],
+      "facility_type": "LOJISTIK_MERKEZI",
+      "lat": 40.7465977,
+      "lon": 30.0221473,
+      "address": {
+        "street": null,
+        "province": null,
+        "district": null,
+        "full": null
+      },
+      "website": null,
+      "phone": null,
+      "operator": null,
+      "business_status": "OPERATIONAL",
+      "raw_tags": {
+        "landuse": "industrial",
+        "name": "Borusan Araç Lojistik Merkezi",
+        "type": "multipolygon"
+      },
+      "checked_at": "2026-07-20T05:40:45.392Z"
+    }
+  ]
+}
