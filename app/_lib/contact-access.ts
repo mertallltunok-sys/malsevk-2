@@ -1,3 +1,4 @@
+import { ENGAGED_OFFER_STATUSES } from "./job-requests";
 import { findJobById } from "./jobs-lookup";
 import { getAllOffers } from "./offers";
 import type { Session } from "./types";
@@ -16,7 +17,12 @@ export type RevealedContact = {
  * İletişim bilgilerinin TEK ortak erişim kapısı. Bu fonksiyon dışında
  * hiçbir bileşen doğrudan kullanıcı kaydından phone/email okumamalıdır.
  * Yalnızca şu koşulların TAMAMI doğruysa veri döner, aksi halde null:
- *  - Teklif gerçekten var mı ve durumu "accepted" mı?
+ *  - Teklif gerçekten var mı ve durumu "meşgul" (ENGAGED_OFFER_STATUSES —
+ *    accepted/in_progress/completion_requested/completion_disputed) mi?
+ *    İş sona erdiğinde (completed/cancelled/agreement_failed ve diğer tüm
+ *    durumlar) iletişim bilgisi otomatik gizlenir — hem eski kabul eden
+ *    firma hem de ilan sahibi karşı tarafın bilgisini kaybeder, ayrı bir
+ *    "gizle" işlemi gerekmez.
  *  - İlgili ilan bulunabiliyor mu ve bir requesterId'si var mı?
  *  - Oturumdaki kullanıcı işin taraflarından biri mi (teklifi veren
  *    Hizmet Veren ya da ilanı oluşturan Hizmet Alan)?
@@ -37,7 +43,7 @@ export function getRevealedContactForOffer(
   if (!session) return null;
 
   const offer = getAllOffers().find((item) => item.id === offerId);
-  if (!offer || offer.status !== "accepted") return null;
+  if (!offer || !ENGAGED_OFFER_STATUSES.includes(offer.status)) return null;
 
   const job = findJobById(offer.jobId);
   if (!job || !job.requesterId) return null;

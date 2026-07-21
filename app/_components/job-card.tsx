@@ -1,20 +1,48 @@
 import { CalendarDays, MapPin } from "lucide-react";
 import Link from "next/link";
-import { formatJobDate, getJobStatusLabel, getJobStatusTone } from "../_lib/jobs";
-import type { Job } from "../_lib/types";
+import {
+  getJobOfferAvailability,
+  getJobOfferAvailabilityLabel,
+  getJobOfferAvailabilityTone,
+} from "../_lib/job-requests";
+import { formatJobDate } from "../_lib/jobs";
+import type { Job, Offer } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
 
-export function JobCard({ job }: { job: Job }) {
+export function JobCard({
+  job,
+  offers,
+  forceClosed = false,
+  closedReasonLabel,
+}: {
+  job: Job;
+  offers: Offer[];
+  /** İlan-geneli durum "açık" olsa bile bu kartı "kapalı" göstermeye zorlar — yalnızca oturumdaki kullanıcıya özel kapanma durumları için (bkz. job-requests.ts#getJobAvailabilityForProvider). */
+  forceClosed?: boolean;
+  /** Kartta rozetin altında gösterilecek kısa, güvenle türetilmiş kapanma nedeni. Verilmezse hiçbir ek metin gösterilmez. */
+  closedReasonLabel?: string;
+}) {
+  const rawAvailability = getJobOfferAvailability(job, offers);
+  const availability = forceClosed && rawAvailability === "acik" ? "kapali" : rawAvailability;
+
   return (
     <Link
       href={`/ilanlar/${job.id}`}
       className="flex h-full flex-col gap-4 rounded-card border border-border bg-surface p-6 shadow-sm transition duration-200 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
     >
-      <div className="flex items-start justify-between gap-3">
-        <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-          {job.category}
-        </span>
-        <StatusBadge label={getJobStatusLabel(job.status)} tone={getJobStatusTone(job.status)} />
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
+            {job.category}
+          </span>
+          <StatusBadge
+            label={getJobOfferAvailabilityLabel(availability)}
+            tone={getJobOfferAvailabilityTone(availability)}
+          />
+        </div>
+        {closedReasonLabel && (
+          <p className="mt-2 text-right text-xs text-muted-foreground">{closedReasonLabel}</p>
+        )}
       </div>
 
       <div>

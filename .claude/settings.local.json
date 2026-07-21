@@ -14,7 +14,8 @@
       "WebSearch",
       "WebFetch(domain:www.tcdd.gov.tr)",
       "WebFetch(domain:tr.wikipedia.org)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npm -v)"
     ]
   }
 }

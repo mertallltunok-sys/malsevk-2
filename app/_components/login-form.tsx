@@ -372,6 +372,7 @@ export function LoginForm({
             </p>
             <p className="mt-1">Hizmet Alan: zeynep@test.com / Zeynep1!</p>
             <p>Hizmet Veren: mert@test.com / Mert123!</p>
+            <p>Hizmet Veren: mehmet.demir.demo@malsevk.com / Demo123!</p>
           </div>
         )}
       </form>

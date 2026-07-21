@@ -38,7 +38,37 @@ export type Job = {
   photos: JobPhoto[];
 };
 
-export type OfferStatus = "pending" | "accepted" | "rejected";
+/**
+ * "accepted" sonrası olası akış: iş fiilen başlar ("in_progress") ya da
+ * taraflar anlaşamaz ("agreement_failed"). İş başladıktan sonra Hizmet
+ * Veren tamamlandığını bildirir ("completion_requested"); Hizmet Alan bunu
+ * onaylar ("completed") ya da itiraz eder ("completion_disputed") —
+ * itiraz da Hizmet Alan tarafından "completed" ya da "cancelled" olarak
+ * sonuçlandırılır (bkz. offers.ts#resolveCompletionDispute). Job.status bu
+ * geçişlerin hiçbirinde değişmez (bkz. jobs.ts) — ilanın "teklife
+ * açık/kapalı" ve "devam eden iş" görünümü, her zaman olduğu gibi, ilgili
+ * Offer kayıtlarından türetilir (bkz. job-requests.ts#ENGAGED_OFFER_STATUSES).
+ */
+export type OfferStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "in_progress"
+  | "agreement_failed"
+  | "completion_requested"
+  | "completion_disputed"
+  | "completed"
+  | "cancelled";
+
+/** Yalnızca status "agreement_failed" olduğunda anlamlıdır. */
+export type DisagreementReason =
+  | "telefona_ulasilamadi"
+  | "epostaya_donus_olmadi"
+  | "fiyatta_anlasilamadi"
+  | "tarih_planinda_anlasilamadi"
+  | "hizmet_veren_yapamayacagini_bildirdi"
+  | "hizmet_alan_vazgecti"
+  | "diger";
 
 export type Offer = {
   id: string;
@@ -51,4 +81,10 @@ export type Offer = {
   status: OfferStatus;
   createdAt: string;
   updatedAt: string;
+  /** Yalnızca status "agreement_failed" olan tekliflerde bulunur; eski kayıtlarda yoktur. */
+  disagreementReason?: DisagreementReason;
+  /** Yalnızca disagreementReason "diger" olduğunda ve kullanıcı bir not girdiğinde bulunur. */
+  disagreementNote?: string;
+  /** Yalnızca status "completion_disputed" olan (ya da olmuş) tekliflerde bulunur. */
+  completionDisputeNote?: string;
 };

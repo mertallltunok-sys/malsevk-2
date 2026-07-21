@@ -9,6 +9,7 @@ import { getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_
 import type { Job, Offer, Session, UserRole } from "../_lib/types";
 import { findUserById } from "../_lib/users";
 import { ContactInfoBlock } from "./contact-info-block";
+import { OfferOutcomePanel } from "./offer-outcome-panel";
 import { StatusBadge } from "./status-badge";
 
 function getRoleLabel(role: UserRole): string {
@@ -114,9 +115,11 @@ export function IncomingOfferCard({
         </div>
       )}
 
-      {offer.status === "accepted" && revealedContact && (
-        <ContactInfoBlock contact={revealedContact.provider} />
-      )}
+      {revealedContact && <ContactInfoBlock contact={revealedContact.provider} />}
+
+      {(offer.status === "accepted" ||
+        offer.status === "completion_requested" ||
+        offer.status === "completion_disputed") && <OfferOutcomePanel offer={offer} session={session} />}
     </div>
   );
 }

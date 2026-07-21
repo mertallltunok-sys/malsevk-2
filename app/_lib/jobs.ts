@@ -150,3 +150,17 @@ export function formatJobDate(isoDate: string): string {
     year: "numeric",
   });
 }
+
+/**
+ * Yalnızca bilgilendirme amaçlı: çalışma tarihi bugünden önceyse true
+ * döner. Hiçbir işlemi engellemez, hiçbir alanı değiştirmez — yalnızca
+ * arayüzde küçük bir öneri notu göstermek için kullanılır. Karşılaştırma
+ * gün bazındadır (saat bilgisi yok sayılır).
+ */
+export function isJobDateInPast(workDate: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const jobDate = new Date(workDate);
+  jobDate.setHours(0, 0, 0, 0);
+  return jobDate.getTime() < today.getTime();
+}

@@ -156,6 +156,13 @@ const DEV_ACCOUNTS: RegisterInput[] = [
     password: "Mert123!",
     role: "hizmet-veren",
   },
+  {
+    name: "Mehmet Demir",
+    email: "mehmet.demir.demo@malsevk.com",
+    phone: "+905553334455",
+    password: "Demo123!",
+    role: "hizmet-veren",
+  },
 ];
 
 /**
@@ -205,14 +212,17 @@ async function upsertDevAccount(account: RegisterInput): Promise<void> {
 }
 
 /**
- * Bilinçli olarak NODE_ENV'e göre kısıtlanmamıştır: gerçek bir backend/veritabanı
- * olmadığından (localStorage her origin'de — localhost, Vercel preview/production —
- * boş başlar), demo hesapların yalnızca `next dev` altında oluşup canlıda hiç
- * oluşmaması login'i orada tamamen kırar. Bu yüzden her ortamda çalışır.
+ * Yalnızca `next dev` altında (NODE_ENV==="development") çalışır — Vercel
+ * preview/production dahil `next build`+`next start` ile çalışan HİÇBİR
+ * ortamda demo hesap oluşturulmaz/güncellenmez (o ortamlarda NODE_ENV her
+ * zaman "production"dur). Kasıtlı olarak "!== production" değil "===
+ * development" (allow-list) kontrolü kullanılır: NODE_ENV beklenmedik bir
+ * değer alırsa bile demo hesap oluşturma varsayılan olarak KAPALI kalır.
  * Idempotenttir — tekrar tekrar çağrılsa da hesapları yinelemez, yalnızca
  * güncel olmayan alanları senkronlar; mevcut kullanıcı kayıtlarına dokunmaz.
  */
 export async function seedDevAccountsIfNeeded(): Promise<void> {
+  if (process.env.NODE_ENV !== "development") return;
   if (typeof window === "undefined") return;
 
   for (const account of DEV_ACCOUNTS) {

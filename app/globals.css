@@ -55,6 +55,17 @@
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --animate-photo-fade: photo-fade 300ms ease-out;
+}
+
+@keyframes photo-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {

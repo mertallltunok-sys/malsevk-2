@@ -1,21 +1,27 @@
 "use client";
 
-import { Bell } from "lucide-react";
+import { Bell, Inbox } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
 import { useDropdown } from "../_lib/use-dropdown";
+import { markNotificationRead } from "../_lib/notification-reads";
 import { useNotifications } from "../_lib/use-notifications";
+import { useReadNotificationIds } from "../_lib/use-notification-reads";
 import type { Session } from "../_lib/types";
 
 export function NotificationBell({ session }: { session: Session }) {
   const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
   const notifications = useNotifications(session);
-  const [viewed, setViewed] = useState(false);
-  const unreadCount = viewed ? 0 : notifications.length;
+  const readIds = useReadNotificationIds(session.id);
+  const readIdSet = new Set(readIds);
+  const unreadCount = notifications.filter((notification) => !readIdSet.has(notification.id)).length;
 
   function handleToggle() {
     setOpen((value) => !value);
-    setViewed(true);
+  }
+
+  function handleNotificationClick(notificationId: string) {
+    markNotificationRead(session.id, notificationId);
+    setOpen(false);
   }
 
   return (
@@ -53,18 +59,27 @@ export function NotificationBell({ session }: { session: Session }) {
             </p>
           ) : (
             <ul className="flex flex-col gap-1">
-              {notifications.slice(0, 8).map((notification) => (
-                <li key={notification.id}>
-                  <Link
-                    href={notification.href}
-                    onClick={() => setOpen(false)}
-                    role="menuitem"
-                    className="block rounded-md px-3 py-2 text-sm leading-relaxed text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  >
-                    {notification.message}
-                  </Link>
-                </li>
-              ))}
+              {notifications.slice(0, 8).map((notification) => {
+                const isUnread = !readIdSet.has(notification.id);
+                return (
+                  <li key={notification.id}>
+                    <Link
+                      href={notification.href}
+                      onClick={() => handleNotificationClick(notification.id)}
+                      role="menuitem"
+                      className={`flex items-start gap-2.5 rounded-md px-3 py-2 text-sm leading-relaxed text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                        isUnread ? "bg-background font-semibold hover:bg-border" : "hover:bg-background"
+                      }`}
+                    >
+                      <Inbox
+                        className={`mt-0.5 h-4 w-4 shrink-0 ${isUnread ? "text-accent" : "text-muted-foreground"}`}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1">{notification.message}</span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

@@ -68,12 +68,15 @@ export function JobPhotoUpload({
   onBusyChange,
   disabled = false,
   errorId,
+  existingCount = 0,
 }: {
   role: string;
   onPhotosChange: (photos: ReadyJobPhoto[]) => void;
   onBusyChange?: (busy: boolean) => void;
   disabled?: boolean;
   errorId?: string;
+  /** Bu bileşenin bilmediği, dışarıda zaten sayılan (ör. düzenleme ekranında korunan mevcut) fotoğraf sayısı — MAX_PHOTOS sınırına ve kapak fotoğrafı hesabına dahil edilir. */
+  existingCount?: number;
 }) {
   const [items, setItems] = useState<PhotoItem[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -141,7 +144,7 @@ export function JobPhotoUpload({
       const knownHashes = new Set(itemsRef.current.map((item) => item.contentHash));
 
       for (const file of incoming) {
-        if (currentCount + toQueue.length >= MAX_PHOTOS) {
+        if (existingCount + currentCount + toQueue.length >= MAX_PHOTOS) {
           errors.push(`En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.`);
           break;
         }
@@ -181,7 +184,7 @@ export function JobPhotoUpload({
         void processOne(newItems[i].clientId, toQueue[i].file);
       }
     },
-    [disabled, processOne],
+    [disabled, processOne, existingCount],
   );
 
   function handleDelete(clientId: string) {
@@ -255,7 +258,7 @@ export function JobPhotoUpload({
           className="sr-only"
         />
         <p className="text-xs text-muted-foreground">
-          {readyOrProcessingCount} / {MAX_PHOTOS} fotoğraf yüklendi · JPG, PNG, WEBP, HEIC/HEIF ·
+          {existingCount + readyOrProcessingCount} / {MAX_PHOTOS} fotoğraf yüklendi · JPG, PNG, WEBP, HEIC/HEIF ·
           en fazla {Math.round(MAX_PHOTO_SIZE_BYTES / (1024 * 1024))} MB
         </p>
       </div>
@@ -278,7 +281,7 @@ export function JobPhotoUpload({
               previewUrl={item.processed?.previewUrl ?? null}
               fileName={item.fileName}
               fileSize={item.processed?.blob.size ?? item.fileSize}
-              isCover={index === 0}
+              isCover={existingCount === 0 && index === 0}
               status={item.status}
               errorMessage={item.errorMessage}
               onDelete={() => handleDelete(item.clientId)}

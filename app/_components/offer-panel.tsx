@@ -3,9 +3,11 @@
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { jobHasAcceptedOffer } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
+import { MAX_ACTIVE_JOBS, hasReachedActiveJobLimit } from "../_lib/provider-capacity";
 import type { Job, Offer } from "../_lib/types";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
@@ -44,7 +46,7 @@ function OfferSummaryCard({ offer }: { offer: Offer }) {
   );
 }
 
-export function OfferPanel({ job }: { job: Job }) {
+export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
   const session = useSession();
   const [existingOffer, setExistingOffer] = useState<Offer | null | undefined>(
     undefined,
@@ -81,6 +83,19 @@ export function OfferPanel({ job }: { job: Job }) {
     ? getOfferForJob(job.id, session.id)
     : existingOffer;
 
+  // Suistimal koruması (bkz. offers.ts#createOffer): teklifi kabul edilip
+  // sonra anlaşma sağlanamayan firma, ilan yeniden yayına alınsa bile aynı
+  // ilana tekrar teklif veremez. Bu, arayüzdeki eşdeğer engeldir — asıl
+  // yetkilendirme zaten createOffer() içinde, arayüzden bağımsız uygulanır.
+  if (currentOffer && currentOffer.status === "agreement_failed") {
+    return (
+      <p className="rounded-card border border-border bg-background p-6 text-sm leading-relaxed text-muted-foreground">
+        Bu ilan için daha önce teklifiniz kabul edilmiş ancak anlaşma sağlanamamıştır. Aynı ilana
+        yeniden teklif veremezsiniz.
+      </p>
+    );
+  }
+
   if (currentOffer) {
     return (
       <div>
@@ -98,6 +113,35 @@ export function OfferPanel({ job }: { job: Job }) {
           Bu ilana daha önce teklif verdiniz.
         </p>
         <OfferSummaryCard offer={currentOffer} />
+      </div>
+    );
+  }
+
+  if (jobHasAcceptedOffer(job.id, offers)) {
+    return (
+      <p className="rounded-card border border-border bg-background p-6 text-sm leading-relaxed text-muted-foreground">
+        Bu ilan için bir firma ile anlaşma sağlanmıştır. Artık yeni teklif kabul edilmemektedir.
+      </p>
+    );
+  }
+
+  // Aktif iş kapasitesi dolu olduğunda ilanları/teklifleri görüntülemeye
+  // devam edebilir, yalnızca YENİ teklif gönderemez — bu görsel engel,
+  // offers.ts#createOffer içindeki arayüzden bağımsız kontrolün eşdeğeridir.
+  if (hasReachedActiveJobLimit(session.id, offers)) {
+    return (
+      <div className="rounded-card border border-border bg-background p-6">
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          Aktif İş Sınırına Ulaştınız
+        </button>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          {`Aynı anda en fazla ${MAX_ACTIVE_JOBS} aktif iş yürütebilirsiniz. Mevcut işleriniz tamamlandıktan sonra yeni teklif verebilirsiniz.`}
+        </p>
       </div>
     );
   }

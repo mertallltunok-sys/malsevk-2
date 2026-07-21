@@ -3,18 +3,22 @@
 import { CalendarDays, ClipboardList, MapPin } from "lucide-react";
 import Link from "next/link";
 import {
-  formatJobDate,
-  getJobStatusLabel,
-  getJobStatusTone,
-  isJobOpenForOffers,
-} from "../_lib/jobs";
+  getJobOfferAvailability,
+  getJobOfferAvailabilityLabel,
+  getJobOfferAvailabilityTone,
+} from "../_lib/job-requests";
+import { formatJobDate, isJobDateInPast, isJobOpenForOffers } from "../_lib/jobs";
+import { useAllOffers } from "../_lib/use-offers";
 import { useJobById } from "../_lib/use-jobs";
+import { useSession } from "../_lib/use-session";
 import { JobPhotoGallery } from "./job-photo-gallery";
 import { OfferPanel } from "./offer-panel";
 import { StatusBadge } from "./status-badge";
 
 export function JobDetailContent({ id }: { id: string }) {
   const job = useJobById(id);
+  const offers = useAllOffers();
+  const session = useSession();
 
   if (!job) {
     return (
@@ -31,6 +35,8 @@ export function JobDetailContent({ id }: { id: string }) {
       </div>
     );
   }
+
+  const offerAvailability = getJobOfferAvailability(job, offers);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
@@ -50,7 +56,10 @@ export function JobDetailContent({ id }: { id: string }) {
             {job.title}
           </h1>
         </div>
-        <StatusBadge label={getJobStatusLabel(job.status)} tone={getJobStatusTone(job.status)} />
+        <StatusBadge
+          label={getJobOfferAvailabilityLabel(offerAvailability)}
+          tone={getJobOfferAvailabilityTone(offerAvailability)}
+        />
       </div>
 
       <div className="mt-6 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
@@ -63,6 +72,10 @@ export function JobDetailContent({ id }: { id: string }) {
           {formatJobDate(job.workDate)}
         </span>
       </div>
+
+      {session?.id === job.requesterId && job.status !== "tamamlandi" && isJobDateInPast(job.workDate) && (
+        <p className="mt-2 text-xs text-warning">Tarihi güncellemeniz önerilir.</p>
+      )}
 
       <div className="mt-8">
         <JobPhotoGallery photos={job.photos} jobTitle={job.title} />
@@ -94,7 +107,7 @@ export function JobDetailContent({ id }: { id: string }) {
           </p>
           <div className="mt-4">
             {isJobOpenForOffers(job.status) ? (
-              <OfferPanel job={job} />
+              <OfferPanel job={job} offers={offers} />
             ) : (
               <p className="rounded-card border border-border bg-surface p-6 text-sm leading-relaxed text-muted-foreground">
                 Bu ilan şu anda teklif almaya açık değil.

@@ -223,6 +223,94 @@ export async function createJob(
   return { ok: true, job };
 }
 
+export type UpdateJobInput = {
+  title: string;
+  category: string;
+  province: string;
+  district: string;
+  workLocationType: string;
+  workDate: string;
+  description: string;
+  operationDetails: string;
+  /** Korunacak mevcut fotoğrafların id'leri (silinenler bu listede olmaz). */
+  keptPhotoIds: string[];
+  /** Bu düzenlemede eklenen, henüz IndexedDB'ye yazılmamış yeni fotoğraflar. */
+  newPhotos: ProcessedPhotoInput[];
+};
+
+/**
+ * Mevcut bir ilanı günceller — id, status ve requesterId hiç değişmez, yeni
+ * bir ilan oluşturulmaz. Yalnızca ilanın sahibi olan Hizmet Alan
+ * çağırabilir. Fotoğraflarda: `keptPhotoIds`'te olmayan eski fotoğrafların
+ * blob'ları silinir, `newPhotos` işlenip eklenir, `keptPhotoIds`'teki
+ * fotoğraflara hiç dokunulmaz (yeniden yüklenmez/yeniden işlenmez).
+ * Teklifler (Offer kayıtları) bu fonksiyonun hiç bilmediği, ayrı bir
+ * depoda (offers.ts) tutulduğu için burada dokunulmaz — ilan id'si
+ * değişmediğinden bağlantıları kendiliğinden korunur.
+ */
+export async function updateJob(
+  session: Session | null,
+  jobId: string,
+  input: UpdateJobInput,
+): Promise<CreateJobResult> {
+  if (!session) {
+    return { ok: false, error: "İlanı düzenlemek için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-alan") {
+    return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan düzenleyebilir." };
+  }
+
+  const existing = findUserCreatedJobById(jobId);
+  if (!existing || existing.requesterId !== session.id) {
+    return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
+  }
+
+  const keptPhotos = existing.photos.filter((photo) => input.keptPhotoIds.includes(photo.id));
+  const totalPhotoCount = keptPhotos.length + input.newPhotos.length;
+  if (totalPhotoCount < MIN_PHOTOS) {
+    return { ok: false, error: PHOTOS_REQUIRED_MESSAGE };
+  }
+  if (totalPhotoCount > MAX_PHOTOS) {
+    return { ok: false, error: `En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.` };
+  }
+
+  const newlyPersisted = await persistPhotosOrRollback(input.newPhotos);
+  if (!newlyPersisted) {
+    return { ok: false, error: "Fotoğraflar kaydedilemedi. Lütfen tekrar deneyin." };
+  }
+
+  const combinedPhotos: JobPhoto[] = [...keptPhotos, ...newlyPersisted].map((photo, index) => ({
+    ...photo,
+    order: index,
+  }));
+
+  const updated: Job = {
+    ...existing,
+    title: input.title.trim(),
+    category: input.category,
+    province: input.province.trim(),
+    district: input.district.trim(),
+    workLocationType: input.workLocationType.trim(),
+    workDate: input.workDate,
+    description: input.description.trim(),
+    operationDetails: input.operationDetails.trim(),
+    photos: combinedPhotos,
+  };
+
+  const all = readUserCreatedJobsSnapshot();
+  writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)));
+
+  // Kayıt başarıyla güncellendikten SONRA artık kullanılmayan eski
+  // fotoğraf blob'larını sil — sıra önemli: kayıt önce, silme sonra, ki
+  // arada bir hata olsa bile kullanıcı eski fotoğraflarına erişebilsin.
+  const removedPhotos = existing.photos.filter((photo) => !input.keptPhotoIds.includes(photo.id));
+  if (removedPhotos.length > 0) {
+    await deletePhotoBlobs(removedPhotos.map((photo) => photo.storageKey));
+  }
+
+  return { ok: true, job: updated };
+}
+
 export type DeleteJobPhotoResult = { ok: true; job: Job } | { ok: false; error: string };
 
 /**
@@ -266,4 +354,47 @@ export async function deleteJobPhoto(
   writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)));
 
   return { ok: true, job: updated };
+}
+
+export type DeleteJobResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Bir ilan kaydını (ve fotoğraf blob'larını) tamamen siler. Yalnızca ilanın
+ * sahibi olan Hizmet Alan çağırabilir; durumu "tamamlandi" olan bir ilan
+ * burada da engellenir. Bu fonksiyon teklif (Offer) deposunu hiç bilmez —
+ * job-store.ts, offers.ts'i import edemez çünkü offers.ts zaten
+ * jobs-lookup.ts üzerinden job-store.ts'e bağımlıdır (döngüsel import
+ * olurdu). "Kabul edilmiş/devam eden teklifi var mı" kontrolü ve ilana
+ * bağlı tekliflerin silinmesi, teklif verisine ihtiyaç duyduğu için
+ * offers.ts#deleteJobWithOffers içinde yapılır — normal akışta kullanıcı
+ * arayüzünün çağırması gereken, asıl yetkilendirilmiş giriş noktası odur.
+ */
+export async function deleteJob(session: Session | null, jobId: string): Promise<DeleteJobResult> {
+  if (!session) {
+    return { ok: false, error: "İlanı silmek için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-alan") {
+    return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan silebilir." };
+  }
+
+  const existing = findUserCreatedJobById(jobId);
+  if (!existing || existing.requesterId !== session.id) {
+    return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
+  }
+
+  if (existing.status === "tamamlandi") {
+    return {
+      ok: false,
+      error: "Bu ilana bağlı aktif veya tamamlanmış bir iş bulunduğu için ilan silinemez.",
+    };
+  }
+
+  const all = readUserCreatedJobsSnapshot();
+  writeUserCreatedJobs(all.filter((item) => item.id !== jobId));
+
+  if (existing.photos.length > 0) {
+    await deletePhotoBlobs(existing.photos.map((photo) => photo.storageKey));
+  }
+
+  return { ok: true };
 }
