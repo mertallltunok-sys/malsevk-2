@@ -1,12 +1,10 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, ImageOff, X } from "lucide-react";
+import { ImageOff } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { JobPhoto } from "../_lib/types";
 import { useJobPhotoUrl } from "../_lib/use-job-photo-url";
-
-const SWIPE_THRESHOLD_PX = 40;
 
 /**
  * `storageKey`, IndexedDB'de (photo-blob-store.ts) tutulan bir blob'a işaret
@@ -73,21 +71,20 @@ function MainPhoto({
       alt={alt}
       priority={priority}
       sizes="(min-width: 1024px) 768px, 100vw"
-      className="animate-photo-fade object-cover"
+      className="animate-photo-fade object-contain motion-reduce:animate-none"
     />
   );
 }
 
+/**
+ * Büyük ana fotoğraf yalnızca görüntülenir — tıklanamaz, büyümez, lightbox/
+ * modal açmaz. Fotoğrafı değiştirmenin TEK yolu alttaki küçük önizlemelere
+ * tıklamaktır (bkz. proje talimatı: "sadece küçük fotoğraflara tıklanınca
+ * büyük fotoğraf değişsin").
+ */
 export function JobPhotoGallery({ photos, jobTitle }: { photos: JobPhoto[]; jobTitle: string }) {
   const sorted = [...photos].sort((a, b) => a.order - b.order);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const touchStartX = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (lightboxOpen) dialogRef.current?.focus();
-  }, [lightboxOpen]);
 
   if (sorted.length === 0) {
     return (
@@ -98,43 +95,17 @@ export function JobPhotoGallery({ photos, jobTitle }: { photos: JobPhoto[]; jobT
     );
   }
 
-  function clampIndex(index: number): number {
-    return Math.min(Math.max(index, 0), sorted.length - 1);
-  }
-  function showNext() {
-    setActiveIndex((current) => clampIndex(current + 1));
-  }
-  function showPrevious() {
-    setActiveIndex((current) => clampIndex(current - 1));
-  }
-
-  function handleTouchStart(event: React.TouchEvent) {
-    touchStartX.current = event.touches[0].clientX;
-  }
-  function handleTouchEnd(event: React.TouchEvent) {
-    if (touchStartX.current === null) return;
-    const deltaX = event.changedTouches[0].clientX - touchStartX.current;
-    touchStartX.current = null;
-    if (deltaX > SWIPE_THRESHOLD_PX) showPrevious();
-    else if (deltaX < -SWIPE_THRESHOLD_PX) showNext();
-  }
-
   const activePhoto = sorted[activeIndex];
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setLightboxOpen(true)}
-        aria-label={`Fotoğrafı büyüt (${activeIndex + 1}/${sorted.length}): ${jobTitle}`}
-        className="relative block aspect-video w-full cursor-pointer overflow-hidden rounded-xl border border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      >
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-background">
         <MainPhoto
           photo={activePhoto}
           alt={`${jobTitle} - fotoğraf ${activeIndex + 1}`}
           priority={activeIndex === 0}
         />
-      </button>
+      </div>
 
       {sorted.length > 1 && (
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Fotoğraf küçük resimleri">
@@ -160,77 +131,6 @@ export function JobPhotoGallery({ photos, jobTitle }: { photos: JobPhoto[]; jobT
               </button>
             );
           })}
-        </div>
-      )}
-
-      {lightboxOpen && (
-        <div
-          ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Fotoğraf görüntüleyici"
-          tabIndex={-1}
-          onClick={() => setLightboxOpen(false)}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setLightboxOpen(false);
-            if (event.key === "ArrowRight") showNext();
-            if (event.key === "ArrowLeft") showPrevious();
-          }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 focus:outline-none"
-        >
-          <button
-            type="button"
-            onClick={() => setLightboxOpen(false)}
-            aria-label="Kapat"
-            className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-
-          {activeIndex > 0 && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                showPrevious();
-              }}
-              aria-label="Önceki fotoğraf"
-              className="absolute left-4 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <ChevronLeft className="h-5 w-5" aria-hidden="true" />
-            </button>
-          )}
-          {activeIndex < sorted.length - 1 && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                showNext();
-              }}
-              aria-label="Sonraki fotoğraf"
-              className="absolute right-4 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <ChevronRight className="h-5 w-5" aria-hidden="true" />
-            </button>
-          )}
-
-          <div
-            onClick={(event) => event.stopPropagation()}
-            className="relative h-[85vh] max-h-full w-full max-w-4xl"
-          >
-            <PhotoImage
-              storageKey={activePhoto.storageKey}
-              alt={`${jobTitle} - fotoğraf ${activeIndex + 1}`}
-              sizes="100vw"
-              className="rounded-lg object-contain"
-            />
-          </div>
-
-          <p className="absolute bottom-4 text-sm text-white/80">
-            {activeIndex + 1} / {sorted.length}
-          </p>
         </div>
       )}
     </div>
