@@ -2,12 +2,13 @@
 
 import { Bell, Inbox, Trash2 } from "lucide-react";
 import Link from "next/link";
-import type { MouseEvent } from "react";
 import { useDropdown } from "../_lib/use-dropdown";
 import { dismissNotification } from "../_lib/notification-dismissals";
 import { markNotificationRead } from "../_lib/notification-reads";
+import { useDismissAnimation } from "../_lib/use-dismiss-animation";
 import { useNotifications } from "../_lib/use-notifications";
 import { useReadNotificationIds } from "../_lib/use-notification-reads";
+import type { AppNotification } from "../_lib/notifications";
 import type { Session } from "../_lib/types";
 
 export function NotificationBell({ session }: { session: Session }) {
@@ -19,22 +20,6 @@ export function NotificationBell({ session }: { session: Session }) {
 
   function handleToggle() {
     setOpen((value) => !value);
-  }
-
-  function handleNotificationClick(notificationId: string) {
-    markNotificationRead(session.id, notificationId);
-    setOpen(false);
-  }
-
-  function handleDelete(event: MouseEvent, notificationId: string) {
-    // Link'in yönlendirmesini/okundu işaretlemesini tetiklememesi için —
-    // buton, satırın altındaki Link ile kardeş (nested değil, bkz. aşağıdaki
-    // JSX), bu yüzden bubbling normalde sorun yaratmaz ama savunma amaçlı
-    // yine de durduruluyor.
-    event.preventDefault();
-    event.stopPropagation();
-    if (!window.confirm("Bu bildirimi silmek istiyor musunuz?")) return;
-    dismissNotification(session.id, notificationId);
   }
 
   return (
@@ -71,40 +56,75 @@ export function NotificationBell({ session }: { session: Session }) {
               Yeni bildiriminiz yok.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1">
-              {notifications.slice(0, 8).map((notification) => {
-                const isUnread = !readIdSet.has(notification.id);
-                return (
-                  <li key={notification.id} className="group relative">
-                    <Link
-                      href={notification.href}
-                      onClick={() => handleNotificationClick(notification.id)}
-                      role="menuitem"
-                      className={`flex items-start gap-2.5 rounded-md py-2 pl-3 pr-10 text-sm leading-relaxed text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                        isUnread ? "bg-background font-semibold hover:bg-border" : "hover:bg-background"
-                      }`}
-                    >
-                      <Inbox
-                        className={`mt-0.5 h-4 w-4 shrink-0 ${isUnread ? "text-accent" : "text-muted-foreground"}`}
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 break-words">{notification.message}</span>
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={(event) => handleDelete(event, notification.id)}
-                      aria-label="Bildirimi sil"
-                      className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  </li>
-                );
-              })}
+            <ul className="flex flex-col">
+              {notifications.slice(0, 8).map((notification) => (
+                <NotificationBellRow
+                  key={notification.id}
+                  notification={notification}
+                  isUnread={!readIdSet.has(notification.id)}
+                  onRead={() => {
+                    markNotificationRead(session.id, notification.id);
+                    setOpen(false);
+                  }}
+                  onDismiss={() => dismissNotification(session.id, notification.id)}
+                />
+              ))}
             </ul>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function NotificationBellRow({
+  notification,
+  isUnread,
+  onRead,
+  onDismiss,
+}: {
+  notification: AppNotification;
+  isUnread: boolean;
+  onRead: () => void;
+  onDismiss: () => void;
+}) {
+  const { rowRef, removing, style, trigger } = useDismissAnimation(onDismiss);
+
+  return (
+    <li ref={rowRef} style={style} className="relative mb-1 last:mb-0">
+      <div className="flex items-center gap-1">
+        <Link
+          href={notification.href}
+          onClick={onRead}
+          role="menuitem"
+          className={`flex min-w-0 flex-1 items-start gap-2.5 rounded-md py-2 pl-3 pr-2 text-sm leading-relaxed text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            isUnread ? "bg-background font-semibold hover:bg-border" : "hover:bg-background"
+          }`}
+        >
+          <Inbox
+            className={`mt-0.5 h-4 w-4 shrink-0 ${isUnread ? "text-accent" : "text-muted-foreground"}`}
+            aria-hidden="true"
+          />
+          <span className="min-w-0 flex-1 break-words">{notification.message}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={(event) => {
+            // Buton artık linkin üzerine binen mutlak konumlu bir eleman
+            // değil, linkle aynı flex satırındaki ayrı bir kardeş — bu
+            // yüzden linke tıklama/yönlendirme zaten tetiklenmez; yine de
+            // savunma amaçlı durduruluyor.
+            event.preventDefault();
+            event.stopPropagation();
+            trigger();
+          }}
+          disabled={removing}
+          aria-label="Bildirimi sil"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+    </li>
   );
 }
