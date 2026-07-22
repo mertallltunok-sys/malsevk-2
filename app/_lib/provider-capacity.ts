@@ -8,7 +8,7 @@ import type { Offer } from "./types";
  * (ör. bir kullanıcının/paketin kendi limitini döndüren bir fonksiyona)
  * kolayca dönüştürülebilmesi için ayrı, bağımsız bir modülde tutulur.
  */
-export const MAX_ACTIVE_JOBS = 2;
+export const MAX_ACTIVE_JOBS = 5;
 
 /**
  * Bir Hizmet Veren'in şu an aktif (henüz sonuçlanmamış — bkz.

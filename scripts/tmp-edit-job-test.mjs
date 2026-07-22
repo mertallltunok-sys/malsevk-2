@@ -94,8 +94,10 @@ async function seedJobsWithPhotos(page, requesterId) {
   }, requesterId);
 }
 
+let browser;
+
 async function main() {
-  const browser = await chromium.launch();
+  browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
   const consoleErrors = [];
@@ -299,7 +301,11 @@ async function main() {
   console.log(`\n[edit-job-test] ${passed} test geçti.`);
 }
 
-main().catch((error) => {
-  console.error("[edit-job-test] HATA:", error);
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error("[edit-job-test] HATA:", error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    if (browser) await browser.close().catch(() => {});
+  });

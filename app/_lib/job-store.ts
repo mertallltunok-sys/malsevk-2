@@ -125,6 +125,36 @@ export function findUserCreatedJobById(id: string): Job | null {
   return readUserCreatedJobsSnapshot().find((job) => job.id === id) ?? null;
 }
 
+/** Tüm kullanıcı-oluşturmalı ilanları döndürür (statik örnek ilanlar hariç, bkz. jobs.ts). */
+export function getAllUserCreatedJobs(): Job[] {
+  return readUserCreatedJobsSnapshot();
+}
+
+/**
+ * Verilen id'lere sahip ilanları, normal `deleteJob`'daki "tamamlandi
+ * durumundaki ilan silinemez" gibi tekli-silme korumaları UYGULANMADAN
+ * kaldırır. Yalnızca dev-only demo veri sıfırlama aracı (bkz.
+ * reset-demo-data.ts) için vardır — gerçek kullanıcı akışlarının
+ * kullanması gereken, yetkilendirilmiş giriş noktası hâlâ
+ * offers.ts#deleteJobWithOffers'tır. `deleteJob` ile aynı sırayı izler:
+ * kayıt önce silinir, fotoğraf blob'ları sonra temizlenir. Silinen
+ * ilanları döndürür (rapor amaçlı).
+ */
+export async function removeUserCreatedJobsByIds(ids: string[]): Promise<Job[]> {
+  if (ids.length === 0) return [];
+  const idSet = new Set(ids);
+  const all = readUserCreatedJobsSnapshot();
+  const removed = all.filter((job) => idSet.has(job.id));
+  if (removed.length === 0) return [];
+  writeUserCreatedJobs(all.filter((job) => !idSet.has(job.id)));
+
+  const photoKeys = removed.flatMap((job) => job.photos.map((photo) => photo.storageKey));
+  if (photoKeys.length > 0) {
+    await deletePhotoBlobs(photoKeys);
+  }
+  return removed;
+}
+
 /** Sunucuya gönderilecek, zaten işlenmiş (HEIC dönüştürülmüş, EXIF temizlenmiş) bir fotoğraf. */
 export type ProcessedPhotoInput = {
   blob: Blob;

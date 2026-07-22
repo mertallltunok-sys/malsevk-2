@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   DISAGREEMENT_REASON_OPTIONS,
   confirmCompletion,
@@ -9,7 +9,10 @@ import {
   resolveCompletionDispute,
   startWorkForOffer,
 } from "../_lib/offers";
+import { getCompletionDeadlineIso } from "../_lib/time-remaining";
 import type { DisagreementReason, Offer, Session } from "../_lib/types";
+import { CompletionCountdown } from "./completion-countdown";
+import { DialogShell } from "./dialog-shell";
 
 const START_WORK_CONFIRM_TEXT =
   "Bu işin başladığını onaylıyor musunuz? Bu işlemden sonra ilan yeniden teklif alamaz.";
@@ -19,45 +22,6 @@ const CONFIRM_COMPLETION_TEXT =
   "İşin gerçekten tamamlandığını onaylıyor musunuz? Bu işlemden sonra iş kapanacak ve Hizmet Veren'in aktif iş kapasitesinden düşecektir.";
 const RESOLVE_COMPLETED_TEXT = "Sonuç olarak işin tamamlandığını kabul ediyor musunuz?";
 const RESOLVE_CANCELLED_TEXT = "Bu işi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.";
-
-/** Mevcut fotoğraf galerisi lightbox'ıyla aynı diyalog deseni: hafif arka plan, ESC ile kapanma, açılışta odak. */
-function DialogShell({
-  labelledBy,
-  onClose,
-  children,
-}: {
-  labelledBy: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
-  return (
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={labelledBy}
-      tabIndex={-1}
-      onClick={onClose}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
-      }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 focus:outline-none"
-    >
-      <div
-        onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-md rounded-card border border-border bg-surface p-6 shadow-md"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function StartWorkDialog({
   submitting,
@@ -344,13 +308,25 @@ type ModalState =
  * bu da `useAllOffers()`'ı (mevcut useSyncExternalStore zinciri) tetikleyip
  * ebeveyni yeniden render eder — `offer.status` değiştiğinde bu bileşen
  * doğru dalı kendiliğinden render eder ya da ağaçtan kalkar.
+ *
+ * `onCompleted`: yalnızca `confirmCompletion` GERÇEKTEN başarılı olduktan
+ * SONRA (iş `completed` olduktan, kapasite/bildirim işlemleri tamamlandıktan
+ * ve onay modalı kapandıktan sonra) çağrılır — hemen ardından açılması
+ * gereken değerlendirme modalını tetiklemek için (bkz. incoming-offer-card.tsx/
+ * job-requests-panel.tsx). Bu bileşen bilerek modalı kendisi açmaz: offer
+ * "completed" olduğu an bu bileşen ENGAGED_OFFER_STATUSES dışına düştüğü
+ * için çağıranın ağacından kalkar (bkz. yukarıdaki not) — yerel bir state
+ * burada tutulsaydı değerlendirme modalı da onunla birlikte kaybolurdu. Bu
+ * yüzden değerlendirme modalının state'i çağıranda (üst bileşende) tutulur.
  */
 export function OfferOutcomePanel({
   offer,
   session,
+  onCompleted,
 }: {
   offer: Offer;
   session: Session;
+  onCompleted?: (offer: Offer) => void;
 }) {
   const [modal, setModal] = useState<ModalState>("none");
   const [submitting, setSubmitting] = useState(false);
@@ -405,6 +381,7 @@ export function OfferOutcomePanel({
       return;
     }
     setModal("none");
+    onCompleted?.(result.offer);
   }
 
   function handleDisputeCompletion() {
@@ -491,6 +468,9 @@ export function OfferOutcomePanel({
           Hizmet Veren işin tamamlandığını bildirdi. Kontrol edip onaylayın ya da bir sorun varsa
           itiraz edin.
         </p>
+        {offer.completionRequestedAt && (
+          <CompletionCountdown deadlineIso={getCompletionDeadlineIso(offer.completionRequestedAt)} />
+        )}
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
@@ -541,7 +521,7 @@ export function OfferOutcomePanel({
     return (
       <div className="mt-4 rounded-card border border-border bg-background p-4">
         <p className="text-sm font-semibold text-foreground">İtiraz Edildi</p>
-        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-1 break-words text-sm leading-relaxed text-muted-foreground">
           Bu iş için itiraz ettiniz
           {offer.completionDisputeNote ? `: "${offer.completionDisputeNote}"` : "."} Sonucu
           belirleyin.

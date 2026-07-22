@@ -52,7 +52,7 @@ export function JobDetailContent({ id }: { id: string }) {
           <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
             {job.category}
           </span>
-          <h1 className="mt-3 max-w-2xl text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl">
+          <h1 className="mt-3 max-w-2xl break-words text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl">
             {job.title}
           </h1>
         </div>
@@ -85,7 +85,7 @@ export function JobDetailContent({ id }: { id: string }) {
         <div className="flex flex-col gap-6">
           <div className="rounded-card border border-border bg-surface p-6">
             <h2 className="text-lg font-semibold text-foreground">İş Açıklaması</h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground">
               {job.description}
             </p>
           </div>
@@ -94,7 +94,7 @@ export function JobDetailContent({ id }: { id: string }) {
               <ClipboardList className="h-5 w-5 text-accent" aria-hidden="true" />
               Operasyon Detayları
             </h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground">
               {job.operationDetails}
             </p>
           </div>

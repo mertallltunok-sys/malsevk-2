@@ -46,10 +46,10 @@ export function JobCard({
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold leading-snug text-foreground">
+        <h3 className="break-words text-lg font-semibold leading-snug text-foreground">
           {job.title}
         </h3>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">
           {job.description}
         </p>
       </div>

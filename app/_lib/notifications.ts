@@ -1,6 +1,19 @@
 import type { Job, Offer, Session } from "./types";
 
-export type NotificationType = "yeni_teklif" | "anlasma_saglanamadi" | "ilan_yeniden_yayinda";
+export type NotificationType =
+  | "yeni_teklif"
+  | "teklif_kabul_edildi"
+  | "teklif_reddedildi"
+  | "is_basladi"
+  | "anlasma_saglanamadi"
+  | "ilan_yeniden_yayinda"
+  | "tamamlanma_onayi_bekleniyor"
+  | "is_tamamlandi"
+  | "tamamlanma_onaylandi"
+  | "tamamlanma_itiraz_edildi"
+  | "itiraz_kaydedildi"
+  | "is_iptal_edildi"
+  | "teklif_geri_cekildi";
 
 export type AppNotification = {
   id: string;
@@ -14,21 +27,42 @@ export type AppNotification = {
 };
 
 /**
- * Bildirimler yalnızca gerçek sistem verisinden türetilir, sabit/demo
- * bildirim üretilmez. Rol bazında iki ayrı türetim vardır — Hizmet Alan ve
- * Hizmet Veren asla birbirinin bildirimini görmez:
+ * Bildirimler yalnızca gerçek sistem verisinden (Offer.status) türetilir,
+ * sabit/demo bildirim veya ayrı bir "bildirim"/"olay" tablosu yok — tıpkı
+ * "yeni_teklif"in offer.createdAt'ten türetilmesi gibi. Bu sayede id'ler
+ * sabit kalır (offer.id + olay adına bağlı) ve okunma durumu
+ * (notification-reads.ts) kalıcı olarak eşleşmeye devam eder. Rol bazında
+ * iki ayrı türetim vardır — Hizmet Alan ve Hizmet Veren asla birbirinin
+ * bildirimini görmez.
  *
- *  - Hizmet Alan: kendi ilanlarına gelen her teklif için "yeni_teklif"
- *    (değişmedi) + kendi ilanlarında anlaşma sağlanamayan her teklif için
- *    "ilan_yeniden_yayinda".
- *  - Hizmet Veren: kendi verdiği, sonradan anlaşma sağlanamayan her teklif
- *    için "anlasma_saglanamadi".
+ * ÖNEMLİ: "accepted"/"in_progress"/"completion_requested"/
+ * "completion_disputed" gibi GEÇİCİ (bir sonraki geçişte üzerine yazılan)
+ * durumlara bağlı bildirimler, teklif o durumdan çıktığında (ör.
+ * "completion_requested" -> "completed") listeden kendiliğinden kalkar —
+ * çünkü hep offer'ın O ANKİ status'una göre süzülür, ayrı bir geçmiş kaydı
+ * tutulmaz. "agreement_failed"/"completed"/"rejected"/"cancelled"/
+ * "withdrawn" gibi TERMİNAL durumlar bu yüzden kalıcıdır (offer bir daha
+ * o durumdan çıkmaz). Bu, mevcut mimarinin (ayrı olay tablosu yok, tek
+ * doğruluk kaynağı Offer.status) doğal ve kasıtlı bir sonucudur.
  *
- * Her iki yeni tür de var olan bir Offer kaydının status'unun
- * "agreement_failed" olmasından türetilir — ayrı bir "bildirim" veya "olay"
- * tablosu yok, tıpkı "yeni_teklif"in offer.createdAt'ten türetilmesi gibi.
- * Bu sayede id'ler sabit kalır (offer.id'ye bağlı) ve okunma durumu
- * (notification-reads.ts) kalıcı olarak eşleşmeye devam eder.
+ * Aynı temel olay (ör. tamamlama onaylandı), alıcıya göre FARKLI
+ * notificationType değerleriyle iki kez türetilebilir — "anlasma_saglanamadi"
+ * (Hizmet Veren) / "ilan_yeniden_yayinda" (Hizmet Alan) ikilisiyle aynı
+ * mevcut desen.
+ *
+ *  - Hizmet Alan: "yeni_teklif" (değişmedi) + anlaşma sağlanamayan teklif
+ *    için "ilan_yeniden_yayinda" + Hizmet Veren tamamlama talebi
+ *    gönderdiğinde "tamamlanma_onayi_bekleniyor" + kendi onayladığı
+ *    tamamlanma için (işlem kaydı) "is_tamamlandi" + kendi gönderdiği
+ *    itiraz için (işlem kaydı) "itiraz_kaydedildi" + geri çekilen teklif
+ *    için "teklif_geri_cekildi".
+ *  - Hizmet Veren: kabul edilen teklifi için "teklif_kabul_edildi" +
+ *    reddedilen teklifi için "teklif_reddedildi" + işe başlanan teklifi
+ *    için "is_basladi" + anlaşma sağlanamayan teklifi için
+ *    "anlasma_saglanamadi" + Hizmet Alan'ın onayladığı tamamlanma için
+ *    "tamamlanma_onaylandi" + Hizmet Alan'ın itiraz ettiği tamamlanma
+ *    talebi için "tamamlanma_itiraz_edildi" + itirazın iptalle
+ *    sonuçlanması için "is_iptal_edildi".
  */
 export function getNotificationsForSession(
   session: Session,
@@ -67,14 +101,142 @@ export function getNotificationsForSession(
         createdAt: offer.updatedAt,
       }));
 
-    return [...newOfferNotifications, ...reopenedNotifications].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt),
-    );
+    const completionRequestedNotifications: AppNotification[] = offers
+      .filter((offer) => offer.status === "completion_requested" && myJobTitleById.has(offer.jobId))
+      .map((offer) => ({
+        id: `completion-requested-${offer.id}`,
+        notificationType: "tamamlanma_onayi_bekleniyor",
+        message:
+          "Hizmet Veren işin tamamlandığını bildirdi. Lütfen işi kontrol ederek onaylayın veya itiraz edin.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/hizmet-taleplerim?durum=devam-eden",
+        createdAt: offer.updatedAt,
+      }));
+
+    const completedNotifications: AppNotification[] = offers
+      .filter((offer) => offer.status === "completed" && myJobTitleById.has(offer.jobId))
+      .map((offer) => ({
+        id: `job-completed-${offer.id}`,
+        notificationType: "is_tamamlandi",
+        message: "İşin tamamlanmasını onayladınız. İş Tamamlanan İşler bölümüne taşındı.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/hizmet-taleplerim?durum=tamamlandi",
+        createdAt: offer.updatedAt,
+      }));
+
+    const disputeRecordNotifications: AppNotification[] = offers
+      .filter((offer) => offer.status === "completion_disputed" && myJobTitleById.has(offer.jobId))
+      .map((offer) => ({
+        id: `completion-disputed-record-${offer.id}`,
+        notificationType: "itiraz_kaydedildi",
+        message: "Tamamlanma talebine yaptığınız itiraz Hizmet Veren'e iletildi.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/hizmet-taleplerim?durum=devam-eden",
+        createdAt: offer.updatedAt,
+      }));
+
+    const withdrawnNotifications: AppNotification[] = offers
+      .filter((offer) => offer.status === "withdrawn" && myJobTitleById.has(offer.jobId))
+      .map((offer) => ({
+        id: `offer-withdrawn-${offer.id}`,
+        notificationType: "teklif_geri_cekildi",
+        message: "Hizmet Veren ilanınıza verdiği teklifi geri çekti.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/gelen-teklifler",
+        createdAt: offer.updatedAt,
+      }));
+
+    return [
+      ...newOfferNotifications,
+      ...reopenedNotifications,
+      ...completionRequestedNotifications,
+      ...completedNotifications,
+      ...disputeRecordNotifications,
+      ...withdrawnNotifications,
+    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   if (session.role === "hizmet-veren") {
-    return offers
-      .filter((offer) => offer.providerId === session.id && offer.status === "agreement_failed")
+    const myOffers = offers.filter((offer) => offer.providerId === session.id);
+
+    const acceptedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "accepted")
+      .map((offer) => ({
+        id: `offer-accepted-${offer.id}`,
+        notificationType: "teklif_kabul_edildi",
+        message: "Hizmet Alan teklifinizi kabul etti.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/tekliflerim",
+        createdAt: offer.updatedAt,
+      }));
+
+    const rejectedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "rejected")
+      .map((offer) => ({
+        id: `offer-rejected-${offer.id}`,
+        notificationType: "teklif_reddedildi",
+        message: "Hizmet Alan teklifinizi kabul etmedi.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/tekliflerim",
+        createdAt: offer.updatedAt,
+      }));
+
+    const startedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "in_progress")
+      .map((offer) => ({
+        id: `offer-started-${offer.id}`,
+        notificationType: "is_basladi",
+        message: "Hizmet Alan, işin başladığını onayladı.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/tekliflerim",
+        createdAt: offer.updatedAt,
+      }));
+
+    const completionApprovedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "completed")
+      .map((offer) => ({
+        id: `completion-approved-${offer.id}`,
+        notificationType: "tamamlanma_onaylandi",
+        message: "Hizmet Alan işin tamamlandığını onayladı.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/tekliflerim",
+        createdAt: offer.updatedAt,
+      }));
+
+    const completionDisputedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "completion_disputed")
+      .map((offer) => ({
+        id: `completion-disputed-requester-${offer.id}`,
+        notificationType: "tamamlanma_itiraz_edildi",
+        message: "Hizmet Alan, işin tamamlanma talebine itiraz etti. İtiraz açıklamasını kontrol edin.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/tekliflerim",
+        createdAt: offer.updatedAt,
+      }));
+
+    const cancelledNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "cancelled")
+      .map((offer) => ({
+        id: `job-cancelled-${offer.id}`,
+        notificationType: "is_iptal_edildi",
+        message: "Hizmet Alan, itiraz edilen işi iptal olarak sonuçlandırdı.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: "/panel/tekliflerim",
+        createdAt: offer.updatedAt,
+      }));
+
+    const agreementFailedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "agreement_failed")
       .map((offer) => ({
         id: `agreement-failed-${offer.id}`,
         notificationType: "anlasma_saglanamadi" as const,
@@ -84,8 +246,17 @@ export function getNotificationsForSession(
         offerId: offer.id,
         href: `/ilanlar/${offer.jobId}`,
         createdAt: offer.updatedAt,
-      }))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      }));
+
+    return [
+      ...acceptedNotifications,
+      ...rejectedNotifications,
+      ...startedNotifications,
+      ...agreementFailedNotifications,
+      ...completionApprovedNotifications,
+      ...completionDisputedNotifications,
+      ...cancelledNotifications,
+    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   return [];

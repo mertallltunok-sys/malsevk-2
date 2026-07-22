@@ -16,6 +16,7 @@
   --warning-soft: #faf1e3;
   --danger: #b3453f;
   --danger-soft: #fbebea;
+  --rating: #d4a017;
 
   /* Yüzeyler */
   --bg: #f6f7f9;
@@ -50,6 +51,7 @@
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-rating: var(--rating);
 
   --radius-card: var(--radius-lg);
 
@@ -77,4 +79,17 @@
 body {
   background: var(--color-background);
   color: var(--color-foreground);
+}
+
+/*
+ * Son koruma katmanı: kırılmayan uzun kelimeler (ilan başlığı/açıklaması vb.
+ * kullanıcı metni) artık ilgili bileşenlerde `break-words` ile ele alınıyor
+ * (asıl kök neden düzeltmesi) — bu yalnızca fark edilmemiş bir noktadan
+ * kaynaklanabilecek yatay taşmanın sayfayı yana kaydırmasını engelleyen ek
+ * bir güvenlik ağıdır, kök neden düzeltmesinin YERİNE değil.
+ */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
 }

@@ -1,10 +1,14 @@
 "use client";
 
 import { getProfileInfo } from "../_lib/profile";
+import { getProviderRatingSummary } from "../_lib/ratings";
+import { useAllOffers } from "../_lib/use-offers";
+import { useAllRatings } from "../_lib/use-ratings";
 import { useSession } from "../_lib/use-session";
 import { findUserById } from "../_lib/users";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { ProfileInfoCard } from "./profile-info-card";
+import { ProviderRatingSummaryCard } from "./provider-rating-summary-card";
 
 /**
  * Veriler yalnızca oturumdaki kullanıcının kendi id'sinden (`session.id`)
@@ -13,6 +17,8 @@ import { ProfileInfoCard } from "./profile-info-card";
  */
 export function ProfilePageContent() {
   const session = useSession();
+  const offers = useAllOffers();
+  const ratings = useAllRatings();
 
   if (!session) {
     return (
@@ -41,6 +47,9 @@ export function ProfilePageContent() {
       <div className="mt-8">
         <ProfileInfoCard profile={getProfileInfo(user)} />
       </div>
+      {user.role === "hizmet-veren" && (
+        <ProviderRatingSummaryCard summary={getProviderRatingSummary(user.id, offers, ratings)} />
+      )}
     </div>
   );
 }

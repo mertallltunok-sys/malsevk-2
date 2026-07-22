@@ -9,6 +9,7 @@ import { getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_
 import type { Job, Offer, Session, UserRole } from "../_lib/types";
 import { findUserById } from "../_lib/users";
 import { ContactInfoBlock } from "./contact-info-block";
+import { JobRatingModal } from "./job-rating-modal";
 import { OfferOutcomePanel } from "./offer-outcome-panel";
 import { StatusBadge } from "./status-badge";
 
@@ -29,6 +30,8 @@ export function IncomingOfferCard({
 }) {
   const [pendingAction, setPendingAction] = useState<"accepted" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ratingModalOffer, setRatingModalOffer] = useState<Offer | null>(null);
+  const [justRated, setJustRated] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const provider = findUserById(offer.providerId);
   const revealedContact = getRevealedContactForOffer(session, offer.id);
@@ -84,7 +87,7 @@ export function IncomingOfferCard({
         <span>Teklif tarihi: {formatJobDate(offer.createdAt)}</span>
       </div>
 
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{offer.description}</p>
+      <p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground">{offer.description}</p>
 
       {error && (
         <p role="alert" className="mt-3 text-sm text-danger">
@@ -119,7 +122,30 @@ export function IncomingOfferCard({
 
       {(offer.status === "accepted" ||
         offer.status === "completion_requested" ||
-        offer.status === "completion_disputed") && <OfferOutcomePanel offer={offer} session={session} />}
+        offer.status === "completion_disputed") && (
+        <OfferOutcomePanel
+          offer={offer}
+          session={session}
+          onCompleted={(completedOffer) => setRatingModalOffer(completedOffer)}
+        />
+      )}
+
+      {justRated && (
+        <p role="status" aria-live="polite" className="mt-4 text-sm font-medium text-success">
+          Değerlendirmeniz için teşekkür ederiz.
+        </p>
+      )}
+
+      {ratingModalOffer && (
+        <JobRatingModal
+          offer={ratingModalOffer}
+          session={session}
+          onClose={(submitted) => {
+            setRatingModalOffer(null);
+            if (submitted) setJustRated(true);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -64,6 +64,11 @@ export function findUserById(id: string): StoredUser | null {
   return readUsers().find((user) => user.id === id) ?? null;
 }
 
+/** Tüm kullanıcıları döndürür — yalnızca sayım/rapor amaçlı araçlar için (bkz. reset-demo-data.ts). */
+export function getAllUsers(): StoredUser[] {
+  return readUsers();
+}
+
 async function hashPassword(password: string): Promise<string> {
   const data = new TextEncoder().encode(password);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -164,6 +169,16 @@ const DEV_ACCOUNTS: RegisterInput[] = [
     role: "hizmet-veren",
   },
 ];
+
+/**
+ * Demo/seed hesaplarının e-posta adresleri — tek doğruluk kaynağı
+ * DEV_ACCOUNTS'tur, burada tahmin edilmez/tekrar yazılmaz. Yalnızca demo
+ * kullanıcıları e-posta üzerinden kesin olarak tespit etmesi gereken
+ * araçlar (bkz. reset-demo-data.ts) için dışa açılır.
+ */
+export const DEV_ACCOUNT_EMAILS: readonly string[] = DEV_ACCOUNTS.map((account) =>
+  account.email.trim().toLowerCase(),
+);
 
 /**
  * Var olan bir dev hesabını (id'sini koruyarak — ilan/teklif ilişkileri

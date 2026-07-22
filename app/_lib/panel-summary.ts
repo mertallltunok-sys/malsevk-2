@@ -1,4 +1,9 @@
-import { getJobRequestFilter, jobHasAcceptedOffer } from "./job-requests";
+import {
+  COMPLETED_OFFER_STATUSES,
+  IN_PROGRESS_OFFER_STATUSES,
+  getJobRequestFilter,
+  jobHasAcceptedOffer,
+} from "./job-requests";
 import { isJobOpenForOffers } from "./jobs";
 import type { Job, Offer, OfferStatus, Session } from "./types";
 
@@ -114,12 +119,10 @@ export function getHizmetAlanPanelSummary(
 }
 
 /**
- * Hizmet Veren panel özeti. "Devam Eden İşler" aynı nedenle (veri
- * modelinde karşılığı yok) her zaman 0 döner. "Tamamlanan İşler", kabul
- * edilmiş bir teklifin bağlı olduğu ilanın durumu "tamamlandi" olduğunda
- * sayılır — bugünkü akışta ilan durumu teklif kabulünde otomatik
- * değişmediği için bu genelde 0 çıkar, ama formül gerçek veriye dayanır,
- * sabitlenmiş bir sayı değildir.
+ * Hizmet Veren panel özeti. "Devam Eden İşler" ve "Tamamlanan İşler",
+ * Hizmet Alan tarafındakiyle aynı merkezi sabitlerden (IN_PROGRESS_OFFER_STATUSES /
+ * COMPLETED_OFFER_STATUSES, job-requests.ts) hesaplanır — status listesi
+ * burada ayrıca elle tekrar yazılmaz.
  */
 export function getHizmetVerenPanelSummary(
   session: Session,
@@ -138,8 +141,11 @@ export function getHizmetVerenPanelSummary(
   ).length;
 
   const acceptedOffers = myOffers.filter((offer) => offer.status === "accepted");
-  const completedCount = acceptedOffers.filter(
-    (offer) => jobById.get(offer.jobId)?.status === "tamamlandi",
+  const inProgressCount = myOffers.filter((offer) =>
+    IN_PROGRESS_OFFER_STATUSES.includes(offer.status),
+  ).length;
+  const completedCount = myOffers.filter((offer) =>
+    COMPLETED_OFFER_STATUSES.includes(offer.status),
   ).length;
 
   const recentActivity: PanelActivityItem[] = myOffers
@@ -166,7 +172,7 @@ export function getHizmetVerenPanelSummary(
     availableListingCount,
     myOfferCount: myOffers.length,
     acceptedOfferCount: acceptedOffers.length,
-    inProgressCount: 0,
+    inProgressCount,
     completedCount,
     recentActivity,
   };

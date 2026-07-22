@@ -1,4 +1,9 @@
-import { jobHasAcceptedOffer } from "./job-requests";
+import {
+  COMPLETION_AUTO_APPROVE_DAYS,
+  REOFFER_COOLDOWN_DAYS,
+  isReofferCooldownStatus,
+  jobHasAcceptedOffer,
+} from "./job-requests";
 import { deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
 import { findJobById } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
@@ -7,6 +12,8 @@ import { hasReachedActiveJobLimit } from "./provider-capacity";
 import type { Currency, DisagreementReason, Offer, Session } from "./types";
 
 const OFFERS_STORAGE_KEY = "malsevk.offers.v1";
+const REOFFER_COOLDOWN_MS = REOFFER_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+const COMPLETION_AUTO_APPROVE_MS = COMPLETION_AUTO_APPROVE_DAYS * 24 * 60 * 60 * 1000;
 
 const listeners = new Set<() => void>();
 let cachedRaw: string | null = null;
@@ -43,13 +50,18 @@ function isOffer(value: unknown): value is Offer {
       offer.status === "completion_requested" ||
       offer.status === "completion_disputed" ||
       offer.status === "completed" ||
-      offer.status === "cancelled") &&
+      offer.status === "cancelled" ||
+      offer.status === "withdrawn") &&
     typeof offer.createdAt === "string" &&
     typeof offer.updatedAt === "string" &&
     (offer.disagreementReason === undefined ||
       DISAGREEMENT_REASON_VALUES.includes(offer.disagreementReason as DisagreementReason)) &&
     (offer.disagreementNote === undefined || typeof offer.disagreementNote === "string") &&
-    (offer.completionDisputeNote === undefined || typeof offer.completionDisputeNote === "string")
+    (offer.completionDisputeNote === undefined || typeof offer.completionDisputeNote === "string") &&
+    (offer.completionRequestedByUserId === undefined ||
+      typeof offer.completionRequestedByUserId === "string") &&
+    (offer.completionRequestedAt === undefined || typeof offer.completionRequestedAt === "string") &&
+    (offer.autoCompleted === undefined || typeof offer.autoCompleted === "boolean")
   );
 }
 
@@ -118,15 +130,40 @@ export function getAllOffers(): Offer[] {
   return readAllOffersSnapshot();
 }
 
+/**
+ * Verilen id'lere sahip teklif kayıtlarını doğrudan kaldırır — normal
+ * kullanıcı akışlarındaki hiçbir yetkilendirme/geçiş kontrolü uygulanmaz.
+ * Yalnızca dev-only demo veri sıfırlama aracı (bkz. reset-demo-data.ts)
+ * için vardır; gerçek kullanıcı akışları hâlâ withdrawOffer/
+ * updateOfferStatus/deleteJobWithOffers gibi yetkilendirilmiş
+ * fonksiyonları kullanmalıdır.
+ */
+export function removeOffersByIds(ids: string[]): void {
+  if (ids.length === 0) return;
+  const idSet = new Set(ids);
+  const all = readAllOffersSnapshot();
+  const next = all.filter((offer) => !idSet.has(offer.id));
+  if (next.length === all.length) return;
+  writeAllOffers(next);
+}
+
 export function getOffersByProvider(providerId: string): Offer[] {
   return readAllOffersSnapshot()
     .filter((offer) => offer.providerId === providerId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/**
+ * Bir (jobId, providerId) çifti için normalde tek bir Offer kaydı vardır —
+ * ama withdrawn/rejected/agreement_failed sonrası REOFFER_COOLDOWN_DAYS
+ * dolunca aynı Hizmet Veren yeniden teklif verebildiği için (bkz.
+ * createOffer) bu durumda İKİ (eski + yeni) kayıt aynı anda var olabilir.
+ * Yeni teklif her zaman dizinin sonuna eklendiği için (writeAllOffers)
+ * `findLast` her zaman "şu anki gerçek teklifi" döndürür.
+ */
 export function getOfferForJob(jobId: string, providerId: string): Offer | null {
   return (
-    readAllOffersSnapshot().find(
+    readAllOffersSnapshot().findLast(
       (offer) => offer.jobId === jobId && offer.providerId === providerId,
     ) ?? null
   );
@@ -152,6 +189,8 @@ export function getOfferStatusLabel(status: Offer["status"]): string {
       return "Tamamlandı";
     case "cancelled":
       return "İptal Edildi";
+    case "withdrawn":
+      return "Geri Çekildi";
   }
 }
 
@@ -170,6 +209,7 @@ export function getOfferStatusTone(
     case "agreement_failed":
     case "completion_disputed":
     case "cancelled":
+    case "withdrawn":
       return "danger";
   }
 }
@@ -202,6 +242,16 @@ export type CreateOfferResult =
  * mükerrer teklif kontrolü. Arayüz yalnızca bu sonucu gösterir; kuralları
  * tekrar yazmaz. `status` alanı bilerek CreateOfferInput'ta yok — teklif
  * durumu her zaman bu fonksiyon tarafından "pending" olarak atanır.
+ *
+ * KONTROL SIRASI kasıtlıdır: önce "aynı providerId+jobId için daha önce
+ * teklif var mı" (status'tan bağımsız — pending/withdrawn/rejected/
+ * agreement_failed/accepted/in_progress/completion_requested/
+ * completion_disputed/completed/cancelled FARK ETMEZ, tek bir Offer kaydı
+ * bile varsa ikinci teklif engellenir), SONRA aktif iş kapasitesi kontrol
+ * edilir. Böylece kullanıcı daha önce teklif verdiği bir ilana bakarken
+ * aktif kapasitesi de dolu olsa bile doğru (daha spesifik) hata mesajını
+ * görür — kapasite mesajı yalnızca gerçekten YENİ bir teklif denemesinde
+ * anlamlıdır.
  */
 export function createOffer(
   session: Session | null,
@@ -225,6 +275,40 @@ export function createOffer(
   // API'si yok; bu fonksiyon, o katmanın (sunucu tarafı doğrulamanın)
   // eşdeğeridir — arayüzden bağımsız, atlanamaz.
   const all = readAllOffersSnapshot();
+
+  // 1) Aynı ilana daha önce teklif verilmiş mi — EN GÜNCEL kaydına bakılır
+  // (bir (providerId, jobId) çifti için birden fazla kayıt olabilir, bkz.
+  // getOfferForJob). withdrawn/rejected/agreement_failed sonrası
+  // REOFFER_COOLDOWN_DAYS (3 gün) dolana kadar yeniden teklif engellenir;
+  // dolduktan sonra tamamen normal şekilde yeni bir teklif oluşturulabilir.
+  // accepted/in_progress/completion_requested/completion_disputed/
+  // completed/cancelled ise KALICI olarak engeller — bu durumlardan sonra
+  // aynı ilana asla yeniden teklif verilemez.
+  const latestOwnOffer = all.findLast(
+    (offer) => offer.jobId === input.jobId && offer.providerId === session.id,
+  );
+  if (latestOwnOffer) {
+    if (isReofferCooldownStatus(latestOwnOffer.status)) {
+      const cooldownEndsAt = new Date(latestOwnOffer.updatedAt).getTime() + REOFFER_COOLDOWN_MS;
+      if (Date.now() < cooldownEndsAt) {
+        if (latestOwnOffer.status === "agreement_failed") {
+          return {
+            ok: false,
+            error:
+              "Bu ilan için daha önce teklifiniz kabul edilmiş ancak anlaşma sağlanamamıştır. Bekleme süresi dolana kadar yeniden teklif veremezsiniz.",
+          };
+        }
+        return {
+          ok: false,
+          error: `Bu ilana yeniden teklif verebilmek için ${REOFFER_COOLDOWN_DAYS} günlük bekleme süresi devam ediyor.`,
+        };
+      }
+      // Bekleme süresi doldu — normal akışa (kapasite/alan doğrulamaları) devam edilir.
+    } else {
+      return { ok: false, error: "Bu hizmet talebine daha önce teklif verdiniz." };
+    }
+  }
+
   if (jobHasAcceptedOffer(job.id, all)) {
     return { ok: false, error: "Bu ilan için artık teklif kabul edilmemektedir." };
   }
@@ -232,13 +316,14 @@ export function createOffer(
     return { ok: false, error: "Bu ilan artık teklif almaya açık değil." };
   }
 
-  // Aktif iş kapasitesi kontrolü: arayüzdeki pasif "Teklif Ver" butonunun
-  // (offer-panel.tsx) eşdeğeri, arayüzden bağımsız zorunlu kılınan hali —
-  // kullanıcı HTML/JS değiştirerek bu kontrolü atlayamaz.
+  // 2) Aktif iş kapasitesi kontrolü — yalnızca daha önce teklif verilmemişse
+  // anlamlıdır (bkz. yukarıdaki sıralama notu). Arayüzdeki pasif "Teklif
+  // Ver" butonunun (offer-panel.tsx) eşdeğeri, arayüzden bağımsız zorunlu
+  // kılınan hali — kullanıcı HTML/JS değiştirerek bu kontrolü atlayamaz.
   if (hasReachedActiveJobLimit(session.id, all)) {
     return {
       ok: false,
-      error: "Aktif iş kapasitenize ulaştınız. Mevcut işleriniz tamamlanmadan yeni teklif veremezsiniz.",
+      error: "Aktif hizmet verme sınırına ulaştınız.",
     };
   }
 
@@ -265,24 +350,6 @@ export function createOffer(
     return { ok: false, error: "Tahmini hizmet süresi geçersiz." };
   }
 
-  const existingOwnOffer = all.find(
-    (offer) => offer.jobId === input.jobId && offer.providerId === session.id,
-  );
-  if (existingOwnOffer) {
-    // Suistimal koruması: teklifi kabul edilip sonra anlaşma sağlanamayan
-    // firma, ilan yeniden yayına alınsa bile aynı ilana tekrar teklif
-    // veremez — genel "daha önce teklif verdin" kuralının özel bir hali,
-    // ama kullanıcıya asıl nedeni açıkça anlatan farklı bir mesajla.
-    if (existingOwnOffer.status === "agreement_failed") {
-      return {
-        ok: false,
-        error:
-          "Bu ilan için daha önce teklifiniz kabul edilmiş ancak anlaşma sağlanamamıştır. Aynı ilana yeniden teklif veremezsiniz.",
-      };
-    }
-    return { ok: false, error: "Bu ilana daha önce teklif verdiniz." };
-  }
-
   const now = new Date().toISOString();
   const offer: Offer = {
     id: crypto.randomUUID(),
@@ -299,6 +366,47 @@ export function createOffer(
 
   writeAllOffers([...all, offer]);
   return { ok: true, offer };
+}
+
+export type WithdrawOfferResult = { ok: true; offer: Offer } | { ok: false; error: string };
+
+/**
+ * Hizmet Veren, Hizmet Alan henüz karar vermeden (teklif hâlâ "pending"
+ * iken) verdiği teklifi geri çeker. Yalnızca teklifin sahibi olan Hizmet
+ * Veren çağırabilir, yalnızca "pending" durumundaki bir teklif için — bu
+ * son koşul aynı zamanda "teklif başka sekmede zaten kabul/reddedilmiş mi"
+ * yarış durumu korumasıdır (bkz. updateOfferStatus'taki aynı desen).
+ * Kayıt silinmez, yalnızca status "withdrawn" olur — geçmiş korunur.
+ * "withdrawn" ENGAGED_OFFER_STATUSES dışında olduğu için aktif iş
+ * kapasitesine hiç girmemiş sayılır, iletişim bilgisi zaten hiç açılmamıştı
+ * (bkz. contact-access.ts), ilanı da kilitlemez (bkz. jobHasAcceptedOffer) —
+ * ilan diğer Hizmet Verenlere açık kalır. Ancak "withdrawn" bu Hizmet
+ * Veren'e yeniden teklif hakkı VERMEZ: createOffer, (providerId, jobId)
+ * çifti için status'tan bağımsız tek kayıt kuralını uygular.
+ */
+export function withdrawOffer(session: Session | null, offerId: string): WithdrawOfferResult {
+  if (!session) {
+    return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-veren") {
+    return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar teklifini geri çekebilir." };
+  }
+
+  const all = readAllOffersSnapshot();
+  const offer = all.find((item) => item.id === offerId);
+  if (!offer) {
+    return { ok: false, error: "Teklif bulunamadı." };
+  }
+  if (offer.providerId !== session.id) {
+    return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
+  }
+  if (offer.status !== "pending") {
+    return { ok: false, error: "Bu işlem yalnızca beklemede olan bir teklif için yapılabilir." };
+  }
+
+  const updated: Offer = { ...offer, status: "withdrawn", updatedAt: new Date().toISOString() };
+  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  return { ok: true, offer: updated };
 }
 
 export type UpdateOfferStatusResult =
@@ -490,7 +598,9 @@ export type RequestCompletionResult = { ok: true; offer: Offer } | { ok: false; 
  * Hizmet Alan onayına tabidir (bkz. confirmCompletion/disputeCompletion).
  * "completion_requested" durumu aktif iş kapasitesinden düşmez (bkz.
  * job-requests.ts#ENGAGED_OFFER_STATUSES) — onay bekleyen iş hâlâ meşgul
- * sayılır.
+ * sayılır. `completionRequestedByUserId` talebi başlatan kullanıcıyı
+ * kaydeder — talep tekrar gönderilemez (bu fonksiyon yalnızca "in_progress"
+ * durumundan çalışır, "completion_requested" artık bu koşulu sağlamaz).
  */
 export function requestCompletion(session: Session | null, offerId: string): RequestCompletionResult {
   if (!session) {
@@ -512,7 +622,14 @@ export function requestCompletion(session: Session | null, offerId: string): Req
     return { ok: false, error: "Bu işlem yalnızca devam eden bir iş için yapılabilir." };
   }
 
-  const updated: Offer = { ...offer, status: "completion_requested", updatedAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const updated: Offer = {
+    ...offer,
+    status: "completion_requested",
+    completionRequestedByUserId: session.id,
+    completionRequestedAt: now,
+    updatedAt: now,
+  };
   writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
   return { ok: true, offer: updated };
 }
@@ -546,6 +663,13 @@ export function confirmCompletion(session: Session | null, offerId: string): Con
   }
   if (offer.status !== "completion_requested") {
     return { ok: false, error: "Bu işlem yalnızca onay bekleyen bir iş için yapılabilir." };
+  }
+  // Savunma amaçlı: talebi başlatan kullanıcı kendi talebini onaylayamaz.
+  // Bugünkü tek yönlü akışta (yalnızca Hizmet Veren başlatabilir, yalnızca
+  // Hizmet Alan onaylayabilir) rol ayrımı nedeniyle zaten imkânsızdır, ama
+  // veri katmanında da açıkça reddedilir.
+  if (offer.completionRequestedByUserId === session.id) {
+    return { ok: false, error: "Kendi gönderdiğiniz tamamlanma talebini onaylayamazsınız." };
   }
 
   const updated: Offer = { ...offer, status: "completed", updatedAt: new Date().toISOString() };
@@ -588,6 +712,10 @@ export function disputeCompletion(
   }
   if (offer.status !== "completion_requested") {
     return { ok: false, error: "Bu işlem yalnızca onay bekleyen bir iş için yapılabilir." };
+  }
+  // Savunma amaçlı: bkz. confirmCompletion'daki aynı kontrol.
+  if (offer.completionRequestedByUserId === session.id) {
+    return { ok: false, error: "Kendi gönderdiğiniz tamamlanma talebine itiraz edemezsiniz." };
   }
 
   const trimmedNote = note.trim();
@@ -644,4 +772,40 @@ export function resolveCompletionDispute(
   const updated: Offer = { ...offer, status: resolution, updatedAt: new Date().toISOString() };
   writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
   return { ok: true, offer: updated };
+}
+
+/**
+ * "completion_requested" durumundaki, Hizmet Alan'ın hiç işlem yapmadığı
+ * teklifleri COMPLETION_AUTO_APPROVE_DAYS (7 gün) dolunca otomatik
+ * "completed" yapar (`autoCompleted: true` işaretiyle — bkz. ratings.ts'teki
+ * 30 günlük puanlama penceresi). Projede gerçek bir backend/zamanlayıcı
+ * olmadığı için (bkz. CLAUDE.md) bu GECİKMELİ (lazy) çalışır: yalnızca bu
+ * fonksiyon çağrıldığında (bkz. use-offers.ts) kontrol edilir — "7 gün
+ * doldu" anında değil, taraflardan biri sonraki ziyaretinde tetiklenir.
+ * Hiç değişiklik yoksa `writeAllOffers`/`notify()` hiç çağrılmaz (gereksiz
+ * re-render'dan kaçınmak için).
+ */
+export function applyExpiredCompletionAutoApprovals(): void {
+  const all = readAllOffersSnapshot();
+  const now = Date.now();
+  let changed = false;
+
+  const next = all.map((offer) => {
+    if (offer.status !== "completion_requested" || !offer.completionRequestedAt) return offer;
+    const deadline = new Date(offer.completionRequestedAt).getTime() + COMPLETION_AUTO_APPROVE_MS;
+    if (now < deadline) return offer;
+
+    changed = true;
+    const updated: Offer = {
+      ...offer,
+      status: "completed",
+      autoCompleted: true,
+      updatedAt: new Date(now).toISOString(),
+    };
+    return updated;
+  });
+
+  if (changed) {
+    writeAllOffers(next);
+  }
 }

@@ -40,6 +40,7 @@ export function SearchableSelect({
 }) {
   const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
   const [query, setQuery] = useState("");
+  const invalid = Boolean(errorId);
 
   const filteredOptions = useMemo(() => {
     const trimmed = query.trim();
@@ -75,7 +76,9 @@ export function SearchableSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-describedby={errorId}
-        className="mt-2 flex w-full items-center justify-between gap-2 rounded-md border border-border bg-surface px-4 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
+        className={`mt-2 flex w-full items-center justify-between gap-2 rounded-md border bg-surface px-4 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 ${
+          invalid ? "border-danger" : "border-border"
+        }`}
       >
         <span
           className={`truncate ${selectedLabel ? "text-foreground" : "text-muted-foreground"}`}

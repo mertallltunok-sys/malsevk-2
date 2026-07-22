@@ -8,12 +8,21 @@ import { HeaderAuthActions } from "./header-auth-actions";
 
 type NavLink = { href: string; label: string };
 
+const createJobCtaClass =
+  "mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+
 /**
  * Header artık layout.tsx içinde yaşadığı için sayfa geçişlerinde
  * yeniden monte olmuyor. Menü, linke tıklayınca, dışına tıklayınca veya
  * Escape'e basılınca kapanır (bkz. use-dropdown.ts).
  */
-export function MobileMenu({ navLinks }: { navLinks: NavLink[] }) {
+export function MobileMenu({
+  navLinks,
+  showCreateJobCta = false,
+}: {
+  navLinks: NavLink[];
+  showCreateJobCta?: boolean;
+}) {
   const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
 
   function closeIfLinkClicked(event: MouseEvent<HTMLDivElement>) {
@@ -54,6 +63,11 @@ export function MobileMenu({ navLinks }: { navLinks: NavLink[] }) {
               {link.label}
             </Link>
           ))}
+          {showCreateJobCta && (
+            <Link href="/hizmet-talebi-olustur" className={createJobCtaClass}>
+              Hizmet Talebi Oluştur
+            </Link>
+          )}
           <HeaderAuthActions layout="mobile" />
         </div>
       )}

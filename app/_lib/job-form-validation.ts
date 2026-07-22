@@ -15,7 +15,10 @@ export type JobFormFields = {
 
 export type JobFormErrors = Partial<Record<keyof JobFormFields, string>>;
 
-export function validateJobForm(fields: JobFormFields): JobFormErrors {
+export function validateJobForm(
+  fields: JobFormFields,
+  options?: { isEdit?: boolean },
+): JobFormErrors {
   const errors: JobFormErrors = {};
 
   if (fields.category.trim().length === 0) {
@@ -54,7 +57,11 @@ export function validateJobForm(fields: JobFormFields): JobFormErrors {
     errors.district = "Geçerli bir ilçe giriniz.";
   }
 
-  if (fields.facilityType.trim().length === 0) {
+  // Düzenlemede atlanır: Job kaydı facilityType'ı hiç saklamaz (yalnızca
+  // workLocationType/tesis metni kalıcıdır, bkz. job-edit-form.tsx), bu
+  // yüzden mevcut bir ilanı düzenlerken bu alan her zaman boş başlar ve
+  // kullanıcı konumu hiç değiştirmese bile kaydı imkansız kılardı.
+  if (!options?.isEdit && fields.facilityType.trim().length === 0) {
     errors.facilityType = "İşin yapılacağı yer türünü seçiniz.";
   }
 

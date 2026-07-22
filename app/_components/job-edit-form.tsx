@@ -134,18 +134,21 @@ function JobEditFormFields({ job, session }: { job: Job; session: Session }) {
     if (submitting || photosProcessing) return;
 
     const photoCount = photoState.keptPhotoIds.length + photoState.newPhotos.length;
-    const fieldErrors = validateJobForm({
-      category,
-      title,
-      description,
-      province: provinceName,
-      district,
-      facilityType,
-      workLocationType,
-      workDate,
-      operationDetails,
-      photoCount,
-    });
+    const fieldErrors = validateJobForm(
+      {
+        category,
+        title,
+        description,
+        province: provinceName,
+        district,
+        facilityType,
+        workLocationType,
+        workDate,
+        operationDetails,
+        photoCount,
+      },
+      { isEdit: true },
+    );
     setErrors(fieldErrors);
     setSubmitError(null);
 

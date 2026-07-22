@@ -6,39 +6,52 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { formatJobDate, getJobStatusLabel, getJobStatusTone, isJobDateInPast } from "../_lib/jobs";
 import {
+  getCompletedOfferForJob,
+  getEngagedOfferForJob,
   getJobRequestFilter,
   getJobRequestFilterLabel,
   getJobRequestFilterTone,
+  type JobRequestFilter,
 } from "../_lib/job-requests";
 import { deleteJobWithOffers } from "../_lib/offers";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
 import { useSession } from "../_lib/use-session";
-import type { Job, Session } from "../_lib/types";
+import type { Job, Offer, Session } from "../_lib/types";
 import { AuthGateNotice } from "./auth-gate-notice";
+import { JobRatingModal } from "./job-rating-modal";
+import { JobRatingWidget } from "./job-rating-widget";
+import { OfferOutcomePanel } from "./offer-outcome-panel";
 import { StatusBadge } from "./status-badge";
 
-// Bilerek JobRequestFilter'dan bağımsız: "kabul-edildi" (teklif kabul
-// edildi, karar bekleniyor) durumu için ayrı bir sekme yok — o durumdaki
-// ilanlar yalnızca "Tümü" sekmesinde, kendi doğru rozetiyle görünür.
-type TabKey = "tumu" | "aktif" | "devam-eden" | "tamamlandi";
+// Yalnızca 3 sekme var — "Tümü" kaldırıldı. "Kabul Edildi" (teklif kabul
+// edildi, iş henüz başlamadı) durumu ayrı bir sekme değil: kullanıcı
+// açısından ilan artık aktif değil (düzenlenemez/silinemez/yeni teklif
+// alamaz), bu yüzden "Devam Eden" sekmesi altında listelenir — yalnızca
+// listeleme/görünürlük kararı, rozet metni yine kendi ("Teklif Kabul
+// Edildi") etiketiyle kalır (bkz. matchesTab, aşağıda).
+type TabKey = "aktif" | "devam-eden" | "tamamlandi";
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: "tumu", label: "Tümü" },
   { key: "aktif", label: "Aktif" },
   { key: "devam-eden", label: "Devam Eden" },
   { key: "tamamlandi", label: "Tamamlanan" },
 ];
 
 const EMPTY_MESSAGES: Record<TabKey, string> = {
-  tumu: "Henüz bir hizmet talebiniz bulunmuyor.",
   aktif: "Henüz aktif bir hizmet talebiniz bulunmuyor.",
   "devam-eden": "Henüz devam eden bir işiniz bulunmuyor.",
   tamamlandi: "Henüz tamamlanan bir işiniz bulunmuyor.",
 };
 
 function tabHref(key: TabKey): string {
-  return key === "tumu" ? "/panel/hizmet-taleplerim" : `/panel/hizmet-taleplerim?durum=${key}`;
+  return key === "aktif" ? "/panel/hizmet-taleplerim" : `/panel/hizmet-taleplerim?durum=${key}`;
+}
+
+/** "Kabul Edildi" bilerek "Devam Eden" sekmesiyle eşleşir (bkz. yukarıdaki not). */
+function matchesTab(filter: JobRequestFilter | null, tab: TabKey): boolean {
+  if (tab === "devam-eden") return filter === "devam-eden" || filter === "kabul-edildi";
+  return filter === tab;
 }
 
 /** Mevcut "Görüşme Sonucu" diyaloglarıyla (offer-outcome-panel.tsx) aynı desen: hafif arka plan, ESC ile kapanma, açılışta odak. */
@@ -137,15 +150,15 @@ function JobRequestsList({ session }: { session: Session }) {
   const searchParams = useSearchParams();
   const rawDurum = searchParams.get("durum");
   const activeTab: TabKey =
-    rawDurum === "aktif" || rawDurum === "devam-eden" || rawDurum === "tamamlandi"
-      ? rawDurum
-      : "tumu";
+    rawDurum === "devam-eden" || rawDurum === "tamamlandi" ? rawDurum : "aktif";
   const justUpdated = searchParams.get("guncellendi") === "1";
 
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [justDeleted, setJustDeleted] = useState(false);
+  const [ratingModalOffer, setRatingModalOffer] = useState<Offer | null>(null);
+  const [justRated, setJustRated] = useState(false);
 
   function openDeleteDialog(job: Job) {
     setDeleteTarget(job);
@@ -174,10 +187,14 @@ function JobRequestsList({ session }: { session: Session }) {
 
   const myEntries = jobs
     .filter((job) => job.requesterId === session.id)
-    .map((job) => ({ job, filter: getJobRequestFilter(job, offers) }));
+    .map((job) => ({
+      job,
+      filter: getJobRequestFilter(job, offers),
+      engagedOffer: getEngagedOfferForJob(job.id, offers),
+      completedOffer: getCompletedOfferForJob(job.id, offers),
+    }));
 
-  const visible =
-    activeTab === "tumu" ? myEntries : myEntries.filter((entry) => entry.filter === activeTab);
+  const visible = myEntries.filter((entry) => matchesTab(entry.filter, activeTab));
 
   return (
     <div>
@@ -200,6 +217,17 @@ function JobRequestsList({ session }: { session: Session }) {
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
           İlan başarıyla silindi.
+        </p>
+      )}
+
+      {justRated && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mb-4 flex items-center gap-2 rounded-md bg-success-soft px-4 py-3 text-sm font-medium text-success"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Değerlendirmeniz için teşekkür ederiz.
         </p>
       )}
 
@@ -230,7 +258,7 @@ function JobRequestsList({ session }: { session: Session }) {
             <p className="text-sm leading-relaxed text-muted-foreground">
               {EMPTY_MESSAGES[activeTab]}
             </p>
-            {activeTab === "tumu" && (
+            {activeTab === "aktif" && (
               <Link
                 href="/hizmet-talebi-olustur"
                 className="mt-4 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
@@ -241,14 +269,14 @@ function JobRequestsList({ session }: { session: Session }) {
           </div>
         ) : (
           <ul className="flex flex-col gap-4">
-            {visible.map(({ job, filter }) => (
+            {visible.map(({ job, filter, engagedOffer, completedOffer }) => (
               <li key={job.id} className="rounded-card border border-border bg-surface p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
                       {job.category}
                     </span>
-                    <h3 className="mt-2 text-lg font-semibold leading-snug text-foreground">
+                    <h3 className="mt-2 break-words text-lg font-semibold leading-snug text-foreground">
                       {job.title}
                     </h3>
                   </div>
@@ -273,6 +301,20 @@ function JobRequestsList({ session }: { session: Session }) {
                   <p className="mt-2 text-xs text-warning">Tarihi güncellemeniz önerilir.</p>
                 )}
 
+                {engagedOffer &&
+                  (engagedOffer.status === "completion_requested" ||
+                    engagedOffer.status === "completion_disputed") && (
+                    <OfferOutcomePanel
+                      offer={engagedOffer}
+                      session={session}
+                      onCompleted={(completedOffer) => setRatingModalOffer(completedOffer)}
+                    />
+                  )}
+
+                {filter === "tamamlandi" && completedOffer && (
+                  <JobRatingWidget offer={completedOffer} session={session} />
+                )}
+
                 <div className="mt-4 flex flex-wrap items-center gap-4">
                   <Link
                     href={`/ilanlar/${job.id}`}
@@ -280,19 +322,26 @@ function JobRequestsList({ session }: { session: Session }) {
                   >
                     İlan detayına git
                   </Link>
-                  <Link
-                    href={`/panel/hizmet-taleplerim/${job.id}/duzenle`}
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                  >
-                    İlanı Düzenle
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => openDeleteDialog(job)}
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                  >
-                    İlanı Sil
-                  </button>
+                  {/* Düzenle/Sil yalnızca "Aktif" ilanlarda gösterilir — iş
+                      başladıktan (ya da teklif kabul edildikten) sonra ilan
+                      artık değiştirilemez/silinemez (bkz. matchesTab). */}
+                  {filter === "aktif" && (
+                    <>
+                      <Link
+                        href={`/panel/hizmet-taleplerim/${job.id}/duzenle`}
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                      >
+                        İlanı Düzenle
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => openDeleteDialog(job)}
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                      >
+                        İlanı Sil
+                      </button>
+                    </>
+                  )}
                 </div>
               </li>
             ))}
@@ -307,6 +356,17 @@ function JobRequestsList({ session }: { session: Session }) {
           error={deleteError}
           onConfirm={handleConfirmDelete}
           onCancel={closeDeleteDialog}
+        />
+      )}
+
+      {ratingModalOffer && (
+        <JobRatingModal
+          offer={ratingModalOffer}
+          session={session}
+          onClose={(submitted) => {
+            setRatingModalOffer(null);
+            if (submitted) setJustRated(true);
+          }}
         />
       )}
     </div>

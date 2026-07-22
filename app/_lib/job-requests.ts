@@ -27,6 +27,52 @@ export const ENGAGED_OFFER_STATUSES: OfferStatus[] = [
 ];
 
 /**
+ * "Devam Eden İşler" olarak sayılan teklif durumları — TEK ortak doğruluk
+ * kaynağı. İş fiilen başlamış ("in_progress") ama henüz iki tarafça da
+ * kapatılmamış tüm durumları kapsar: tamamlandı bildirimi Hizmet Veren
+ * tarafından gönderilmiş ama Hizmet Alan tarafından henüz onaylanmamış
+ * ("completion_requested") ya da itiraz edilmiş ("completion_disputed")
+ * olsa bile iş hâlâ "devam ediyor" sayılır. "accepted" bilerek DAHİL
+ * DEĞİL — kabul edilmiş ama işe henüz başlanmamış teklifler ayrı bir
+ * durumdur (bkz. getJobRequestFilter: "kabul-edildi").
+ */
+export const IN_PROGRESS_OFFER_STATUSES: OfferStatus[] = [
+  "in_progress",
+  "completion_requested",
+  "completion_disputed",
+];
+
+/** "Tamamlanan İşler" olarak sayılan teklif durumları — TEK ortak doğruluk kaynağı. */
+export const COMPLETED_OFFER_STATUSES: OfferStatus[] = ["completed"];
+
+/**
+ * Bir teklif bu durumlardan birine geçtiğinde, aynı Hizmet Veren'in aynı
+ * ilana yeniden teklif verebilmesi süreli olarak (bkz. REOFFER_COOLDOWN_DAYS)
+ * engellenir — kalıcı değil. "accepted"/"in_progress"/"completion_requested"/
+ * "completion_disputed"/"completed"/"cancelled" bilerek DAHİL DEĞİL — bu
+ * durumlardan sonra aynı ilana asla yeniden teklif verilemez (bkz.
+ * offers.ts#createOffer). TEK ortak doğruluk kaynağıdır.
+ */
+export type ReofferCooldownStatus = "withdrawn" | "rejected" | "agreement_failed";
+
+export const REOFFER_COOLDOWN_OFFER_STATUSES: ReofferCooldownStatus[] = [
+  "withdrawn",
+  "rejected",
+  "agreement_failed",
+];
+
+/** REOFFER_COOLDOWN_OFFER_STATUSES'tan birine geçtikten sonra yeniden teklif verilebilmesi için beklenmesi gereken gün sayısı. */
+export const REOFFER_COOLDOWN_DAYS = 3;
+
+/** Tip daraltıcı: `Array.prototype.includes` TypeScript'te otomatik daraltma yapmadığı için (bkz. offer-panel.tsx). */
+export function isReofferCooldownStatus(status: OfferStatus): status is ReofferCooldownStatus {
+  return status === "withdrawn" || status === "rejected" || status === "agreement_failed";
+}
+
+/** "completion_requested" durumundaki bir teklifin, Hizmet Alan hiç işlem yapmazsa kaç gün sonra otomatik "completed" olacağı. */
+export const COMPLETION_AUTO_APPROVE_DAYS = 7;
+
+/**
  * Bir ilana kilitli (bkz. ENGAGED_OFFER_STATUSES) bir teklif olup olmadığını
  * söyler. Job.status'ta bunun karşılığı yok (bkz. types.ts: JobStatus
  * yalnızca "yayinda" | "tamamlandi" | "iptal") — kabul/iş başlama kararı
@@ -42,19 +88,51 @@ export function jobHasAcceptedOffer(jobId: string, offers: Offer[]): boolean {
 }
 
 /**
- * "Kabul edildi" (karar bekleniyor) ve "devam eden" (iş fiilen başladı)
- * ayrı Job.status değerleri değil — ilgili Offer'ın "accepted" mı
- * "in_progress" mi olduğuna göre ayrışır. Var olmayan bir alan icat
- * edilmiyor; yalnızca mevcut Job.status ve Offer.status birleştirilerek
- * türetiliyor. "iptal" durumundaki ilanlar hiçbir filtreye girmez (null
- * döner).
+ * Bir ilana kilitli (bkz. ENGAGED_OFFER_STATUSES) tekli teklifi döndürür —
+ * `jobHasAcceptedOffer`'ın boolean değil, asıl kaydı döndüren hâli. Bir
+ * ilanın aynı anda en fazla bir "meşgul" teklifi olabilir (createOffer bunu
+ * zorunlu kılar), bu yüzden `.find()` güvenlidir. Hizmet Alan'ın kendi
+ * ilanları listesinde (job-requests-panel.tsx), ilgili teklifin tam
+ * durumuna (ör. "completion_requested") göre aksiyon kutusu göstermek için
+ * kullanılır — aynı filtreleme mantığı tekrar yazılmaz.
+ */
+export function getEngagedOfferForJob(jobId: string, offers: Offer[]): Offer | null {
+  return offers.find((offer) => offer.jobId === jobId && ENGAGED_OFFER_STATUSES.includes(offer.status)) ?? null;
+}
+
+/**
+ * Bir ilanın tamamlanmış (bkz. COMPLETED_OFFER_STATUSES) tekli teklifini
+ * döndürür — `getEngagedOfferForJob`'ın "completed" karşılığı. Puanlama
+ * ekranının (Hizmet Taleplerim > Tamamlanan) ilgili teklifi bulması için
+ * kullanılır.
+ */
+export function getCompletedOfferForJob(jobId: string, offers: Offer[]): Offer | null {
+  return (
+    offers.find((offer) => offer.jobId === jobId && COMPLETED_OFFER_STATUSES.includes(offer.status)) ?? null
+  );
+}
+
+/**
+ * "Kabul edildi" (karar bekleniyor), "devam eden" (iş fiilen başladı,
+ * tamamlandı onayı bekliyor ya da itiraz edilmiş) ve "tamamlandı" ayrı
+ * Job.status değerleri değil — ilgili Offer'ın durumuna göre ayrışır
+ * (bkz. IN_PROGRESS_OFFER_STATUSES / COMPLETED_OFFER_STATUSES, tek ortak
+ * doğruluk kaynağı). Var olmayan bir alan icat edilmiyor; yalnızca mevcut
+ * Job.status ve Offer.status birleştirilerek türetiliyor. "iptal"
+ * durumundaki ilanlar hiçbir filtreye girmez (null döner). "tamamlandi"
+ * kontrolü hem Job.status hem Offer.status üzerinden yapılır: bugünkü
+ * akışta yalnızca ikincisi gerçekleşir (Job.status hiçbir teklif
+ * geçişinde değişmez, bkz. types.ts), ama Job.status'un ileride bir gün
+ * gerçekten "tamamlandi" olabileceği ihtimaline karşı ilk kontrol de
+ * korunur.
  */
 export function getJobRequestFilter(job: Job, offers: Offer[]): JobRequestFilter | null {
   if (job.status === "tamamlandi") return "tamamlandi";
   if (job.status !== "yayinda") return null;
 
   const jobOffers = offers.filter((offer) => offer.jobId === job.id);
-  if (jobOffers.some((offer) => offer.status === "in_progress")) return "devam-eden";
+  if (jobOffers.some((offer) => COMPLETED_OFFER_STATUSES.includes(offer.status))) return "tamamlandi";
+  if (jobOffers.some((offer) => IN_PROGRESS_OFFER_STATUSES.includes(offer.status))) return "devam-eden";
   if (jobOffers.some((offer) => offer.status === "accepted")) return "kabul-edildi";
   return "aktif";
 }

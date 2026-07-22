@@ -35,8 +35,12 @@ export function IncomingOffersPanel() {
     jobs.filter((job) => job.requesterId === session.id).map((job) => job.id),
   );
 
+  // "withdrawn": Hizmet Veren'in kabul edilmeden önce geri çektiği teklif —
+  // aktif Gelen Teklifler listesinde hiç görünmez, tekrar kabul edilemez
+  // (bkz. offers.ts#withdrawOffer).
   const incoming = offers
     .filter((offer) => myJobIds.has(offer.jobId))
+    .filter((offer) => offer.status !== "withdrawn")
     .filter((offer) => !highlightJobId || offer.jobId === highlightJobId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
