@@ -49,9 +49,9 @@ function getIsMountedServerSnapshot() {
  * `getBoundingClientRect().bottom` değeri + küçük bir boşlukla ölçülür.
  *
  * İçerik yalnızca hesap işlemlerinden ibarettir (bkz. HeaderAuthActions'ın
- * "mobile" dalı) — genel site navigasyonu (Nasıl Çalışır/Hizmetler/İlanlar,
- * Hizmet Talebi Oluştur) burada YOKTUR; masaüstündeki `<nav>` ile
- * karıştırılmamalı, o `site-header.tsx`'te ayrı ve değişmeden duruyor.
+ * "mobile" dalı) — genel site navigasyonu (Nasıl Çalışır, Hizmet Talebi
+ * Oluştur) burada YOKTUR; masaüstündeki `<nav>` ile karıştırılmamalı, o
+ * `site-header.tsx`'te ayrı ve değişmeden duruyor.
  */
 export function MobileMenu() {
   const portalRef = useRef<HTMLDivElement>(null);

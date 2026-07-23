@@ -7,11 +7,7 @@ import { HeaderAuthActions } from "./header-auth-actions";
 import { MobileMenu } from "./mobile-menu";
 import { NotificationBell } from "./notification-bell";
 
-const navLinks = [
-  { href: "/#nasil-calisir", label: "Nasıl Çalışır" },
-  { href: "/#hizmetler", label: "Hizmetler" },
-  { href: "/ilanlar", label: "İlanlar" },
-];
+const navLinks = [{ href: "/#nasil-calisir", label: "Nasıl Çalışır" }];
 
 const navLinkClass =
   "rounded-sm text-sm font-medium text-foreground/80 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2";
