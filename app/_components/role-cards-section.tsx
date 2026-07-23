@@ -1,5 +1,8 @@
+"use client";
+
 import { ArrowRight, ClipboardList, Handshake, type LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { useSession } from "../_lib/use-session";
 
 const roles: {
   href: string;
@@ -26,7 +29,17 @@ const roles: {
   },
 ];
 
+/**
+ * Yalnızca giriş yapılmamış ziyaretçiye gösterilir — Hizmet Alan veya
+ * Hizmet Veren olarak oturum açmış bir kullanıcı için zaten hangi rolde
+ * olduğu belli, "size uygun başlangıcı seçin" seçimi anlamsız. `null`
+ * dönmek (CSS ile gizlemek yerine) Hero ile ServicesSection arasında
+ * boşluk bırakan bir kapsayıcı bırakmaz.
+ */
 export function RoleCardsSection() {
+  const session = useSession();
+  if (session) return null;
+
   return (
     <section aria-labelledby="roller-baslik" className="bg-surface">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
