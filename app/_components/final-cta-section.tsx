@@ -1,6 +1,19 @@
-import { ButtonLink } from "./button-link";
+"use client";
 
+import { ButtonLink } from "./button-link";
+import { useSession } from "../_lib/use-session";
+
+/**
+ * Yalnızca giriş yapılmamış ziyaretçiye gösterilir — Hizmet Alan/Hizmet
+ * Veren için zaten Hero'da role özel CTA var (bkz. hero-section.tsx), bu
+ * genel/ikinci CTA tekrar niteliğinde. `null` dönmek (CSS ile gizlemek
+ * yerine) önceki bölüm ile footer arasında boşluk bırakan bir kapsayıcı
+ * bırakmaz — aynı desen RoleCardsSection'da da kullanılıyor.
+ */
 export function FinalCtaSection() {
+  const session = useSession();
+  if (session) return null;
+
   return (
     <section aria-labelledby="son-cta-baslik" className="bg-background">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
