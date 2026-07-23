@@ -96,3 +96,43 @@ html {
 body {
   max-width: 100%;
 }
+
+/*
+ * Mobil dokunma/ekran stabilitesi: viewport meta'daki (layout.tsx)
+ * initial/minimum/maximum-scale=1 kilidini destekleyen ikinci katman.
+ * `pan-x pan-y` (yalnızca kaydırma) izin verir, `pinch-zoom`'u dışarıda
+ * bırakır — bu yüzden çift dokunuşla yakınlaştırma da devre dışı kalır.
+ * `manipulation` KULLANILMADI çünkü spesifikasyonda `pinch-zoom`'u hâlâ
+ * izin verilenler arasında tanımlar. `pan-x` bilerek dahil edildi: bazı
+ * bileşenlerde (ör. fotoğraf galerisi küçük resim şeridi) gerçek yatay
+ * kaydırma (`overflow-x-auto`) var, bunu kırmamak gerekiyor. Sayfanın
+ * kendisi zaten `overflow-x: hidden` ile yatay kaymaya kapalı.
+ */
+html {
+  touch-action: pan-x pan-y;
+  overscroll-behavior-x: none;
+}
+
+/*
+ * iOS Safari, odaklanılan input'un hesaplanan font-size'ı 16px'in altında
+ * olduğunda sayfayı otomatik yakınlaştırır. Masaüstü tasarımını korumak
+ * için düzeltme yalnızca mobil genişliklerde (Tailwind `md` kırılımının
+ * altı) uygulanır; bileşenlerdeki mevcut `text-sm` sınıfları masaüstünde
+ * değişmeden kalır. checkbox/radio/file gibi metin girişi olmayan input
+ * türleri bilerek kapsam dışı bırakıldı.
+ */
+@media (max-width: 767px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="password"],
+  input[type="date"],
+  input[type="search"],
+  input[type="url"],
+  input[type="number"],
+  input:not([type]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

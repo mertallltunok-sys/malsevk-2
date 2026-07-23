@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { SiteFooter } from "./_components/site-footer";
 import { SiteHeader } from "./_components/site-header";
@@ -18,6 +18,18 @@ export const metadata: Metadata = {
   title: "MALSEVK.COM | Lojistik Hizmet Platformu",
   description:
     "MALSEVK, hizmet alan firmalar ile uzman lojistik hizmet verenlerini güvenli, hızlı ve profesyonel şekilde buluşturan Türkiye'nin lojistik hizmet platformudur.",
+};
+
+// Bilinçli ürün kararı: mobilde pinch/double-tap zoom tamamen kapalı
+// (dokunma sırasında istemsiz ölçekleme yaşanmasın diye). Next.js App
+// Router'da viewport meta'sının TEK kaynağı burasıdır — başka hiçbir
+// dosyada <meta name="viewport"> veya metadata.viewport yok.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
