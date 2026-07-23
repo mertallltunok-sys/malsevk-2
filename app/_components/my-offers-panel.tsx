@@ -173,19 +173,17 @@ function WithdrawOfferDialog({
 type TabKey = ProviderOfferFilter;
 
 // Job tarafındaki (job-requests-panel.tsx) "aktif/devam-eden/tamamlandi" sekme
-// deseniyle aynı yapı — burada "kabul-edildi" ek bir dördüncü sekme (bkz.
-// job-requests.ts#getProviderOfferFilter'daki not: teklif sahibi için bu
-// ayrım "devam-eden"le birleştirilmez).
+// deseniyle aynı yapı. Kabul edilmiş ama iş henüz başlamamış teklifler ayrı
+// bir sekme değil, "aktif" içinde gösterilir (bkz.
+// job-requests.ts#getProviderOfferFilter).
 const TABS: { key: TabKey; label: string }[] = [
   { key: "aktif", label: "Aktif" },
-  { key: "kabul-edildi", label: "Kabul Edilen" },
   { key: "devam-eden", label: "Devam Eden" },
   { key: "tamamlandi", label: "Tamamlanan" },
 ];
 
 const EMPTY_MESSAGES: Record<TabKey, string> = {
   aktif: "Henüz herhangi bir ilana teklif vermediniz.",
-  "kabul-edildi": "Kabul edilen teklifiniz bulunmuyor.",
   "devam-eden": "Devam eden işiniz bulunmuyor.",
   tamamlandi: "Tamamlanan işiniz bulunmuyor.",
 };
@@ -275,9 +273,7 @@ export function MyOffersPanel() {
 
   const rawDurum = searchParams.get("durum");
   const activeTab: TabKey =
-    rawDurum === "kabul-edildi" || rawDurum === "devam-eden" || rawDurum === "tamamlandi"
-      ? rawDurum
-      : "aktif";
+    rawDurum === "devam-eden" || rawDurum === "tamamlandi" ? rawDurum : "aktif";
 
   const visible = offers.filter((offer) => getProviderOfferFilter(offer) === activeTab);
 
