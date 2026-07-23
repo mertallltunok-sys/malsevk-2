@@ -42,10 +42,10 @@ const hizmetVerenMenuItems: MenuItem[] = [
   { label: "Panel Özeti", href: "/panel", icon: LayoutDashboard },
   { label: "Uygun İlanlar", href: "/ilanlar", icon: Briefcase },
   { label: "Verdiğim Teklifler", href: "/panel/tekliflerim", icon: Send },
-  { label: "Kabul Edilen Teklifler", icon: CircleCheck },
-  { label: "Devam Eden İşler", icon: Clock },
-  { label: "Tamamlanan İşler", icon: CheckCircle2 },
-  { label: "Bildirimler", icon: Bell },
+  { label: "Kabul Edilen Teklifler", href: "/panel/tekliflerim?durum=kabul-edildi", icon: CircleCheck },
+  { label: "Devam Eden İşler", href: "/panel/tekliflerim?durum=devam-eden", icon: Clock },
+  { label: "Tamamlanan İşler", href: "/panel/tekliflerim?durum=tamamlandi", icon: CheckCircle2 },
+  { label: "Bildirimler", href: "/panel/bildirimler", icon: Bell },
   { label: "Hesap Ayarları", href: "/panel/hesap-ayarlari", icon: Settings },
 ];
 

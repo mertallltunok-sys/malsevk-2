@@ -2,8 +2,10 @@
 
 import { CalendarDays, Clock, FileText } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
+import { getProviderOfferFilter, type ProviderOfferFilter } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import {
@@ -168,10 +170,35 @@ function WithdrawOfferDialog({
   );
 }
 
+type TabKey = ProviderOfferFilter;
+
+// Job tarafındaki (job-requests-panel.tsx) "aktif/devam-eden/tamamlandi" sekme
+// deseniyle aynı yapı — burada "kabul-edildi" ek bir dördüncü sekme (bkz.
+// job-requests.ts#getProviderOfferFilter'daki not: teklif sahibi için bu
+// ayrım "devam-eden"le birleştirilmez).
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "aktif", label: "Aktif" },
+  { key: "kabul-edildi", label: "Kabul Edilen" },
+  { key: "devam-eden", label: "Devam Eden" },
+  { key: "tamamlandi", label: "Tamamlanan" },
+];
+
+const EMPTY_MESSAGES: Record<TabKey, string> = {
+  aktif: "Henüz herhangi bir ilana teklif vermediniz.",
+  "kabul-edildi": "Kabul edilen teklifiniz bulunmuyor.",
+  "devam-eden": "Devam eden işiniz bulunmuyor.",
+  tamamlandi: "Tamamlanan işiniz bulunmuyor.",
+};
+
+function tabHref(key: TabKey): string {
+  return key === "aktif" ? "/panel/tekliflerim" : `/panel/tekliflerim?durum=${key}`;
+}
+
 export function MyOffersPanel() {
   const session = useSession();
   const jobs = useAllJobs();
   const jobById = new Map(jobs.map((job) => [job.id, job]));
+  const searchParams = useSearchParams();
 
   const [completionTarget, setCompletionTarget] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -246,137 +273,170 @@ export function MyOffersPanel() {
 
   const offers = getOffersByProvider(session.id);
 
-  if (offers.length === 0) {
-    return (
-      <div className="rounded-card border border-border bg-surface p-8 text-center">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Henüz herhangi bir ilana teklif vermediniz.
-        </p>
-        <Link
-          href="/ilanlar"
-          className="mt-4 inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-6 py-3 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-        >
-          İş ilanlarını incele
-        </Link>
-      </div>
-    );
-  }
+  const rawDurum = searchParams.get("durum");
+  const activeTab: TabKey =
+    rawDurum === "kabul-edildi" || rawDurum === "devam-eden" || rawDurum === "tamamlandi"
+      ? rawDurum
+      : "aktif";
+
+  const visible = offers.filter((offer) => getProviderOfferFilter(offer) === activeTab);
 
   return (
-    <div className="flex flex-col gap-5">
-      {offers.map((offer) => {
-        const job = jobById.get(offer.jobId);
-        const revealedContact = getRevealedContactForOffer(session, offer.id);
-        const isLong = offer.description.length > DESCRIPTION_PREVIEW_LENGTH;
-        const preview = isLong
-          ? `${offer.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`
-          : offer.description;
+    <div>
+      <div role="tablist" aria-label="Teklif durumu" className="flex flex-wrap gap-2">
+        {TABS.map((tab) => {
+          const isActive = tab.key === activeTab;
+          return (
+            <Link
+              key={tab.key}
+              href={tabHref(tab.key)}
+              role="tab"
+              aria-selected={isActive}
+              className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                isActive
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-surface text-foreground hover:border-primary/40"
+              }`}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
 
-        return (
-          <div
-            key={offer.id}
-            className="rounded-card border border-border bg-surface p-6"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                {job && (
-                  <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-                    {job.category}
-                  </span>
-                )}
-                <h3 className="mt-2 text-lg font-semibold text-foreground">
-                  {job ? job.title : "İlan artık mevcut değil"}
-                </h3>
-              </div>
-              <StatusBadge
-                label={getOfferStatusLabel(offer.status)}
-                tone={getOfferStatusTone(offer.status)}
-              />
-            </div>
-
-            <p className="mt-3 text-lg font-semibold text-foreground">
-              {formatMoney(offer.amount, offer.currency)}
+      <div className="mt-6">
+        {visible.length === 0 ? (
+          <div className="rounded-card border border-border bg-surface p-8 text-center">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {EMPTY_MESSAGES[activeTab]}
             </p>
-
-            <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
-              <span className="flex items-center gap-2">
-                <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {offer.estimatedDuration}
-              </span>
-              <span className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {formatJobDate(offer.createdAt)}
-              </span>
-            </div>
-
-            {isLong ? (
-              <details className="mt-3 break-words text-sm text-muted-foreground">
-                <summary className="cursor-pointer list-none font-medium text-primary marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm">
-                  {preview} <span className="underline">Tamamını gör</span>
-                </summary>
-                <p className="mt-2 leading-relaxed">{offer.description}</p>
-              </details>
-            ) : (
-              <p className="mt-3 flex items-start gap-2 break-words text-sm leading-relaxed text-muted-foreground">
-                <FileText className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                {offer.description}
-              </p>
-            )}
-
-            {job && (
-              <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <Link
-                  href={`/ilanlar/${job.id}`}
-                  className="w-fit text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-sm"
-                >
-                  İlan detayına git
-                </Link>
-                {offer.status === "pending" && (
-                  <button
-                    type="button"
-                    onClick={() => openWithdrawDialog(offer)}
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                  >
-                    Tekliften Vazgeç
-                  </button>
-                )}
-              </div>
-            )}
-
-            {revealedContact && <ContactInfoBlock contact={revealedContact.requester} />}
-
-            {offer.status === "in_progress" && (
-              <button
-                type="button"
-                onClick={() => openCompletionDialog(offer)}
-                className="mt-4 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+            {activeTab === "aktif" && (
+              <Link
+                href="/ilanlar"
+                className="mt-4 inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-6 py-3 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
               >
-                Tamamlandı Olarak İşaretle
-              </button>
-            )}
-
-            {offer.status === "completion_requested" && (
-              <div className="mt-4 rounded-card border border-border bg-background p-4">
-                <p className="text-sm font-semibold text-foreground">Tamamlanma onayı bekleniyor</p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                  Hizmet Alan&apos;ın onayı bekleniyor.
-                </p>
-                {offer.completionRequestedAt && (
-                  <CompletionCountdown deadlineIso={getCompletionDeadlineIso(offer.completionRequestedAt)} />
-                )}
-              </div>
-            )}
-
-            {offer.status === "completion_disputed" && (
-              <p className="mt-4 break-words text-sm leading-relaxed text-danger">
-                İtiraz edildi
-                {offer.completionDisputeNote ? `: "${offer.completionDisputeNote}"` : "."} Hizmet
-                Alan sonucu belirleyecek.
-              </p>
+                İş ilanlarını incele
+              </Link>
             )}
           </div>
-        );
-      })}
+        ) : (
+          <div className="flex flex-col gap-5">
+            {visible.map((offer) => {
+              const job = jobById.get(offer.jobId);
+              const revealedContact = getRevealedContactForOffer(session, offer.id);
+              const isLong = offer.description.length > DESCRIPTION_PREVIEW_LENGTH;
+              const preview = isLong
+                ? `${offer.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`
+                : offer.description;
+
+              return (
+                <div
+                  key={offer.id}
+                  className="rounded-card border border-border bg-surface p-6"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      {job && (
+                        <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
+                          {job.category}
+                        </span>
+                      )}
+                      <h3 className="mt-2 text-lg font-semibold text-foreground">
+                        {job ? job.title : "İlan artık mevcut değil"}
+                      </h3>
+                    </div>
+                    <StatusBadge
+                      label={getOfferStatusLabel(offer.status)}
+                      tone={getOfferStatusTone(offer.status)}
+                    />
+                  </div>
+
+                  <p className="mt-3 text-lg font-semibold text-foreground">
+                    {formatMoney(offer.amount, offer.currency)}
+                  </p>
+
+                  <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
+                    <span className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      {offer.estimatedDuration}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      {formatJobDate(offer.createdAt)}
+                    </span>
+                  </div>
+
+                  {isLong ? (
+                    <details className="mt-3 break-words text-sm text-muted-foreground">
+                      <summary className="cursor-pointer list-none font-medium text-primary marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm">
+                        {preview} <span className="underline">Tamamını gör</span>
+                      </summary>
+                      <p className="mt-2 leading-relaxed">{offer.description}</p>
+                    </details>
+                  ) : (
+                    <p className="mt-3 flex items-start gap-2 break-words text-sm leading-relaxed text-muted-foreground">
+                      <FileText className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      {offer.description}
+                    </p>
+                  )}
+
+                  {job && (
+                    <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <Link
+                        href={`/ilanlar/${job.id}`}
+                        className="w-fit text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-sm"
+                      >
+                        İlan detayına git
+                      </Link>
+                      {offer.status === "pending" && (
+                        <button
+                          type="button"
+                          onClick={() => openWithdrawDialog(offer)}
+                          className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                        >
+                          Tekliften Vazgeç
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {revealedContact && <ContactInfoBlock contact={revealedContact.requester} />}
+
+                  {offer.status === "in_progress" && (
+                    <button
+                      type="button"
+                      onClick={() => openCompletionDialog(offer)}
+                      className="mt-4 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                    >
+                      Tamamlandı Olarak İşaretle
+                    </button>
+                  )}
+
+                  {offer.status === "completion_requested" && (
+                    <div className="mt-4 rounded-card border border-border bg-background p-4">
+                      <p className="text-sm font-semibold text-foreground">Tamamlanma onayı bekleniyor</p>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        Hizmet Alan&apos;ın onayı bekleniyor.
+                      </p>
+                      {offer.completionRequestedAt && (
+                        <CompletionCountdown deadlineIso={getCompletionDeadlineIso(offer.completionRequestedAt)} />
+                      )}
+                    </div>
+                  )}
+
+                  {offer.status === "completion_disputed" && (
+                    <p className="mt-4 break-words text-sm leading-relaxed text-danger">
+                      İtiraz edildi
+                      {offer.completionDisputeNote ? `: "${offer.completionDisputeNote}"` : "."} Hizmet
+                      Alan sonucu belirleyecek.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {completionTarget && (
         <RequestCompletionDialog

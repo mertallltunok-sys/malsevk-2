@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { MyOffersPanel } from "../../_components/my-offers-panel";
 
 export const metadata: Metadata = {
@@ -18,7 +19,16 @@ export default function TekliflerimPage() {
           edebilirsiniz.
         </p>
         <div className="mt-10">
-          <MyOffersPanel />
+          <Suspense
+            fallback={
+              <div
+                aria-hidden="true"
+                className="h-48 animate-pulse rounded-card border border-border bg-surface"
+              />
+            }
+          >
+            <MyOffersPanel />
+          </Suspense>
         </div>
       </div>
     </section>

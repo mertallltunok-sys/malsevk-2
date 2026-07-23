@@ -24,10 +24,6 @@ export function NotificationsPanel() {
     );
   }
 
-  if (session.role !== "hizmet-alan") {
-    return <AuthGateNotice message="Bu sayfa yalnızca Hizmet Alan kullanıcılar içindir." />;
-  }
-
   return <NotificationsList session={session} />;
 }
 

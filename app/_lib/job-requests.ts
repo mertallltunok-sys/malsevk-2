@@ -273,3 +273,31 @@ export function getJobRequestFilterTone(
       return "neutral";
   }
 }
+
+export type ProviderOfferFilter = "aktif" | "kabul-edildi" | "devam-eden" | "tamamlandi";
+
+/**
+ * Hizmet Veren'in "Verdiğim Teklifler" sayfasındaki sekme filtrelemesinin tek
+ * ortak doğruluk kaynağı — yukarıdaki `getJobRequestFilter`in Job-seviyesi
+ * (birden fazla teklifi birleştiren) muadili değil, TEK bir teklifin kendi
+ * durumuna bakan Offer-seviyesi hali. IN_PROGRESS_OFFER_STATUSES/
+ * COMPLETED_OFFER_STATUSES'ı (yukarıda tanımlı, tek doğruluk kaynağı)
+ * doğrudan kullanır, yeni bir status kümesi icat etmez.
+ *
+ * "accepted" burada `getJobRequestFilter`in aksine "devam-eden" ile
+ * BİRLEŞTİRİLMEZ, kendi başına "kabul-edildi" sekmesidir — Job sahibi
+ * (Hizmet Alan) için "kabul edildi ama iş başlamadı" ilanın artık
+ * düzenlenemez/silinemez olması dışında görünürlük açısından önemli
+ * değildi, ama teklif sahibi (Hizmet Veren) için bu ayrı, anlamlı bir
+ * sekmedir (bkz. my-offers-panel.tsx). "pending"/"rejected"/"withdrawn"/
+ * "agreement_failed"/"cancelled" (henüz kabul edilmemiş ya da olumsuz
+ * sonuçlanmış teklifler) hepsi "aktif" sekmesine düşer — tıpkı
+ * `getJobRequestFilter`in "aktif"i gibi, kesin bir sonuca varmamış ya da
+ * kabul dışında sonuçlanmış her şeyin toplandığı sekme.
+ */
+export function getProviderOfferFilter(offer: Offer): ProviderOfferFilter {
+  if (offer.status === "accepted") return "kabul-edildi";
+  if (IN_PROGRESS_OFFER_STATUSES.includes(offer.status)) return "devam-eden";
+  if (COMPLETED_OFFER_STATUSES.includes(offer.status)) return "tamamlandi";
+  return "aktif";
+}
