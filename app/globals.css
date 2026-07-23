@@ -88,8 +88,11 @@ body {
  * kaynaklanabilecek yatay taşmanın sayfayı yana kaydırmasını engelleyen ek
  * bir güvenlik ağıdır, kök neden düzeltmesinin YERİNE değil.
  */
-html,
-body {
+html {
   max-width: 100%;
   overflow-x: hidden;
+}
+
+body {
+  max-width: 100%;
 }
