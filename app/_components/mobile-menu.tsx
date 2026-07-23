@@ -2,7 +2,8 @@
 
 import { Menu, X } from "lucide-react";
 import Link from "next/link";
-import type { MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { useDropdown } from "../_lib/use-dropdown";
 import { useScrollLock } from "../_lib/use-scroll-lock";
 import { HeaderAuthActions } from "./header-auth-actions";
@@ -12,15 +13,46 @@ type NavLink = { href: string; label: string };
 const createJobCtaClass =
   "mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
+// Panel açılana kadar (veya buton henüz ölçülemediyse) kullanılan tek
+// kare süren yedek değer — panel o an zaten `opacity-0` olduğundan görünür
+// değildir, bu yüzden 1px'lik hassasiyet önemli değil.
+const FALLBACK_HEADER_HEIGHT_PX = 64;
+// Hamburger butonunun alt kenarı ile panelin üst kenarı arasındaki, tasarıma
+// uygun küçük boşluk.
+const PANEL_GAP_PX = 4;
+
+// `document.body` portal hedefi yalnızca client'ta var — SSR'da hiç
+// render edilmemeli (hydration mismatch olmaması için sunucu anlık
+// görüntüsü hep `false` döner). `useEffect` + `setState` yerine
+// `useSyncExternalStore` kullanılıyor çünkü proje ESLint kuralı
+// (`react-hooks/set-state-in-effect`) effect gövdesinde senkron
+// `setState` çağrısını engelliyor — bu hiç değişmeyen bir "abonelik"
+// olduğu için subscribe hiçbir zaman tetiklenmez.
+function subscribeNever() {
+  return () => {};
+}
+function getIsMountedSnapshot() {
+  return true;
+}
+function getIsMountedServerSnapshot() {
+  return false;
+}
+
 /**
- * Header artık layout.tsx içinde yaşadığı için sayfa geçişlerinde
- * yeniden monte olmuyor. Menü, linke tıklayınca, dışına/karartılmış alana
+ * Header artık layout.tsx içinde yaşadığı için sayfa geçişlerinde yeniden
+ * monte olmuyor. Menü, linke tıklayınca, dışına/karartılmış alana
  * tıklayınca veya Escape'e basınca kapanır (kapatma mantığının çoğu
- * use-dropdown.ts'te — bu hook değiştirilmedi, bildirim zili ve profil
- * menüsü de aynı hook'u kullanıyor). Panel + perde her zaman DOM'da kalır
- * (yalnızca opaklık/transform ile gizlenir) ki kapanış da açılış gibi
- * CSS geçişiyle yumuşak olsun; `inert`, kapalıyken içindeki linklerin
- * klavye/screen-reader ile erişilememesini sağlar.
+ * use-dropdown.ts'te — bildirim zili ve profil menüsü de aynı hook'u
+ * kullanıyor). Panel + perde `document.body`'ye React portal ile render
+ * edilir ki header'ın kendi `position`/`overflow`/`backdrop-filter`
+ * zincirinden (containing-block bakımından) TAMAMEN bağımsız, saf
+ * viewport-fixed konumlansınlar — bu yüzden `useDropdown`'a `portalRef`
+ * `extraRefs` olarak veriliyor: portal içeriği artık gerçek DOM'da
+ * `containerRef`'in (hamburger butonu) çocuğu DEĞİL, yoksa dışına-tıklama
+ * algısı panelin kendi içeriğine tıklamayı da "dışarı" sayardı. Üst konum
+ * sabit bir `rem` tahmini değil, her açılışta ve pencere yeniden
+ * boyutlanırken/yön değişirken hamburger butonunun gerçek
+ * `getBoundingClientRect().bottom` değeri + küçük bir boşlukla ölçülür.
  */
 export function MobileMenu({
   navLinks,
@@ -29,8 +61,37 @@ export function MobileMenu({
   navLinks: NavLink[];
   showCreateJobCta?: boolean;
 }) {
-  const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
+  const portalRef = useRef<HTMLDivElement>(null);
+  // Ref nesnesinin kendisi (useRef sayesinde) render'lar arasında zaten
+  // sabit — bu diziyi useMemo ile sabitlemek, useDropdown'un içindeki
+  // effect'in yalnızca `open` gerçekten değiştiğinde yeniden abone
+  // olmasını sağlar (her render'da yeni bir dizi literal'i geçmek yerine).
+  const extraRefs = useMemo(() => [portalRef], []);
+  const { open, setOpen, containerRef } = useDropdown<HTMLButtonElement>(extraRefs);
   useScrollLock(open);
+  const mounted = useSyncExternalStore(
+    subscribeNever,
+    getIsMountedSnapshot,
+    getIsMountedServerSnapshot,
+  );
+  const [panelTop, setPanelTop] = useState(FALLBACK_HEADER_HEIGHT_PX);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function measure() {
+      const bottom = containerRef.current?.getBoundingClientRect().bottom;
+      setPanelTop(bottom != null ? Math.round(bottom) + PANEL_GAP_PX : FALLBACK_HEADER_HEIGHT_PX);
+    }
+
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, [open, containerRef]);
 
   function closeIfLinkClicked(event: MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
@@ -38,8 +99,9 @@ export function MobileMenu({
   }
 
   return (
-    <div ref={containerRef} className="contents">
+    <>
       <button
+        ref={containerRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="true"
@@ -55,41 +117,53 @@ export function MobileMenu({
         <span className="sr-only">{open ? "Menüyü kapat" : "Menüyü aç"}</span>
       </button>
 
-      {/* Karartılmış perde: yalnızca aşağıya, header'ın altını kaplar. */}
-      <div
-        aria-hidden="true"
-        onClick={() => setOpen(false)}
-        className={`fixed inset-x-0 top-16 bottom-0 z-50 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none md:hidden ${
-          open ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-      />
+      {mounted &&
+        createPortal(
+          <div ref={portalRef} className="contents">
+            {/* Karartılmış perde: header'ın gerçek alt kenarından başlar,
+                sayfanın geri kalanını kaplar. Header'a değil, doğrudan
+                viewport'a bağlıdır. */}
+            <div
+              aria-hidden="true"
+              onClick={() => setOpen(false)}
+              style={{ top: panelTop }}
+              className={`fixed inset-x-0 bottom-0 z-40 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none md:hidden ${
+                open ? "opacity-100" : "pointer-events-none opacity-0"
+              }`}
+            />
 
-      <div
-        id="mobil-menu-panel"
-        inert={!open}
-        onClick={closeIfLinkClicked}
-        className={`absolute inset-x-0 top-16 z-50 max-h-[calc(100vh-4rem)] overflow-y-auto overscroll-contain border-b border-border bg-surface shadow-md transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none md:hidden ${
-          open ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-2 opacity-0"
-        }`}
-      >
-        <div className="flex flex-col gap-1 p-4">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-background hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            <div
+              id="mobil-menu-panel"
+              role="navigation"
+              aria-label="Mobil menü"
+              inert={!open}
+              onClick={closeIfLinkClicked}
+              style={{ top: panelTop, maxHeight: `calc(100dvh - ${panelTop}px)` }}
+              className={`fixed inset-x-0 z-50 overflow-y-auto overscroll-contain border-b border-border bg-surface shadow-md transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none md:hidden ${
+                open ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0"
+              }`}
             >
-              {link.label}
-            </Link>
-          ))}
-          {showCreateJobCta && (
-            <Link href="/hizmet-talebi-olustur" className={createJobCtaClass}>
-              Hizmet Talebi Oluştur
-            </Link>
-          )}
-          <HeaderAuthActions layout="mobile" />
-        </div>
-      </div>
-    </div>
+              <div className="flex flex-col gap-1 p-4">
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-background hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+                {showCreateJobCta && (
+                  <Link href="/hizmet-talebi-olustur" className={createJobCtaClass}>
+                    Hizmet Talebi Oluştur
+                  </Link>
+                )}
+                <HeaderAuthActions layout="mobile" />
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
