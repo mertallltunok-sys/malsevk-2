@@ -1,16 +1,20 @@
 "use client";
 
-import { Check, X } from "lucide-react";
+import { Building2, Check, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_lib/offers";
+import { getProviderProfileSummary } from "../_lib/provider-profile";
 import type { Job, Offer, Session, UserRole } from "../_lib/types";
+import { useAllOffers } from "../_lib/use-offers";
+import { useAllRatings } from "../_lib/use-ratings";
 import { findUserById } from "../_lib/users";
 import { ContactInfoBlock } from "./contact-info-block";
 import { JobRatingModal } from "./job-rating-modal";
 import { OfferOutcomePanel } from "./offer-outcome-panel";
+import { ProviderProfileDrawer } from "./provider-profile-drawer";
 import { StatusBadge } from "./status-badge";
 
 function getRoleLabel(role: UserRole): string {
@@ -32,9 +36,12 @@ export function IncomingOfferCard({
   const [error, setError] = useState<string | null>(null);
   const [ratingModalOffer, setRatingModalOffer] = useState<Offer | null>(null);
   const [justRated, setJustRated] = useState(false);
+  const [showProviderProfile, setShowProviderProfile] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const provider = findUserById(offer.providerId);
   const revealedContact = getRevealedContactForOffer(session, offer.id);
+  const allOffers = useAllOffers();
+  const allRatings = useAllRatings();
 
   useEffect(() => {
     if (!highlighted || !cardRef.current) return;
@@ -74,6 +81,14 @@ export function IncomingOfferCard({
               ({getRoleLabel("hizmet-veren")})
             </span>
           </p>
+          <button
+            type="button"
+            onClick={() => setShowProviderProfile(true)}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          >
+            <Building2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Hizmet Veren Profili
+          </button>
         </div>
         <StatusBadge label={getOfferStatusLabel(offer.status)} tone={getOfferStatusTone(offer.status)} />
       </div>
@@ -144,6 +159,16 @@ export function IncomingOfferCard({
             setRatingModalOffer(null);
             if (submitted) setJustRated(true);
           }}
+        />
+      )}
+
+      {showProviderProfile && (
+        <ProviderProfileDrawer
+          providerName={provider ? provider.name : "Hizmet Veren"}
+          profile={provider?.providerProfile}
+          summary={getProviderProfileSummary(offer.providerId, allOffers, allRatings)}
+          joinedAtIso={provider?.createdAt}
+          onClose={() => setShowProviderProfile(false)}
         />
       )}
     </div>

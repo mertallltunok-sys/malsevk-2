@@ -7,6 +7,7 @@ import { findUserById } from "../_lib/users";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { handleLogout } from "./profile-menu";
 import { ProfileInfoCard } from "./profile-info-card";
+import { ProviderProfileEditor } from "./provider-profile-editor";
 
 function ComingSoonAction({
   title,
@@ -75,6 +76,10 @@ export function AccountSettingsContent() {
           <p className="rounded-card border border-border bg-surface p-8 text-center text-sm text-muted-foreground">
             Kullanıcı bilgileri bulunamadı.
           </p>
+        )}
+
+        {user && session.role === "hizmet-veren" && (
+          <ProviderProfileEditor session={session} user={user} />
         )}
 
         <div className="rounded-card border border-border bg-surface p-6">

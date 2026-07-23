@@ -6,6 +6,25 @@ export type Session = {
   role: UserRole;
 };
 
+/**
+ * Yalnızca hizmet-veren kullanıcılarda anlamlı, tamamen opsiyonel bir
+ * profil eki (bkz. users.ts#StoredUser). Kullanıcı kaydını oluştururken
+ * zorunlu değildir — hiç doldurulmamışsa StoredUser.providerProfile hiç
+ * yoktur, sahte/varsayılan bir profil üretilmez.
+ */
+export type ProviderProfile = {
+  companyName: string;
+  /** photo-blob-store.ts (IndexedDB) içindeki logo dosyasının anahtarı; yoksa logo yüklenmemiştir. */
+  logoStorageKey?: string;
+  bio: string;
+  /** 1900 ile mevcut yıl arasında olmalıdır (bkz. provider-profile.ts); belirtilmemişse yoktur. */
+  foundedYear?: number;
+  /** İl adları (bkz. turkey-locations.ts#getProvinces) — hizmet verilen bölgeler. */
+  regions: string[];
+  /** jobs.ts#SERVICE_CATEGORIES içinden seçilmiş uzmanlık alanları. */
+  expertise: string[];
+};
+
 export type Currency = "TRY" | "USD";
 
 export type JobStatus = "yayinda" | "tamamlandi" | "iptal";
