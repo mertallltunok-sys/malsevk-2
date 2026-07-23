@@ -324,25 +324,26 @@ export function MyOffersPanel() {
             )}
 
             {job && (
-              <Link
-                href={`/ilanlar/${job.id}`}
-                className="mt-4 inline-block text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-sm"
-              >
-                İlan detayına git
-              </Link>
+              <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <Link
+                  href={`/ilanlar/${job.id}`}
+                  className="w-fit text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-sm"
+                >
+                  İlan detayına git
+                </Link>
+                {offer.status === "pending" && (
+                  <button
+                    type="button"
+                    onClick={() => openWithdrawDialog(offer)}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                  >
+                    Tekliften Vazgeç
+                  </button>
+                )}
+              </div>
             )}
 
             {revealedContact && <ContactInfoBlock contact={revealedContact.requester} />}
-
-            {offer.status === "pending" && (
-              <button
-                type="button"
-                onClick={() => openWithdrawDialog(offer)}
-                className="mt-4 inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-              >
-                Tekliften Vazgeç
-              </button>
-            )}
 
             {offer.status === "in_progress" && (
               <button
