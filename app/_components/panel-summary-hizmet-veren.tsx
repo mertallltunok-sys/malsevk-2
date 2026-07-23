@@ -55,21 +55,21 @@ export function PanelSummaryHizmetVeren({
           label="Kabul Edilen Teklifler"
           description="Kabul edilen teklif sayısı"
           value={summary.acceptedOfferCount}
-          comingSoon
+          href="/panel/tekliflerim?durum=kabul-edildi"
         />
         <PanelStatCard
           icon={Clock}
           label="Devam Eden İşler"
           description="Devam eden iş sayısı"
           value={summary.inProgressCount}
-          comingSoon
+          href="/panel/tekliflerim?durum=devam-eden"
         />
         <PanelStatCard
           icon={CheckCircle2}
           label="Tamamlanan İşler"
           description="Tamamlanan iş sayısı"
           value={summary.completedCount}
-          comingSoon
+          href="/panel/tekliflerim?durum=tamamlandi"
         />
         <PanelStatCard
           icon={Gauge}
