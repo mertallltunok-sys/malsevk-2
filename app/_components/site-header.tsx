@@ -7,15 +7,8 @@ import { HeaderAuthActions } from "./header-auth-actions";
 import { MobileMenu } from "./mobile-menu";
 import { NotificationBell } from "./notification-bell";
 
-const createJobCtaClass =
-  "inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2";
-
 export function SiteHeader() {
-  // Yalnızca Hizmet Alan oturumunda gösterilir (bkz. header-auth-actions.tsx
-  // ile aynı useSession() deseni) — giriş yapılmamışsa (session null) veya
-  // Hizmet Veren ise bu bilerek false kalır, mevcut düzen hiç değişmez.
   const session = useSession();
-  const showCreateJobCta = session?.role === "hizmet-alan";
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-surface/95 backdrop-blur">
@@ -36,14 +29,6 @@ export function SiteHeader() {
             </span>
           </span>
         </Link>
-
-        {showCreateJobCta && (
-          <nav aria-label="Ana menü" className="hidden items-center md:flex">
-            <Link href="/hizmet-talebi-olustur" className={createJobCtaClass}>
-              Hizmet Talebi Oluştur
-            </Link>
-          </nav>
-        )}
 
         <HeaderAuthActions layout="desktop" />
 
