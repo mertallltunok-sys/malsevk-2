@@ -26,7 +26,7 @@ export function HeaderAuthActions({ layout }: { layout: "desktop" | "mobile" }) 
         className={
           layout === "desktop"
             ? "hidden items-center gap-3 md:flex"
-            : "mt-2 flex flex-col gap-2"
+            : "flex flex-col gap-2"
         }
       >
         <ButtonLink href="/giris-yap" variant="secondary">

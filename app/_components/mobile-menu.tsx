@@ -1,17 +1,11 @@
 "use client";
 
 import { Menu, X } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useDropdown } from "../_lib/use-dropdown";
 import { useScrollLock } from "../_lib/use-scroll-lock";
 import { HeaderAuthActions } from "./header-auth-actions";
-
-type NavLink = { href: string; label: string };
-
-const createJobCtaClass =
-  "mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 // Panel açılana kadar (veya buton henüz ölçülemediyse) kullanılan tek
 // kare süren yedek değer — panel o an zaten `opacity-0` olduğundan görünür
@@ -53,14 +47,13 @@ function getIsMountedServerSnapshot() {
  * sabit bir `rem` tahmini değil, her açılışta ve pencere yeniden
  * boyutlanırken/yön değişirken hamburger butonunun gerçek
  * `getBoundingClientRect().bottom` değeri + küçük bir boşlukla ölçülür.
+ *
+ * İçerik yalnızca hesap işlemlerinden ibarettir (bkz. HeaderAuthActions'ın
+ * "mobile" dalı) — genel site navigasyonu (Nasıl Çalışır/Hizmetler/İlanlar,
+ * Hizmet Talebi Oluştur) burada YOKTUR; masaüstündeki `<nav>` ile
+ * karıştırılmamalı, o `site-header.tsx`'te ayrı ve değişmeden duruyor.
  */
-export function MobileMenu({
-  navLinks,
-  showCreateJobCta = false,
-}: {
-  navLinks: NavLink[];
-  showCreateJobCta?: boolean;
-}) {
+export function MobileMenu() {
   const portalRef = useRef<HTMLDivElement>(null);
   // Ref nesnesinin kendisi (useRef sayesinde) render'lar arasında zaten
   // sabit — bu diziyi useMemo ile sabitlemek, useDropdown'un içindeki
@@ -144,20 +137,6 @@ export function MobileMenu({
               }`}
             >
               <div className="flex flex-col gap-1 p-4">
-                {navLinks.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-background hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-                {showCreateJobCta && (
-                  <Link href="/hizmet-talebi-olustur" className={createJobCtaClass}>
-                    Hizmet Talebi Oluştur
-                  </Link>
-                )}
                 <HeaderAuthActions layout="mobile" />
               </div>
             </div>

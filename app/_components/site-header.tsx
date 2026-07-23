@@ -72,7 +72,7 @@ export function SiteHeader() {
             MobileMenu'nün panelinin içinde kalıyor, profil menüsü için). */}
         <div className="flex items-center gap-1 md:hidden">
           {session && <NotificationBell session={session} />}
-          <MobileMenu navLinks={navLinks} showCreateJobCta={showCreateJobCta} />
+          <MobileMenu />
         </div>
       </div>
     </header>

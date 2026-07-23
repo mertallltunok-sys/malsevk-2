@@ -138,7 +138,7 @@ export function ProfileMenu({
 
   if (layout === "mobile") {
     return (
-      <div className="mt-2 flex flex-col gap-1 border-t border-border pt-3">
+      <div className="flex flex-col gap-1">
         <div className="px-1 pb-2">
           <RoleLabel session={session} />
         </div>
