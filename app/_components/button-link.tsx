@@ -13,8 +13,24 @@ const variantClass = {
     "border border-primary-foreground/30 text-primary-foreground hover:border-primary-foreground/60",
 } as const;
 
+export type ButtonVariant = keyof typeof variantClass;
+
+/**
+ * ButtonLink'in kullandığı sınıf birleştirme mantığı — `<a>` dışında bir
+ * elemente (ör. gerçek navigasyon yerine bir modal açması gereken
+ * `<button>`) aynı görsel stili vermek gerektiğinde de buradan çağrılır,
+ * sınıf string'i bir daha elle yazılmaz (bkz. job-listings-auth-gate.tsx'i
+ * tetikleyen butonlar).
+ */
+export function buttonClassName(
+  variant: ButtonVariant = "primary",
+  className?: string,
+): string {
+  return [baseClass, variantClass[variant], className].filter(Boolean).join(" ");
+}
+
 type ButtonLinkProps = ComponentProps<typeof Link> & {
-  variant?: keyof typeof variantClass;
+  variant?: ButtonVariant;
 };
 
 export function ButtonLink({
@@ -22,9 +38,5 @@ export function ButtonLink({
   className,
   ...props
 }: ButtonLinkProps) {
-  const classes = [baseClass, variantClass[variant], className]
-    .filter(Boolean)
-    .join(" ");
-
-  return <Link {...props} className={classes} />;
+  return <Link {...props} className={buttonClassName(variant, className)} />;
 }

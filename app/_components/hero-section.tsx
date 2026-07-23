@@ -10,8 +10,10 @@ import {
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
-import { ButtonLink } from "./button-link";
+import { useState } from "react";
+import { ButtonLink, buttonClassName } from "./button-link";
 import { HeroVisualPanel } from "./hero-visual-panel";
+import { JobListingsAuthGateDialog } from "./job-listings-auth-gate";
 import { useSession } from "../_lib/use-session";
 
 const trustPoints = [
@@ -78,9 +80,9 @@ const heroFeatures: Record<"hizmet-alan" | "hizmet-veren", HeroFeature[]> = {
  */
 const heroCopy = {
   visitor: {
-    title: "Yükünüzü güvenle taşıyacak doğru ekibi bulun",
+    title: "Lojistik operasyonlarınız için doğru hizmeti tek platformda bulun.",
     description:
-      "MALSEVK, hizmet alan firmalar ile uzman hizmet verenleri güvenli, hızlı ve kolay şekilde buluşturur.",
+      "MALSEVK, hizmet alan firmalar ile uzman hizmet verenleri güvenli, hızlı ve şeffaf şekilde buluşturan profesyonel lojistik hizmet platformudur.",
   },
   "hizmet-alan": {
     title: "Lojistik hizmet ihtiyacınızı kolayca karşılayın",
@@ -98,6 +100,7 @@ export function HeroSection() {
   const session = useSession();
   const audience = session?.role ?? "visitor";
   const copy = heroCopy[audience];
+  const [showJobsGate, setShowJobsGate] = useState(false);
 
   return (
     <section className="border-b border-border bg-background">
@@ -128,9 +131,13 @@ export function HeroSection() {
                 <ButtonLink href="/hizmet-talebi-olustur" variant="primary">
                   Hizmet Talebi Oluştur
                 </ButtonLink>
-                <ButtonLink href="/ilanlar" variant="secondary">
+                <button
+                  type="button"
+                  onClick={() => setShowJobsGate(true)}
+                  className={buttonClassName("secondary")}
+                >
                   İş İlanlarını İncele
-                </ButtonLink>
+                </button>
               </>
             )}
           </div>
@@ -169,6 +176,10 @@ export function HeroSection() {
 
         <HeroVisualPanel />
       </div>
+
+      {showJobsGate && (
+        <JobListingsAuthGateDialog onClose={() => setShowJobsGate(false)} />
+      )}
     </section>
   );
 }
