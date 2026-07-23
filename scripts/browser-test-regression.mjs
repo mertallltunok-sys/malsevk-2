@@ -26,12 +26,15 @@ async function main() {
   });
   page.on("pageerror", (err) => consoleErrors.push(String(err)));
 
-  // 1) İlan listeleme sayfası hâlâ çalışıyor
+  // 1) İlan listeleme sayfası: oturum açılmamışsa artık giriş-gerekli kartı
+  // gösterir (bkz. guest-access-card.tsx) — "İş İlanlarını İncele" CTA'ları
+  // artık modal değil, doğrudan bu sayfaya yönlendirir. Gerçek listelemenin
+  // hâlâ çalıştığı adım 3'ten sonra (Hizmet Veren girişiyle) doğrulanır.
   await page.goto(`${BASE_URL}/ilanlar`);
   await assert.doesNotReject(
-    page.getByText("Konteyner Sahasında Lashing Operasyonu").waitFor({ state: "visible", timeout: 10000 }),
+    page.getByText("İlanları görüntülemek için giriş yapmalısınız.").waitFor({ state: "visible", timeout: 10000 }),
   );
-  ok("İlan listeleme sayfası (/ilanlar) sabit örnek ilanları gösteriyor");
+  ok("İlan listeleme sayfası (/ilanlar) oturumsuz kullanıcıda giriş-gerekli kartı gösteriyor");
 
   // 2) Eski/fotoğrafsız bir ilanın detay sayfası çökmeden açılıyor, boş durum gösteriyor
   await page.goto(`${BASE_URL}/ilanlar/ilan-001`);
@@ -61,6 +64,13 @@ async function main() {
     page.getByText("Teklifiniz başarıyla gönderildi.").waitFor({ state: "visible", timeout: 10000 }),
   );
   ok("Hizmet Veren, sabit bir ilana teklif verebiliyor (teklif akışı bozulmamış)");
+
+  // 3b) Oturum açıkken /ilanlar hâlâ gerçek listelemeyi gösteriyor (gate değil)
+  await page.goto(`${BASE_URL}/ilanlar`);
+  await assert.doesNotReject(
+    page.getByText("Konteyner Sahasında Lashing Operasyonu").waitFor({ state: "visible", timeout: 10000 }),
+  );
+  ok("Oturum açık Hizmet Veren için /ilanlar gerçek listelemeyi gösteriyor");
 
   // 4) Rol yetkisi: Hizmet Veren ilan oluşturma formunu göremez (fotoğraf öncesi de böyleydi)
   await page.goto(`${BASE_URL}/hizmet-talebi-olustur`);

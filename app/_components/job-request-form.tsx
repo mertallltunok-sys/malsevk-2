@@ -18,11 +18,16 @@ import {
 } from "../_lib/turkey-locations";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
+import { GuestAccessCard, PageCardShell } from "./guest-access-card";
 import { JobPhotoUpload, type ReadyJobPhoto } from "./job-photo-upload";
 import { SearchableSelect } from "./searchable-select";
 
 const DESCRIPTION_MAX_LENGTH = 1000;
 const OPERATION_DETAILS_MAX_LENGTH = 1000;
+
+const PAGE_TITLE = "Hizmet Talebi Oluştur";
+const PAGE_DESCRIPTION =
+  "İhtiyacınızı tanımlayın; uzman hizmet verenler ilanınızı inceleyip teklif göndersin.";
 
 export function JobRequestForm() {
   const session = useSession();
@@ -187,16 +192,21 @@ export function JobRequestForm() {
 
   if (!session) {
     return (
-      <AuthGateNotice
-        message="İlan oluşturmak için giriş yapmalısınız."
-        loginRedirect="/hizmet-talebi-olustur"
+      <GuestAccessCard
+        pageTitle={PAGE_TITLE}
+        pageDescription={PAGE_DESCRIPTION}
+        cardTitle="İlan oluşturmak için giriş yapmalısınız."
+        cardDescription="Hizmet talebi oluşturmak ve uzman hizmet verenlerden teklif alabilmek için hesabınıza giriş yapın veya yeni bir hesap oluşturun."
+        redirectTo="/hizmet-talebi-olustur"
       />
     );
   }
 
   if (session.role !== "hizmet-alan") {
     return (
-      <AuthGateNotice message="Yalnızca Hizmet Alan kullanıcılar ilan oluşturabilir." />
+      <PageCardShell title={PAGE_TITLE} description={PAGE_DESCRIPTION}>
+        <AuthGateNotice message="Yalnızca Hizmet Alan kullanıcılar ilan oluşturabilir." />
+      </PageCardShell>
     );
   }
 
@@ -247,7 +257,8 @@ export function JobRequestForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+    <PageCardShell title={PAGE_TITLE} description={PAGE_DESCRIPTION}>
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
       <div className="grid gap-6 sm:grid-cols-2">
         <div>
           <label htmlFor={categoryId} className="text-sm font-medium text-foreground">
@@ -582,6 +593,7 @@ export function JobRequestForm() {
             ? "Fotoğraflar işleniyor..."
             : "İlanı Yayınla"}
       </button>
-    </form>
+      </form>
+    </PageCardShell>
   );
 }

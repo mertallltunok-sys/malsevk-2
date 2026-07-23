@@ -10,10 +10,8 @@ import {
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
-import { ButtonLink, buttonClassName } from "./button-link";
+import { ButtonLink } from "./button-link";
 import { HeroVisualPanel } from "./hero-visual-panel";
-import { JobListingsAuthGateDialog } from "./job-listings-auth-gate";
 import { useSession } from "../_lib/use-session";
 
 const trustPoints = [
@@ -100,7 +98,6 @@ export function HeroSection() {
   const session = useSession();
   const audience = session?.role ?? "visitor";
   const copy = heroCopy[audience];
-  const [showJobsGate, setShowJobsGate] = useState(false);
 
   return (
     <section className="border-b border-border bg-background">
@@ -131,13 +128,9 @@ export function HeroSection() {
                 <ButtonLink href="/hizmet-talebi-olustur" variant="primary">
                   Hizmet Talebi Oluştur
                 </ButtonLink>
-                <button
-                  type="button"
-                  onClick={() => setShowJobsGate(true)}
-                  className={buttonClassName("secondary")}
-                >
+                <ButtonLink href="/ilanlar" variant="secondary">
                   İş İlanlarını İncele
-                </button>
+                </ButtonLink>
               </>
             )}
           </div>
@@ -176,10 +169,6 @@ export function HeroSection() {
 
         <HeroVisualPanel />
       </div>
-
-      {showJobsGate && (
-        <JobListingsAuthGateDialog onClose={() => setShowJobsGate(false)} />
-      )}
     </section>
   );
 }

@@ -7,11 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function IlanlarPage() {
-  return (
-    <section className="bg-background">
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <JobListingScreen />
-      </div>
-    </section>
-  );
+  return <JobListingScreen />;
 }

@@ -1,6 +1,5 @@
 import { Lock } from "lucide-react";
-import Link from "next/link";
-import { buttonClassName } from "./button-link";
+import { ButtonLink } from "./button-link";
 
 export function AuthGateNotice({
   message,
@@ -15,8 +14,8 @@ export function AuthGateNotice({
   loginRedirect?: string;
   /**
    * Verilirse "Giriş Yap"ın yanında ikincil bir "Kayıt Ol" bağlantısı da
-   * gösterilir (bkz. job-listings-auth-gate.tsx) — mevcut 9 çağrı yerinden
-   * hiçbiri bunu geçmediği için onların görünümü hiç değişmez.
+   * gösterilir (bkz. guest-access-card.tsx#GuestAccessCard) — bunu
+   * geçmeyen çağrı yerlerinin görünümü hiç değişmez.
    */
   registerRedirect?: string;
   action?: { label: string; href: string };
@@ -31,27 +30,24 @@ export function AuthGateNotice({
       {(loginRedirect || registerRedirect) && (
         <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
           {loginRedirect && (
-            <Link
-              href={`/giris-yap?redirect=${encodeURIComponent(loginRedirect)}`}
-              className={buttonClassName("primary")}
-            >
+            <ButtonLink href={`/giris-yap?redirect=${encodeURIComponent(loginRedirect)}`}>
               Giriş Yap
-            </Link>
+            </ButtonLink>
           )}
           {registerRedirect && (
-            <Link
+            <ButtonLink
               href={`/giris-yap?mode=kayit&redirect=${encodeURIComponent(registerRedirect)}`}
-              className={buttonClassName("secondary")}
+              variant="secondary"
             >
               Kayıt Ol
-            </Link>
+            </ButtonLink>
           )}
         </div>
       )}
       {action && (
-        <Link href={action.href} className={`mt-4 ${buttonClassName("primary")}`}>
+        <ButtonLink href={action.href} className="mt-4">
           {action.label}
-        </Link>
+        </ButtonLink>
       )}
     </div>
   );

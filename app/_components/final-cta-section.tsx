@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { ButtonLink, buttonClassName } from "./button-link";
-import { JobListingsAuthGateDialog } from "./job-listings-auth-gate";
+import { ButtonLink } from "./button-link";
 import { useSession } from "../_lib/use-session";
 
 /**
@@ -14,7 +12,6 @@ import { useSession } from "../_lib/use-session";
  */
 export function FinalCtaSection() {
   const session = useSession();
-  const [showJobsGate, setShowJobsGate] = useState(false);
   if (session) return null;
 
   return (
@@ -39,20 +36,16 @@ export function FinalCtaSection() {
             >
               Hizmet Talebi Oluştur
             </ButtonLink>
-            <button
-              type="button"
-              onClick={() => setShowJobsGate(true)}
-              className={buttonClassName("secondary-on-dark", "w-full sm:w-auto")}
+            <ButtonLink
+              href="/ilanlar"
+              variant="secondary-on-dark"
+              className="w-full sm:w-auto"
             >
               İş İlanlarını İncele
-            </button>
+            </ButtonLink>
           </div>
         </div>
       </div>
-
-      {showJobsGate && (
-        <JobListingsAuthGateDialog onClose={() => setShowJobsGate(false)} />
-      )}
     </section>
   );
 }
