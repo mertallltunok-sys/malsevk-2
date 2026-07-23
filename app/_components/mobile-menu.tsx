@@ -49,9 +49,10 @@ function getIsMountedServerSnapshot() {
  * `getBoundingClientRect().bottom` değeri + küçük bir boşlukla ölçülür.
  *
  * İçerik yalnızca hesap işlemlerinden ibarettir (bkz. HeaderAuthActions'ın
- * "mobile" dalı) — genel site navigasyonu (Nasıl Çalışır, Hizmet Talebi
- * Oluştur) burada YOKTUR; masaüstündeki `<nav>` ile karıştırılmamalı, o
- * `site-header.tsx`'te ayrı ve değişmeden duruyor.
+ * "mobile" dalı) — üst navigasyon bağlantısı (metin linki) hiç yok; yalnızca
+ * Hizmet Alan oturumunda görünen "Hizmet Talebi Oluştur" CTA'sı burada değil,
+ * `site-header.tsx`'teki masaüstü-özel `<nav>` içinde ayrı ve değişmeden
+ * duruyor.
  */
 export function MobileMenu() {
   const portalRef = useRef<HTMLDivElement>(null);

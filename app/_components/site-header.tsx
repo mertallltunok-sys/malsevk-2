@@ -7,11 +7,6 @@ import { HeaderAuthActions } from "./header-auth-actions";
 import { MobileMenu } from "./mobile-menu";
 import { NotificationBell } from "./notification-bell";
 
-const navLinks = [{ href: "/#nasil-calisir", label: "Nasıl Çalışır" }];
-
-const navLinkClass =
-  "rounded-sm text-sm font-medium text-foreground/80 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2";
-
 const createJobCtaClass =
   "inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2";
 
@@ -42,21 +37,13 @@ export function SiteHeader() {
           </span>
         </Link>
 
-        <nav
-          aria-label="Ana menü"
-          className="hidden items-center gap-8 md:flex"
-        >
-          {navLinks.map((link) => (
-            <Link key={link.href} href={link.href} className={navLinkClass}>
-              {link.label}
-            </Link>
-          ))}
-          {showCreateJobCta && (
+        {showCreateJobCta && (
+          <nav aria-label="Ana menü" className="hidden items-center md:flex">
             <Link href="/hizmet-talebi-olustur" className={createJobCtaClass}>
               Hizmet Talebi Oluştur
             </Link>
-          )}
-        </nav>
+          </nav>
+        )}
 
         <HeaderAuthActions layout="desktop" />
 
