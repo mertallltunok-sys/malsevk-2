@@ -5,7 +5,11 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
-import { getProviderOfferFilter, type ProviderOfferFilter } from "../_lib/job-requests";
+import {
+  getProviderOfferFilter,
+  getProviderOffersTabHref,
+  type ProviderOfferFilter,
+} from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import {
@@ -188,9 +192,7 @@ const EMPTY_MESSAGES: Record<TabKey, string> = {
   tamamlandi: "Tamamlanan işiniz bulunmuyor.",
 };
 
-function tabHref(key: TabKey): string {
-  return key === "aktif" ? "/panel/tekliflerim" : `/panel/tekliflerim?durum=${key}`;
-}
+const tabHref = getProviderOffersTabHref;
 
 export function MyOffersPanel() {
   const session = useSession();

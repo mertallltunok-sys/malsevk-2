@@ -1,3 +1,4 @@
+import { getProviderOfferNotificationHref } from "./job-requests";
 import type { Job, Offer, Session } from "./types";
 
 export type NotificationType =
@@ -63,6 +64,18 @@ export type AppNotification = {
  *    "tamamlanma_onaylandi" + Hizmet Alan'ın itiraz ettiği tamamlanma
  *    talebi için "tamamlanma_itiraz_edildi" + itirazın iptalle
  *    sonuçlanması için "is_iptal_edildi".
+ *
+ * Hizmet Veren tarafındaki bu altı bildirimin `href`i sabit bir string
+ * DEĞİL — job-requests.ts#getProviderOfferNotificationHref(offer) çağrılır,
+ * bu da aynı teklifin "Verdiğim Teklifler" sayfasında GERÇEKTEN hangi
+ * sekmede göründüğünü belirleyen tek kaynağı (getProviderOfferFilter)
+ * kullanır. Böylece ör. "is_basladi" (in_progress) her zaman "Devam Eden"
+ * sekmesine, "tamamlanma_onaylandi" (completed) her zaman "Tamamlanan"
+ * sekmesine yönlendirir — bildirim metnine göre kırılgan bir eşleştirme
+ * değil, Offer.status'a göre türetilen bir eşleştirmedir. "agreement_failed"
+ * bilinçli olarak İSTİSNADIR: o teklif artık "Verdiğim Teklifler"in hiçbir
+ * sekmesiyle ilgili değil (iletişim erişimi kapanmış bir ilan detayına
+ * yönlendirir), bu yüzden kendi sabit href'ini korur.
  */
 export function getNotificationsForSession(
   session: Session,
@@ -171,7 +184,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan teklifinizi kabul etti.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: "/panel/tekliflerim",
+        href: getProviderOfferNotificationHref(offer),
         createdAt: offer.updatedAt,
       }));
 
@@ -183,7 +196,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan teklifinizi kabul etmedi.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: "/panel/tekliflerim",
+        href: getProviderOfferNotificationHref(offer),
         createdAt: offer.updatedAt,
       }));
 
@@ -195,7 +208,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan, işin başladığını onayladı.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: "/panel/tekliflerim",
+        href: getProviderOfferNotificationHref(offer),
         createdAt: offer.updatedAt,
       }));
 
@@ -207,7 +220,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan işin tamamlandığını onayladı.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: "/panel/tekliflerim",
+        href: getProviderOfferNotificationHref(offer),
         createdAt: offer.updatedAt,
       }));
 
@@ -219,7 +232,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan, işin tamamlanma talebine itiraz etti. İtiraz açıklamasını kontrol edin.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: "/panel/tekliflerim",
+        href: getProviderOfferNotificationHref(offer),
         createdAt: offer.updatedAt,
       }));
 
@@ -231,7 +244,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan, itiraz edilen işi iptal olarak sonuçlandırdı.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: "/panel/tekliflerim",
+        href: getProviderOfferNotificationHref(offer),
         createdAt: offer.updatedAt,
       }));
 

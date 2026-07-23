@@ -297,3 +297,27 @@ export function getProviderOfferFilter(offer: Offer): ProviderOfferFilter {
   if (COMPLETED_OFFER_STATUSES.includes(offer.status)) return "tamamlandi";
   return "aktif";
 }
+
+/**
+ * Bir `ProviderOfferFilter` sekmesinin "Verdiğim Teklifler" route'unu
+ * üretir — sekme bağlantıları (my-offers-panel.tsx#tabHref) ve bildirim
+ * hedefleri (notifications.ts) bu TEK fonksiyonu paylaşır, route string'ini
+ * iki ayrı yerde elle tekrar yazmazlar. "aktif" query param'sız temel
+ * route'tur (bkz. my-offers-panel.tsx: bilinmeyen/eksik `durum` değeri de
+ * güvenli varsayılan olarak buraya düşer).
+ */
+export function getProviderOffersTabHref(filter: ProviderOfferFilter): string {
+  return filter === "aktif" ? "/panel/tekliflerim" : `/panel/tekliflerim?durum=${filter}`;
+}
+
+/**
+ * Bir teklifin, Hizmet Veren'in "Verdiğim Teklifler" sayfasında hangi
+ * sekmede göründüğünün route'unu doğrudan Offer'dan üretir —
+ * `getProviderOfferFilter` + `getProviderOffersTabHref`'in birleşimi.
+ * Bildirim hedefleri (notifications.ts) bunu kullanır, böylece bir
+ * bildirimin yönlendirdiği sekme her zaman aynı teklifin GERÇEKTEN
+ * göründüğü sekmeyle birebir eşleşir.
+ */
+export function getProviderOfferNotificationHref(offer: Offer): string {
+  return getProviderOffersTabHref(getProviderOfferFilter(offer));
+}
