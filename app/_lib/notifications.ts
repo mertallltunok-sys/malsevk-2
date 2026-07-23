@@ -1,5 +1,6 @@
-import { getProviderOfferNotificationHref } from "./job-requests";
+import { getJobRequestNotificationHref, getProviderOfferNotificationHref } from "./job-requests";
 import type { Job, Offer, Session } from "./types";
+import { findUserById } from "./users";
 
 export type NotificationType =
   | "yeni_teklif"
@@ -19,6 +20,8 @@ export type NotificationType =
 export type AppNotification = {
   id: string;
   notificationType: NotificationType;
+  /** Yalnızca birkaç bildirim türünde bulunur (bugün yalnızca "teklif_geri_cekildi") — diğerlerinde yoktur, arayüz bu durumda başlık satırını hiç render etmez. */
+  title?: string;
   message: string;
   ilanId: string;
   offerId: string;
@@ -83,11 +86,9 @@ export function getNotificationsForSession(
   offers: Offer[],
 ): AppNotification[] {
   if (session.role === "hizmet-alan") {
-    const myJobTitleById = new Map(
-      jobs
-        .filter((job) => job.requesterId === session.id)
-        .map((job) => [job.id, job.title] as const),
-    );
+    const myJobs = jobs.filter((job) => job.requesterId === session.id);
+    const myJobById = new Map(myJobs.map((job) => [job.id, job] as const));
+    const myJobTitleById = new Map(myJobs.map((job) => [job.id, job.title] as const));
 
     const newOfferNotifications: AppNotification[] = offers
       .filter((offer) => myJobTitleById.has(offer.jobId))
@@ -151,17 +152,35 @@ export function getNotificationsForSession(
         createdAt: offer.updatedAt,
       }));
 
+    // Firma/görüntüleme adı: sözleşme kabul edilmeden önce hiçbir zaman
+    // telefon/e-posta/adres gösterilmez (bkz. contact-access.ts — withdrawn
+    // bir teklif ENGAGED_OFFER_STATUSES dışında olduğu için buraya zaten hiç
+    // girmemiştir). Ad önceliği, provider-profile-drawer.tsx'teki AYNI
+    // mevcut kalıp: firma adı varsa o, yoksa hesap adı, o da yoksa jenerik
+    // "Hizmet Veren" — burada yeni bir isim/gizlilik kuralı icat edilmez.
+    // Teklif kaydı ve dolayısıyla bu bildirim yalnızca offers.ts#withdrawOffer
+    // başarıyla "pending" -> "withdrawn" yazdığında var olur (başarısız
+    // denemede status değişmez, bildirim de türemez) ve offer.id başına en
+    // fazla bir kayıt olabileceği için (art arda tıklamalar ikinci
+    // "pending"i bulamayıp reddedilir) mükerrer bildirim yapısal olarak
+    // imkânsızdır — ayrı bir dedup mekanizması gerekmez.
     const withdrawnNotifications: AppNotification[] = offers
       .filter((offer) => offer.status === "withdrawn" && myJobTitleById.has(offer.jobId))
-      .map((offer) => ({
-        id: `offer-withdrawn-${offer.id}`,
-        notificationType: "teklif_geri_cekildi",
-        message: "Hizmet Veren ilanınıza verdiği teklifi geri çekti.",
-        ilanId: offer.jobId,
-        offerId: offer.id,
-        href: "/panel/gelen-teklifler",
-        createdAt: offer.updatedAt,
-      }));
+      .map((offer) => {
+        const provider = findUserById(offer.providerId);
+        const displayName = provider?.providerProfile?.companyName?.trim() || provider?.name || "Hizmet Veren";
+        const jobTitle = myJobTitleById.get(offer.jobId) ?? "ilanınız";
+        return {
+          id: `offer-withdrawn-${offer.id}`,
+          notificationType: "teklif_geri_cekildi" as const,
+          title: "Bir teklif geri çekildi",
+          message: `${displayName}, "${jobTitle}" ilanına verdiği teklifi geri çekti. Bu teklif geri çekildiği için artık gelen teklifler arasında görüntülenmez.`,
+          ilanId: offer.jobId,
+          offerId: offer.id,
+          href: getJobRequestNotificationHref(myJobById.get(offer.jobId) ?? null, offers),
+          createdAt: offer.updatedAt,
+        };
+      });
 
     return [
       ...newOfferNotifications,

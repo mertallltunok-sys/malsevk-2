@@ -14,6 +14,7 @@ import {
   type JobRequestFilter,
 } from "../_lib/job-requests";
 import { deleteJobWithOffers } from "../_lib/offers";
+import { AUTO_DISMISS_FADE_MS, useAutoDismissBanner } from "../_lib/use-auto-dismiss-banner";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
 import { useSession } from "../_lib/use-session";
@@ -125,6 +126,122 @@ function DeleteJobDialog({
   );
 }
 
+/**
+ * Tek bir hizmet talebi kartı — "Bir teklif geri çekildi" bildiriminin
+ * (notifications.ts#getJobRequestNotificationHref) `?ilanId=` ile
+ * yönlendirdiği kartı vurgulamak/odaklamak için ayrı bir bileşene
+ * çıkarıldı; incoming-offer-card.tsx'teki AYNI mevcut vurgulama deseni
+ * (ring border + scrollIntoView, prefers-reduced-motion'a saygılı).
+ */
+function JobRequestCard({
+  job,
+  filter,
+  engagedOffer,
+  completedOffer,
+  session,
+  highlighted,
+  onOpenDelete,
+  onCompleted,
+}: {
+  job: Job;
+  filter: JobRequestFilter | null;
+  engagedOffer: Offer | null;
+  completedOffer: Offer | null;
+  session: Session;
+  highlighted: boolean;
+  onOpenDelete: (job: Job) => void;
+  onCompleted: (offer: Offer) => void;
+}) {
+  const cardRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!highlighted || !cardRef.current) return;
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    cardRef.current.scrollIntoView({
+      block: "center",
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+    });
+  }, [highlighted]);
+
+  return (
+    <li
+      ref={cardRef}
+      className={`rounded-card border bg-surface p-6 transition-colors ${
+        highlighted ? "border-primary ring-2 ring-accent" : "border-border"
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
+            {job.category}
+          </span>
+          <h3 className="mt-2 break-words text-lg font-semibold leading-snug text-foreground">
+            {job.title}
+          </h3>
+        </div>
+        <StatusBadge
+          label={filter ? getJobRequestFilterLabel(filter) : getJobStatusLabel(job.status)}
+          tone={filter ? getJobRequestFilterTone(filter) : getJobStatusTone(job.status)}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
+        <span className="flex items-center gap-2">
+          <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {job.district}, {job.province}
+        </span>
+        <span className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {formatJobDate(job.workDate)}
+        </span>
+      </div>
+
+      {filter !== "tamamlandi" && isJobDateInPast(job.workDate) && (
+        <p className="mt-2 text-xs text-warning">Tarihi güncellemeniz önerilir.</p>
+      )}
+
+      {engagedOffer &&
+        (engagedOffer.status === "completion_requested" ||
+          engagedOffer.status === "completion_disputed") && (
+          <OfferOutcomePanel offer={engagedOffer} session={session} onCompleted={onCompleted} />
+        )}
+
+      {filter === "tamamlandi" && completedOffer && (
+        <JobRatingWidget offer={completedOffer} session={session} />
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-4">
+        <Link
+          href={`/ilanlar/${job.id}`}
+          className="inline-block rounded-sm text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+        >
+          İlan detayına git
+        </Link>
+        {/* Düzenle/Sil yalnızca "Aktif" ilanlarda gösterilir — iş
+            başladıktan (ya da teklif kabul edildikten) sonra ilan
+            artık değiştirilemez/silinemez (bkz. matchesTab). */}
+        {filter === "aktif" && (
+          <>
+            <Link
+              href={`/panel/hizmet-taleplerim/${job.id}/duzenle`}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+            >
+              İlanı Düzenle
+            </Link>
+            <button
+              type="button"
+              onClick={() => onOpenDelete(job)}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+            >
+              İlanı Sil
+            </button>
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export function JobRequestsPanel() {
   const session = useSession();
 
@@ -152,11 +269,12 @@ function JobRequestsList({ session }: { session: Session }) {
   const activeTab: TabKey =
     rawDurum === "devam-eden" || rawDurum === "tamamlandi" ? rawDurum : "aktif";
   const justUpdated = searchParams.get("guncellendi") === "1";
+  const highlightJobId = searchParams.get("ilanId");
 
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [justDeleted, setJustDeleted] = useState(false);
+  const deletedBanner = useAutoDismissBanner();
   const [ratingModalOffer, setRatingModalOffer] = useState<Offer | null>(null);
   const [justRated, setJustRated] = useState(false);
 
@@ -182,7 +300,7 @@ function JobRequestsList({ session }: { session: Session }) {
       return;
     }
     setDeleteTarget(null);
-    setJustDeleted(true);
+    deletedBanner.trigger();
   }
 
   const myEntries = jobs
@@ -209,11 +327,15 @@ function JobRequestsList({ session }: { session: Session }) {
         </p>
       )}
 
-      {justDeleted && (
+      {deletedBanner.visible && (
         <p
           role="status"
           aria-live="polite"
-          className="mb-4 flex items-center gap-2 rounded-md bg-success-soft px-4 py-3 text-sm font-medium text-success"
+          style={{
+            transitionDuration: `${AUTO_DISMISS_FADE_MS}ms`,
+            opacity: deletedBanner.fadingOut ? 0 : 1,
+          }}
+          className="mb-4 flex items-center gap-2 rounded-md bg-success-soft px-4 py-3 text-sm font-medium text-success transition-opacity ease-out motion-reduce:transition-none"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
           İlan başarıyla silindi.
@@ -270,80 +392,17 @@ function JobRequestsList({ session }: { session: Session }) {
         ) : (
           <ul className="flex flex-col gap-4">
             {visible.map(({ job, filter, engagedOffer, completedOffer }) => (
-              <li key={job.id} className="rounded-card border border-border bg-surface p-6">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-                      {job.category}
-                    </span>
-                    <h3 className="mt-2 break-words text-lg font-semibold leading-snug text-foreground">
-                      {job.title}
-                    </h3>
-                  </div>
-                  <StatusBadge
-                    label={filter ? getJobRequestFilterLabel(filter) : getJobStatusLabel(job.status)}
-                    tone={filter ? getJobRequestFilterTone(filter) : getJobStatusTone(job.status)}
-                  />
-                </div>
-
-                <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
-                  <span className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    {job.district}, {job.province}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    {formatJobDate(job.workDate)}
-                  </span>
-                </div>
-
-                {filter !== "tamamlandi" && isJobDateInPast(job.workDate) && (
-                  <p className="mt-2 text-xs text-warning">Tarihi güncellemeniz önerilir.</p>
-                )}
-
-                {engagedOffer &&
-                  (engagedOffer.status === "completion_requested" ||
-                    engagedOffer.status === "completion_disputed") && (
-                    <OfferOutcomePanel
-                      offer={engagedOffer}
-                      session={session}
-                      onCompleted={(completedOffer) => setRatingModalOffer(completedOffer)}
-                    />
-                  )}
-
-                {filter === "tamamlandi" && completedOffer && (
-                  <JobRatingWidget offer={completedOffer} session={session} />
-                )}
-
-                <div className="mt-4 flex flex-wrap items-center gap-4">
-                  <Link
-                    href={`/ilanlar/${job.id}`}
-                    className="inline-block rounded-sm text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                  >
-                    İlan detayına git
-                  </Link>
-                  {/* Düzenle/Sil yalnızca "Aktif" ilanlarda gösterilir — iş
-                      başladıktan (ya da teklif kabul edildikten) sonra ilan
-                      artık değiştirilemez/silinemez (bkz. matchesTab). */}
-                  {filter === "aktif" && (
-                    <>
-                      <Link
-                        href={`/panel/hizmet-taleplerim/${job.id}/duzenle`}
-                        className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                      >
-                        İlanı Düzenle
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => openDeleteDialog(job)}
-                        className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                      >
-                        İlanı Sil
-                      </button>
-                    </>
-                  )}
-                </div>
-              </li>
+              <JobRequestCard
+                key={job.id}
+                job={job}
+                filter={filter}
+                engagedOffer={engagedOffer}
+                completedOffer={completedOffer}
+                session={session}
+                highlighted={job.id === highlightJobId}
+                onOpenDelete={openDeleteDialog}
+                onCompleted={(completedOffer) => setRatingModalOffer(completedOffer)}
+              />
             ))}
           </ul>
         )}

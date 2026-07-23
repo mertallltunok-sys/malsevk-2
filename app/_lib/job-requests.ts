@@ -69,6 +69,21 @@ export function isReofferCooldownStatus(status: OfferStatus): status is ReofferC
   return status === "withdrawn" || status === "rejected" || status === "agreement_failed";
 }
 
+/**
+ * Bir teklifin normal kullanıcı listelerinde/sayaçlarında görünüp
+ * görünmeyeceğinin TEK ortak doğruluk kaynağı — bugün yalnızca "withdrawn"
+ * hariç tutulur. Kayıt SİLİNMEZ (bkz. offers.ts#withdrawOffer): audit amaçlı
+ * saklanır, yeniden-teklif-bekleme-süresi hesabında (REOFFER_COOLDOWN_*,
+ * createOffer) ve kapasite/kabul geçmişi türetmelerinde (provider-profile.ts
+ * #wasEverAccepted) hâlâ okunur — yalnızca "normal" listelerden/sayaçlardan
+ * (Verdiğim Teklifler, Gelen Teklifler, panel özetleri) çıkarılır. Filtre
+ * mantığı burada TEK yerde tutulur; her ekran kendi `!== "withdrawn"`
+ * kontrolünü tekrar yazmaz.
+ */
+export function isOfferVisibleInNormalLists(offer: Offer): boolean {
+  return offer.status !== "withdrawn";
+}
+
 /** "completion_requested" durumundaki bir teklifin, Hizmet Alan hiç işlem yapmazsa kaç gün sonra otomatik "completed" olacağı. */
 export const COMPLETION_AUTO_APPROVE_DAYS = 7;
 
@@ -287,12 +302,17 @@ export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi";
  * "accepted" (kabul edildi ama iş henüz başlamadı) burada `getJobRequestFilter`
  * ile aynı şekilde kendi başına bir sekme değildir — ayrı bir "Kabul Edilen"
  * sekmesi kaldırıldığı için "aktif"e düşer (bkz. my-offers-panel.tsx).
- * "pending"/"rejected"/"withdrawn"/"agreement_failed"/"cancelled" (henüz
- * kabul edilmemiş ya da olumsuz sonuçlanmış teklifler) de aynı şekilde
- * "aktif" sekmesine düşer — kesin bir sonuca varmamış ya da kabul dışında
- * sonuçlanmış her şeyin toplandığı sekme.
+ * "pending"/"rejected"/"agreement_failed"/"cancelled" (henüz kabul edilmemiş
+ * ya da olumsuz sonuçlanmış teklifler) de aynı şekilde "aktif" sekmesine
+ * düşer — kesin bir sonuca varmamış ya da kabul dışında sonuçlanmış her
+ * şeyin toplandığı sekme. "withdrawn" ise (bkz. isOfferVisibleInNormalLists)
+ * `null` döner — `getJobRequestFilter`in "iptal" ilan için null dönmesiyle
+ * aynı desen: hiçbir sekmede görünmesin diye BİLEREK herhangi bir TabKey ile
+ * eşleşmez (my-offers-panel.tsx'teki `=== activeTab` karşılaştırması bu
+ * yüzden ek bir filtre satırına gerek duymadan withdrawn'ı otomatik eler).
  */
-export function getProviderOfferFilter(offer: Offer): ProviderOfferFilter {
+export function getProviderOfferFilter(offer: Offer): ProviderOfferFilter | null {
+  if (!isOfferVisibleInNormalLists(offer)) return null;
   if (IN_PROGRESS_OFFER_STATUSES.includes(offer.status)) return "devam-eden";
   if (COMPLETED_OFFER_STATUSES.includes(offer.status)) return "tamamlandi";
   return "aktif";
@@ -316,8 +336,28 @@ export function getProviderOffersTabHref(filter: ProviderOfferFilter): string {
  * `getProviderOfferFilter` + `getProviderOffersTabHref`'in birleşimi.
  * Bildirim hedefleri (notifications.ts) bunu kullanır, böylece bir
  * bildirimin yönlendirdiği sekme her zaman aynı teklifin GERÇEKTEN
- * göründüğü sekmeyle birebir eşleşir.
+ * göründüğü sekmeyle birebir eşleşir. `?? "aktif"` yalnızca tip güvenliği
+ * içindir — bu fonksiyonu çağıran hiçbir bildirim türü "withdrawn" bir
+ * teklif için üretilmez (bkz. notifications.ts), o yüzden pratikte hiç
+ * tetiklenmez.
  */
 export function getProviderOfferNotificationHref(offer: Offer): string {
-  return getProviderOffersTabHref(getProviderOfferFilter(offer));
+  return getProviderOffersTabHref(getProviderOfferFilter(offer) ?? "aktif");
+}
+
+/**
+ * Bir ilanın, Hizmet Alan'ın "Hizmet Taleplerim" sayfasındaki route'unu
+ * üretir — ilan hâlâ mevcutsa `getJobRequestFilter` ile doğru sekmeye (+
+ * `ilanId` ile ilgili kartın vurgulanması/odaklanması için, bkz.
+ * job-requests-panel.tsx) yönlendirir; ilan bulunamıyorsa (`job` null,
+ * silinmiş) ya da hiçbir sekmeyle eşleşmiyorsa (`filter` null, ör. "iptal"
+ * durumundaki ilan) güvenli şekilde ana görünüme (Aktif, vurgusuz) düşer.
+ * "Bir teklif geri çekildi" bildirimi (notifications.ts) bunu kullanır.
+ */
+export function getJobRequestNotificationHref(job: Job | null, offers: Offer[]): string {
+  if (!job) return "/panel/hizmet-taleplerim";
+  const filter = getJobRequestFilter(job, offers);
+  const base = filter && filter !== "aktif" ? `/panel/hizmet-taleplerim?durum=${filter}` : "/panel/hizmet-taleplerim";
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}ilanId=${job.id}`;
 }

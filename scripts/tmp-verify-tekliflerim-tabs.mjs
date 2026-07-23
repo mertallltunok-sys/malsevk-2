@@ -2,8 +2,13 @@
 // "Kabul Edilen" sekmesi tamamen kaldırıldı, kabul edilmiş ama iş henüz
 // başlamamış teklifler artık "Aktif" sekmesinde gösteriliyor. Yalnızca üç
 // sekme (Aktif/Devam Eden/Tamamlanan) render ediliyor, hiçbir teklif iki
-// sekmede birden görünmüyor, reddedilen/vazgeçilen/iptal edilen teklifler
-// hâlâ güvenli şekilde "Aktif"e düşüyor, mobilde (320px) taşma yok.
+// sekmede birden görünmüyor, reddedilen/iptal edilen teklifler hâlâ güvenli
+// şekilde "Aktif"e düşüyor, mobilde (320px) taşma yok. "withdrawn" (geri
+// çekilmiş) teklifler BURADA KASITLI OLARAK "Aktif"e düşmez — sonraki bir
+// görevde (bkz. job-requests.ts#isOfferVisibleInNormalLists,
+// tmp-verify-withdrawn-offer-removal.mjs) tüm normal listelerden tamamen
+// kaldırıldı; bu dosyadaki VAZGECILDI kontrolü o değişikliği yansıtacak
+// şekilde güncellenmiştir.
 import { chromium } from "playwright";
 
 const BASE_URL = "http://localhost:3000";
@@ -157,7 +162,7 @@ async function main() {
     check("KABUL (accepted) artık BURADA görünüyor (Kabul Edilen sekmesi kaldırıldı)", bodyText.includes(`SADE-KABUL-${stamp}`));
     check("REDDEDILDI (rejected) görünüyor", bodyText.includes(`SADE-REDDEDILDI-${stamp}`));
     check("IPTAL (cancelled) görünüyor", bodyText.includes(`SADE-IPTAL-${stamp}`));
-    check("VAZGECILDI (withdrawn) görünüyor", bodyText.includes(`SADE-VAZGECILDI-${stamp}`));
+    check("VAZGECILDI (withdrawn) BURADA YOK (tüm normal listelerden kaldırıldı)", !bodyText.includes(`SADE-VAZGECILDI-${stamp}`));
     check("ANLASMAOLMADI (agreement_failed) görünüyor", bodyText.includes(`SADE-ANLASMAOLMADI-${stamp}`));
     check("DEVAMEDEN (in_progress) BURADA YOK", !bodyText.includes(`SADE-DEVAMEDEN-${stamp}`));
     check("ONAYBEKLIYOR (completion_requested) BURADA YOK", !bodyText.includes(`SADE-ONAYBEKLIYOR-${stamp}`));

@@ -105,7 +105,10 @@ function NotificationBellRow({
             className={`mt-0.5 h-4 w-4 shrink-0 ${isUnread ? "text-accent" : "text-muted-foreground"}`}
             aria-hidden="true"
           />
-          <span className="min-w-0 flex-1 break-words">{notification.message}</span>
+          <span className="min-w-0 flex-1 break-words">
+            {notification.title && <span className="block font-semibold text-foreground">{notification.title}</span>}
+            {notification.message}
+          </span>
         </Link>
         <button
           type="button"

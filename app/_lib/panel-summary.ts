@@ -2,6 +2,7 @@ import {
   COMPLETED_OFFER_STATUSES,
   IN_PROGRESS_OFFER_STATUSES,
   getJobRequestFilter,
+  isOfferVisibleInNormalLists,
   jobHasAcceptedOffer,
 } from "./job-requests";
 import { isJobOpenForOffers } from "./jobs";
@@ -81,7 +82,14 @@ export function getHizmetAlanPanelSummary(
     else if (filter === "tamamlandi") completedCount++;
   }
 
-  const incomingOffers = offers.filter((offer) => myJobIds.has(offer.jobId));
+  // Geri çekilmiş ("withdrawn") teklifler burada BİLEREK hariç tutulur (bkz.
+  // isOfferVisibleInNormalLists) — "Gelen Teklifler" sayacına dahil edilmez
+  // ve "yeni teklif geldi" olarak Son Hareketler'de yanıltıcı şekilde
+  // görünmez; Hizmet Alan bunun yerine ayrı bir "teklif geri çekildi"
+  // bildirimi alır (bkz. notifications.ts).
+  const incomingOffers = offers
+    .filter((offer) => myJobIds.has(offer.jobId))
+    .filter(isOfferVisibleInNormalLists);
 
   const offerActivity: PanelActivityItem[] = incomingOffers
     .slice()
@@ -130,8 +138,15 @@ export function getHizmetVerenPanelSummary(
   offers: Offer[],
 ): HizmetVerenPanelSummary {
   const jobById = new Map(jobs.map((job) => [job.id, job] as const));
+  // `myOffers` (withdrawn DAHİL) yalnızca `myOfferedJobIds`/`availableListingCount`
+  // için kullanılır: bir ilana geri çekilmiş bir teklif REOFFER_COOLDOWN_DAYS
+  // dolana kadar yeniden teklif vermeyi engellediği için (bkz. offers.ts
+  // #createOffer), o ilanın "Uygun İlanlar"da gösterilmemesi hâlâ doğrudur.
+  // Sayaç/Son Hareketler gibi kullanıcıya görünen her şey `visibleMyOffers`
+  // (withdrawn hariç, bkz. isOfferVisibleInNormalLists) üzerinden hesaplanır.
   const myOffers = offers.filter((offer) => offer.providerId === session.id);
   const myOfferedJobIds = new Set(myOffers.map((offer) => offer.jobId));
+  const visibleMyOffers = myOffers.filter(isOfferVisibleInNormalLists);
 
   const availableListingCount = jobs.filter(
     (job) =>
@@ -140,15 +155,15 @@ export function getHizmetVerenPanelSummary(
       !jobHasAcceptedOffer(job.id, offers),
   ).length;
 
-  const acceptedOffers = myOffers.filter((offer) => offer.status === "accepted");
-  const inProgressCount = myOffers.filter((offer) =>
+  const acceptedOffers = visibleMyOffers.filter((offer) => offer.status === "accepted");
+  const inProgressCount = visibleMyOffers.filter((offer) =>
     IN_PROGRESS_OFFER_STATUSES.includes(offer.status),
   ).length;
-  const completedCount = myOffers.filter((offer) =>
+  const completedCount = visibleMyOffers.filter((offer) =>
     COMPLETED_OFFER_STATUSES.includes(offer.status),
   ).length;
 
-  const recentActivity: PanelActivityItem[] = myOffers
+  const recentActivity: PanelActivityItem[] = visibleMyOffers
     .slice()
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, MAX_RECENT_ACTIVITY)
@@ -170,7 +185,7 @@ export function getHizmetVerenPanelSummary(
 
   return {
     availableListingCount,
-    myOfferCount: myOffers.length,
+    myOfferCount: visibleMyOffers.length,
     acceptedOfferCount: acceptedOffers.length,
     inProgressCount,
     completedCount,

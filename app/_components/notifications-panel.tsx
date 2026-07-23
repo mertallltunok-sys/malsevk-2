@@ -75,6 +75,9 @@ function NotificationPanelRow({
         >
           <Inbox className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
           <div className="min-w-0 flex-1">
+            {notification.title && (
+              <p className="break-words text-sm font-semibold text-foreground">{notification.title}</p>
+            )}
             <p className="break-words text-sm leading-relaxed text-foreground">{notification.message}</p>
             <span className="mt-1 block text-xs text-muted-foreground">
               {formatJobDate(notification.createdAt)}

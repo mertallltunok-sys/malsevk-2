@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { isOfferVisibleInNormalLists } from "../_lib/job-requests";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
 import { useSession } from "../_lib/use-session";
@@ -37,10 +38,11 @@ export function IncomingOffersPanel() {
 
   // "withdrawn": Hizmet Veren'in kabul edilmeden önce geri çektiği teklif —
   // aktif Gelen Teklifler listesinde hiç görünmez, tekrar kabul edilemez
-  // (bkz. offers.ts#withdrawOffer).
+  // (bkz. offers.ts#withdrawOffer, job-requests.ts#isOfferVisibleInNormalLists
+  // — tek ortak doğruluk kaynağı, burada tekrar yazılmaz).
   const incoming = offers
     .filter((offer) => myJobIds.has(offer.jobId))
-    .filter((offer) => offer.status !== "withdrawn")
+    .filter(isOfferVisibleInNormalLists)
     .filter((offer) => !highlightJobId || offer.jobId === highlightJobId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
