@@ -13,6 +13,7 @@ function CountsTable({ title, counts }: { title: string; counts: DemoDataCounts 
     { label: "Kullanıcılar", total: counts.totalUsers, demo: counts.demoUsers },
     { label: "İlanlar", total: counts.totalJobs, demo: counts.demoJobs },
     { label: "Teklifler", total: counts.totalOffers, demo: counts.demoOffers },
+    { label: "Değerlendirmeler", total: counts.totalRatings, demo: counts.demoRatings },
     { label: "İlan fotoğrafları (yalnızca demo ilanlarına bağlı)", total: counts.demoPhotoCount, demo: counts.demoPhotoCount },
   ];
 
@@ -79,9 +80,9 @@ export function DemoDataResetPanel() {
     <div className="flex flex-col gap-6">
       <div className="rounded-card border border-warning bg-warning-soft p-4 text-sm leading-relaxed text-foreground">
         Bu sayfa yalnızca geliştirme ortamında (NODE_ENV=development) çalışır. Yalnızca aşağıdaki
-        demo hesaplarla ilişkili ilan, teklif, bildirim okunma durumu ve ilan fotoğrafı verilerini
-        siler. Demo hesapların kendisi (giriş bilgileri, rol) ve gerçek kullanıcı verileri hiç
-        değiştirilmez.
+        demo hesaplarla ilişkili ilan, teklif, değerlendirme, bildirim okunma durumu ve ilan
+        fotoğrafı verilerini siler. Demo hesapların kendisi (giriş bilgileri, rol, profil) ve
+        gerçek kullanıcı verileri hiç değiştirilmez.
       </div>
 
       {plan && <CountsTable title="Şu anki durum" counts={plan.before} />}
@@ -106,6 +107,7 @@ export function DemoDataResetPanel() {
           <ul className="mt-2 flex flex-col gap-1 text-sm text-muted-foreground">
             <li>{plan.jobIdsToRemove.length} ilan</li>
             <li>{plan.offerIdsToRemove.length} teklif</li>
+            <li>{plan.ratingIdsToRemove.length} değerlendirme</li>
             <li>{plan.photoStorageKeysToRemove.length} ilan fotoğrafı</li>
             <li>{plan.demoUserIds.length} kullanıcının bildirim okunma kaydı</li>
           </ul>
@@ -144,7 +146,10 @@ export function DemoDataResetPanel() {
             <button
               type="button"
               onClick={handleExecute}
-              disabled={running || plan.jobIdsToRemove.length + plan.offerIdsToRemove.length === 0}
+              disabled={
+                running ||
+                plan.jobIdsToRemove.length + plan.offerIdsToRemove.length + plan.ratingIdsToRemove.length === 0
+              }
               className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {running ? "Uygulanıyor..." : "Temizliği Uygula"}

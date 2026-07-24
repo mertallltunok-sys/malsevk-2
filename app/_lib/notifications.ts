@@ -1,6 +1,8 @@
 import {
   getJobRequestNotificationHref,
+  getProviderOfferFilter,
   getProviderOfferNotificationHref,
+  getSettledOfferForJob,
   isOfferVisibleInNormalLists,
 } from "./job-requests";
 import type { Job, Offer, Session } from "./types";
@@ -12,6 +14,7 @@ export type NotificationType =
   | "teklif_reddedildi"
   | "is_basladi"
   | "anlasma_saglanamadi"
+  | "baska_hizmet_verenle_anlasildi"
   | "ilan_yeniden_yayinda"
   | "tamamlanma_onayi_bekleniyor"
   | "is_tamamlandi"
@@ -24,7 +27,7 @@ export type NotificationType =
 export type AppNotification = {
   id: string;
   notificationType: NotificationType;
-  /** Yalnızca birkaç bildirim türünde bulunur (bugün yalnızca "teklif_geri_cekildi") — diğerlerinde yoktur, arayüz bu durumda başlık satırını hiç render etmez. */
+  /** Yalnızca birkaç bildirim türünde bulunur (bugün "teklif_geri_cekildi" ve "baska_hizmet_verenle_anlasildi") — diğerlerinde yoktur, arayüz bu durumda başlık satırını hiç render etmez. */
   title?: string;
   message: string;
   ilanId: string;
@@ -70,19 +73,24 @@ export type AppNotification = {
  *    "anlasma_saglanamadi" + Hizmet Alan'ın onayladığı tamamlanma için
  *    "tamamlanma_onaylandi" + Hizmet Alan'ın itiraz ettiği tamamlanma
  *    talebi için "tamamlanma_itiraz_edildi" + itirazın iptalle
- *    sonuçlanması için "is_iptal_edildi".
+ *    sonuçlanması için "is_iptal_edildi" + AYNI ilana verdiği (hâlâ
+ *    "pending" kalan) bir teklifin, başka bir Hizmet Veren'in teklifi işe
+ *    fiilen başladığı için kapanması durumunda "baska_hizmet_verenle_anlasildi"
+ *    (bkz. siblingClosedNotifications, aşağıda — DİĞER altı bildirimden
+ *    farklı olarak KENDİ Offer'ının değil, aynı jobId'deki KARDEŞ bir
+ *    Offer'ın durum geçişinden türetilir).
  *
- * Hizmet Veren tarafındaki bu altı bildirimin `href`i sabit bir string
- * DEĞİL — job-requests.ts#getProviderOfferNotificationHref(offer) çağrılır,
- * bu da aynı teklifin "Verdiğim Teklifler" sayfasında GERÇEKTEN hangi
- * sekmede göründüğünü belirleyen tek kaynağı (getProviderOfferFilter)
+ * Hizmet Veren tarafındaki bu yedi bildirimin `href`i sabit bir string
+ * DEĞİL — job-requests.ts#getProviderOfferNotificationHref(offer, offers)
+ * çağrılır, bu da aynı teklifin "Verdiğim Teklifler" sayfasında GERÇEKTEN
+ * hangi sekmede göründüğünü belirleyen tek kaynağı (getProviderOfferFilter)
  * kullanır. Böylece ör. "is_basladi" (in_progress) her zaman "Devam Eden"
  * sekmesine, "tamamlanma_onaylandi" (completed) her zaman "Tamamlanan"
- * sekmesine yönlendirir — bildirim metnine göre kırılgan bir eşleştirme
- * değil, Offer.status'a göre türetilen bir eşleştirmedir. "agreement_failed"
- * bilinçli olarak İSTİSNADIR: o teklif artık "Verdiğim Teklifler"in hiçbir
- * sekmesiyle ilgili değil (iletişim erişimi kapanmış bir ilan detayına
- * yönlendirir), bu yüzden kendi sabit href'ini korur.
+ * sekmesine, "anlasma_saglanamadi" (agreement_failed), "is_iptal_edildi"
+ * (cancelled) VE "baska_hizmet_verenle_anlasildi" (kapanan "pending" kardeş
+ * teklif) her zaman "Kapanan Teklifler" sekmesine yönlendirir — bildirim
+ * metnine göre kırılgan bir eşleştirme değil, Offer.status'a göre türetilen
+ * bir eşleştirmedir.
  */
 export function getNotificationsForSession(
   session: Session,
@@ -216,7 +224,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan teklifinizi kabul etti.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: getProviderOfferNotificationHref(offer),
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
 
@@ -228,7 +236,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan teklifinizi kabul etmedi.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: getProviderOfferNotificationHref(offer),
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
 
@@ -240,7 +248,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan, işin başladığını onayladı.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: getProviderOfferNotificationHref(offer),
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
 
@@ -252,7 +260,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan işin tamamlandığını onayladı.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: getProviderOfferNotificationHref(offer),
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
 
@@ -264,7 +272,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan, işin tamamlanma talebine itiraz etti. İtiraz açıklamasını kontrol edin.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: getProviderOfferNotificationHref(offer),
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
 
@@ -276,7 +284,7 @@ export function getNotificationsForSession(
         message: "Hizmet Alan, itiraz edilen işi iptal olarak sonuçlandırdı.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: getProviderOfferNotificationHref(offer),
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
 
@@ -289,15 +297,61 @@ export function getNotificationsForSession(
           "Teklifinizin kabul edildiği ilan için anlaşma sağlanamadı. İletişim bilgileri artık görüntülenemez.",
         ilanId: offer.jobId,
         offerId: offer.id,
-        href: `/ilanlar/${offer.jobId}`,
+        href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
+
+    // DİĞER altı Hizmet Veren bildiriminden farklı olarak, myOffers'ı KENDİ
+    // status'una göre değil, `getProviderOfferFilter` (job-requests.ts — tek
+    // ortak doğruluk kaynağı, "Kapanan Teklifler" sekmesiyle BİREBİR aynı
+    // kural) üzerinden süzer. Yalnızca hâlâ "pending" olan (bkz.
+    // isOfferVisibleInNormalLists — withdrawn zaten "pending" değildir ama
+    // netlik için) VE aynı jobId'de başka bir teklif fiilen işe başladığı
+    // için "kapanan-teklifler"e düşen teklifler için üretilir:
+    //  - Yalnızca KABUL (accepted) değil, İŞE BAŞLAMA (in_progress+) anında
+    //    tetiklenir — getProviderOfferFilter, settled teklif hâlâ yalnızca
+    //    "accepted" iken bilerek "aktif" döndürür (bkz. oradaki doküman).
+    //  - İşi başlayan teklifin KENDİSİNE hiç gitmez — o offer.status
+    //    "pending" değil "in_progress"tir, bu filtreye hiç girmez.
+    //  - Reddedilmiş/iptal edilmiş/geri çekilmiş teklifler zaten "pending"
+    //    olmadığı için otomatik elenir; ayrı bir kontrol gerekmez.
+    //  - Settled teklif sonradan "cancelled" olup ilan yeniden açılırsa
+    //    (bkz. isOfferClosedByJobProgress) bu teklif "aktif"e döner ve
+    //    bildirim kendiliğinden listeden kalkar — TERMİNAL değil, GEÇİCİ bir
+    //    bildirimdir (yukarıdaki genel not ile aynı desen).
+    //  - id yalnızca offer.id'ye bağlıdır (yeni bir Offer.status/alan icat
+    //    edilmedi) — aynı teklif için, koşul true kaldığı sürece HER render'da
+    //    aynı id üretilir, mükerrer kayıt oluşmaz; okunma/silinme durumu
+    //    (notification-reads.ts/notification-dismissals.ts) bu id'ye göre
+    //    kalıcı kalır.
+    const siblingClosedNotifications: AppNotification[] = myOffers
+      .filter(
+        (offer) => offer.status === "pending" && getProviderOfferFilter(offer, offers) === "kapanan-teklifler",
+      )
+      .map((offer) => {
+        // Bildirimin "olay zamanı" (createdAt) kendi offer'ının değil,
+        // ilanı kapatan kardeş teklifin ne zaman güncellendiğidir (işe
+        // başlama anı) — kendi offer.updatedAt'i hâlâ teklifin ilk
+        // gönderilme anını taşır, bu yüzden sıralamada yanlış olurdu.
+        const settledOffer = getSettledOfferForJob(offer.jobId, offers);
+        return {
+          id: `sibling-closed-${offer.id}`,
+          notificationType: "baska_hizmet_verenle_anlasildi" as const,
+          title: "Başka Bir Hizmet Verenle Anlaşıldı",
+          message: "Teklif verdiğiniz ilan için başka bir Hizmet Verenle işe başlandı.",
+          ilanId: offer.jobId,
+          offerId: offer.id,
+          href: getProviderOfferNotificationHref(offer, offers),
+          createdAt: settledOffer?.updatedAt ?? offer.updatedAt,
+        };
+      });
 
     return [
       ...acceptedNotifications,
       ...rejectedNotifications,
       ...startedNotifications,
       ...agreementFailedNotifications,
+      ...siblingClosedNotifications,
       ...completionApprovedNotifications,
       ...completionDisputedNotifications,
       ...cancelledNotifications,

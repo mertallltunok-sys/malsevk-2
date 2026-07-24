@@ -8,6 +8,7 @@ import {
   getJobOfferAvailabilityTone,
 } from "../_lib/job-requests";
 import { formatJobDate, isJobDateInPast, isJobOpenForOffers } from "../_lib/jobs";
+import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useAllOffers } from "../_lib/use-offers";
 import { useJobById } from "../_lib/use-jobs";
 import { useSession } from "../_lib/use-session";
@@ -50,7 +51,7 @@ export function JobDetailContent({ id }: { id: string }) {
       <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-            {job.category}
+            {getCategoryDisplayLabel(job.category)}
           </span>
           <h1 className="mt-3 max-w-2xl break-words text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl">
             {job.title}

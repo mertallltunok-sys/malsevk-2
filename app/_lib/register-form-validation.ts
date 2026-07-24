@@ -1,14 +1,22 @@
+import { isCompanyType } from "./company-type";
 import { isValidEmail } from "./login-form-validation";
 import { isPasswordValid } from "./password-rules";
 import { normalizePhoneNumber } from "./phone";
 
 export type RegisterFormErrors = Partial<{
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   password: string;
   confirmPassword: string;
   role: string;
+  companyName: string;
+  companyType: string;
+  province: string;
+  district: string;
+  kvkk: string;
+  terms: string;
 }>;
 
 export type RegisterFormValidation = {
@@ -17,18 +25,28 @@ export type RegisterFormValidation = {
 };
 
 export function validateRegisterFormFields(fields: {
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   password: string;
   confirmPassword: string;
   role: string;
+  companyName: string;
+  companyType: string;
+  province: string;
+  district: string;
+  kvkkAccepted: boolean;
+  termsAccepted: boolean;
 }): RegisterFormValidation {
   const errors: RegisterFormErrors = {};
 
-  const name = fields.name.trim();
-  if (name.length < 2) {
-    errors.name = "Ad soyad en az 2 karakter olmalıdır.";
+  if (fields.firstName.trim().length === 0) {
+    errors.firstName = "Ad zorunludur.";
+  }
+
+  if (fields.lastName.trim().length === 0) {
+    errors.lastName = "Soyad zorunludur.";
   }
 
   const email = fields.email.trim();
@@ -54,8 +72,40 @@ export function validateRegisterFormFields(fields: {
     errors.confirmPassword = "Şifreler eşleşmiyor.";
   }
 
-  if (fields.role !== "hizmet-alan" && fields.role !== "hizmet-veren") {
-    errors.role = "Devam etmek için bir rol seçin.";
+  const isValidRole = fields.role === "hizmet-alan" || fields.role === "hizmet-veren";
+  if (!isValidRole) {
+    errors.role = "Devam etmek için bir hesap türü seçin.";
+  }
+
+  // Firma adı/tip/il/ilçe yalnızca geçerli bir rol seçildiğinde arayüzde
+  // görünür (bkz. login-form.tsx) — rol henüz seçilmemişse bu alanlar için
+  // hata üretmek, ekranda hiç görünmeyen bir alanın altında hata göstermek
+  // anlamına gelirdi.
+  if (isValidRole) {
+    if (fields.companyName.trim().length === 0) {
+      errors.companyName = "Firma adı zorunludur.";
+    }
+
+    if (!isCompanyType(fields.companyType)) {
+      errors.companyType =
+        fields.role === "hizmet-veren" ? "Hizmet veren tipini seçiniz." : "Kullanıcı tipini seçiniz.";
+    }
+
+    if (fields.province.trim().length === 0) {
+      errors.province = "İl zorunludur.";
+    }
+
+    if (fields.district.trim().length === 0) {
+      errors.district = "İlçe zorunludur.";
+    }
+  }
+
+  if (!fields.kvkkAccepted) {
+    errors.kvkk = "KVKK Aydınlatma Metni'ni kabul etmelisiniz.";
+  }
+
+  if (!fields.termsAccepted) {
+    errors.terms = "Kullanım Koşulları'nı kabul etmelisiniz.";
   }
 
   return { errors, normalizedPhone };

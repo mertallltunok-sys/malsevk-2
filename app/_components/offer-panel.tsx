@@ -3,7 +3,7 @@
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { isReofferCooldownStatus, jobHasAcceptedOffer } from "../_lib/job-requests";
+import { isReofferCooldownStatus } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
@@ -135,13 +135,12 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
     );
   }
 
-  if (jobHasAcceptedOffer(job.id, offers)) {
-    return (
-      <p className="rounded-card border border-border bg-background p-6 text-sm leading-relaxed text-muted-foreground">
-        Bu ilan için bir firma ile anlaşma sağlanmıştır. Artık yeni teklif kabul edilmemektedir.
-      </p>
-    );
-  }
+  // Bu ilana kabul edilmiş/devam eden bir teklif olması artık yeni teklif
+  // vermeyi engellemez — diğer Hizmet Verenler de teklif verebilir (bkz.
+  // job-requests.ts#getJobOfferAvailability). Aynı anda yalnızca TEK
+  // teklifin anlaşma sürecinin ilerleyebilmesi kuralı, Hizmet Alan'ın
+  // Kabul Et/Reddet aksiyonları üzerinde uygulanır (bkz.
+  // incoming-offer-card.tsx#isOfferPendingActionBlocked), bu ekranda değil.
 
   // Aktif iş kapasitesi dolu olduğunda ilanları/teklifleri görüntülemeye
   // devam edebilir, yalnızca YENİ teklif gönderemez — bu görsel engel,

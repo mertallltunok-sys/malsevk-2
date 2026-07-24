@@ -6,6 +6,7 @@ import {
   getJobOfferAvailabilityTone,
 } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
+import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import type { Job, Offer } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
 
@@ -33,7 +34,7 @@ export function JobCard({
       <div>
         <div className="flex items-start justify-between gap-3">
           <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-            {job.category}
+            {getCategoryDisplayLabel(job.category)}
           </span>
           <StatusBadge
             label={getJobOfferAvailabilityLabel(availability)}

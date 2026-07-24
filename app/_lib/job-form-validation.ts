@@ -15,6 +15,22 @@ export type JobFormFields = {
 
 export type JobFormErrors = Partial<Record<keyof JobFormFields, string>>;
 
+/**
+ * İl/ilçe/yer türü değiştiğinde artık geçersiz kalan alanların eski hata
+ * mesajlarını temizler — oluşturma (job-request-form.tsx) ve düzenleme
+ * (job-edit-form.tsx) formları aynı mantığı burada paylaşır. Hiçbir alan
+ * silinmeyecekse aynı referansı döner (gereksiz re-render olmasın diye).
+ */
+export function clearJobFormErrors(
+  errors: JobFormErrors,
+  fields: (keyof JobFormErrors)[],
+): JobFormErrors {
+  if (!fields.some((field) => field in errors)) return errors;
+  const next = { ...errors };
+  for (const field of fields) delete next[field];
+  return next;
+}
+
 export function validateJobForm(
   fields: JobFormFields,
   options?: { isEdit?: boolean },

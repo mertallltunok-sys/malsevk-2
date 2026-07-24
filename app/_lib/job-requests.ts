@@ -5,8 +5,10 @@ export type JobRequestFilter = "aktif" | "kabul-edildi" | "devam-eden" | "tamaml
 
 /**
  * Bir teklifin "meşgul / henüz sonuçlanmamış" sayılan durumları — TEK ortak
- * doğruluk kaynağı, iki bağımsız kuralın ikisi de bunu kullanır:
- *  - "Bu ilana artık yeni teklif verilemez" (jobHasAcceptedOffer, aşağıda)
+ * doğruluk kaynağı, birden fazla bağımsız kuralın kullandığı:
+ *  - "Bu ilan silinebilir mi" (jobHasAcceptedOffer, aşağıda — yalnızca
+ *    offers.ts#deleteJobWithOffers'ın koruması; YENİ teklif verilebilirliğini
+ *    ARTIK belirlemez, bkz. getJobOfferAvailability)
  *  - "Bu Hizmet Veren'in aktif iş kapasitesi doluyor mu"
  *    (provider-capacity.ts#getActiveJobCount)
  * İkisi kavramsal olarak aynı şeyi ifade eder: bir teklif bu durumlardan
@@ -14,10 +16,9 @@ export type JobRequestFilter = "aktif" | "kabul-edildi" | "devam-eden" | "tamaml
  * contact-access.ts, iletişim bilgisinin ne zaman açığa çıkacağını da bu
  * kümeyle belirler — iş süren tarafların birbirinin iletişim bilgisini
  * kaybetmemesi için. "agreement_failed" bilerek DAHİL DEĞİL — anlaşma
- * sağlanamadığında ilan bu küme sayesinde otomatik olarak yeniden teklife
- * açık hale gelir, Job.status'a hiç dokunulmadan. "completed"/"cancelled"
- * de DAHİL DEĞİL — bunlar işin sonuçlandığı, artık meşgul olmayan
- * durumlardır.
+ * sağlanamadığında bu teklif artık "meşgul" sayılmaz (ilan silinebilir hale
+ * gelir), Job.status'a hiç dokunulmadan. "completed"/"cancelled" de DAHİL
+ * DEĞİL — bunlar işin sonuçlandığı, artık meşgul olmayan durumlardır.
  */
 export const ENGAGED_OFFER_STATUSES: OfferStatus[] = [
   "accepted",
@@ -44,6 +45,44 @@ export const IN_PROGRESS_OFFER_STATUSES: OfferStatus[] = [
 
 /** "Tamamlanan İşler" olarak sayılan teklif durumları — TEK ortak doğruluk kaynağı. */
 export const COMPLETED_OFFER_STATUSES: OfferStatus[] = ["completed"];
+
+/**
+ * Bir ilanın artık düzenlenemeyeceği teklif durumları — ENGAGED_OFFER_STATUSES
+ * (iş hâlâ süren teklifler) + COMPLETED_OFFER_STATUSES (tamamlanmış) +
+ * "cancelled" (bir tamamlanma anlaşmazlığının iptalle sonuçlanması, bkz.
+ * offers.ts#resolveCompletionDispute) birleşimi. "cancelled" BİLEREK
+ * ENGAGED_OFFER_STATUSES'a dahil değil (orası yalnızca "iş hâlâ sürüyor"
+ * anlamına gelir, provider-capacity.ts onu bir kapasite serbest bırakma
+ * sinyali olarak kullanır) — ama fiilen yaşanmış ve iptalle kapanmış bir
+ * işin ilanı da artık düzenlenebilir olmamalı, bu yüzden burada AYRICA
+ * ekleniyor. "pending"/"rejected"/"withdrawn"/"agreement_failed" bilerek
+ * dışarıda — bunlar ilanın hâlâ düzenlenebilir kaldığı durumlardır (iş hiç
+ * başlamadı ya da agreement_failed'da olduğu gibi ilan otomatik olarak
+ * yeniden teklife açıldı). Modül dışına açılmıyor; tek erişim noktası
+ * aşağıdaki `isJobEditable`'dır — durum listesi başka hiçbir dosyada
+ * tekrar yazılmamalı.
+ */
+const JOB_LOCKING_OFFER_STATUSES: OfferStatus[] = [
+  ...ENGAGED_OFFER_STATUSES,
+  ...COMPLETED_OFFER_STATUSES,
+  "cancelled",
+];
+
+/** job-edit-form.tsx (route koruması) ve job-store.ts#updateJob (veri katmanı) aynı mesajı kullanır. */
+export const JOB_NOT_EDITABLE_MESSAGE = "Bu ilan, teklif süreci başladığı için artık düzenlenemez.";
+
+/**
+ * Bir ilanın (mevcut tekliflerine göre) hâlâ düzenlenebilir olup olmadığını
+ * söyler — TEK ortak doğruluk kaynağı. job-requests-panel.tsx ("Düzenle"
+ * linkinin görünürlüğü), job-edit-form.tsx (route koruması) ve
+ * job-store.ts#updateJob (veri katmanı koruması) HEPSİ bu fonksiyonu
+ * çağırır; aynı kural üç yerde ayrı ayrı yazılmaz.
+ */
+export function isJobEditable(jobId: string, offers: Offer[]): boolean {
+  return !offers.some(
+    (offer) => offer.jobId === jobId && JOB_LOCKING_OFFER_STATUSES.includes(offer.status),
+  );
+}
 
 /**
  * Bir teklif bu durumlardan birine geçtiğinde, aynı Hizmet Veren'in aynı
@@ -91,10 +130,14 @@ export const COMPLETION_AUTO_APPROVE_DAYS = 7;
  * Bir ilana kilitli (bkz. ENGAGED_OFFER_STATUSES) bir teklif olup olmadığını
  * söyler. Job.status'ta bunun karşılığı yok (bkz. types.ts: JobStatus
  * yalnızca "yayinda" | "tamamlandi" | "iptal") — kabul/iş başlama kararı
- * yalnızca Offer kayıtlarında tutuluyor. Bu, "teklif kabul edildikten sonra
- * ilana başka teklif verilemesin" kuralının tek doğruluk kaynağıdır; hem
- * teklif oluşturma yetkilendirmesinde (offers.ts#createOffer) hem arayüz
- * etiketlerinde aynı fonksiyon kullanılır.
+ * yalnızca Offer kayıtlarında tutuluyor. TEK KULLANIM YERİ artık
+ * offers.ts#deleteJobWithOffers'ın "aktif/tamamlanmış bir işi olan ilan
+ * silinemez" korumasıdır. Kasıtlı olarak YENİ teklif verilebilirliği
+ * belirlemek için KULLANILMAZ — bir ilana teklif kabul edilmiş olması artık
+ * o ilanı diğer Hizmet Verenlere kapatmıyor (bkz. getJobOfferAvailability,
+ * offers.ts#createOffer); aynı anda yalnızca TEK bir teklifin anlaşma
+ * sürecinin ilerleyebilmesi kuralı artık yalnızca isOfferPendingActionBlocked
+ * ile (Kabul Et/Reddet aksiyonları üzerinde) uygulanır.
  */
 export function jobHasAcceptedOffer(jobId: string, offers: Offer[]): boolean {
   return offers.some(
@@ -125,6 +168,37 @@ export function getCompletedOfferForJob(jobId: string, offers: Offer[]): Offer |
   return (
     offers.find((offer) => offer.jobId === jobId && COMPLETED_OFFER_STATUSES.includes(offer.status)) ?? null
   );
+}
+
+/**
+ * Bir ilana ait, taraflar arasında anlaşma süreci ilerlemiş (hâlâ meşgul —
+ * bkz. getEngagedOfferForJob — YA DA başarıyla tamamlanmış — bkz.
+ * getCompletedOfferForJob) tekli teklifi döndürür. Yeni bir durum listesi
+ * icat etmez, yalnızca bu iki mevcut merkezi yardımcının birleşimidir.
+ * "agreement_failed"/"cancelled"/"rejected"/"withdrawn"/"pending" BİLEREK
+ * dışarıda — bunlar "bu teklifle iş yürümüyor" anlamına gelir ve ilanı
+ * diğer bekleyen tekliflere yeniden açar (bkz. isOfferPendingActionBlocked).
+ */
+export function getSettledOfferForJob(jobId: string, offers: Offer[]): Offer | null {
+  return getEngagedOfferForJob(jobId, offers) ?? getCompletedOfferForJob(jobId, offers);
+}
+
+/** incoming-offer-card.tsx (buton yerine gösterilir) ve offers.ts#updateOfferStatus (veri katmanı hata mesajı) AYNI metni paylaşır. */
+export const OFFER_PENDING_BLOCKED_MESSAGE = "Bu ilan için başka bir teklifin anlaşma süreci devam ediyor.";
+
+/**
+ * Bir "pending" teklifin Kabul Et/Reddet eylemlerinin, AYNI ilana ait BAŞKA
+ * bir teklifin anlaşma süreci ilerlediği için geçici (teklif "completed"
+ * ise kalıcı) olarak askıya alınıp alınmadığını söyler — TEK ortak doğruluk
+ * kaynağı. Hem incoming-offer-card.tsx (buton görünürlüğü) hem
+ * offers.ts#updateOfferStatus (veri katmanında zorunlu kılma) bu fonksiyonu
+ * çağırır; aynı kural iki yerde ayrı ayrı yazılmaz. Bir teklif yalnızca
+ * BAŞKA bir teklif yüzünden engellenebilir — kendi durumu asla kendini
+ * engellemez (bu yüzden `settled.id !== offer.id` kontrolü var).
+ */
+export function isOfferPendingActionBlocked(offer: Offer, offers: Offer[]): boolean {
+  const settled = getSettledOfferForJob(offer.jobId, offers);
+  return settled !== null && settled.id !== offer.id;
 }
 
 /**
@@ -160,11 +234,25 @@ export type JobOfferAvailability = "acik" | "kapali" | "tamamlandi" | "iptal";
  * yaşam döngüsünü anlatır ve başka yerlerde de kullanıldığı için
  * değiştirilmedi; bu, yalnızca "yeni teklif verilebilir mi" sorusuna
  * odaklanan ayrı (ama tutarlı) bir etiketleme katmanıdır.
+ *
+ * Bir ilana kabul edilmiş/devam eden bir teklif olması (bkz.
+ * jobHasAcceptedOffer/ENGAGED_OFFER_STATUSES) BİLEREK burada "kapali"
+ * üretmez — bu ilan, "yayinda" kaldığı sürece daima "acik" döner. Aynı anda
+ * yalnızca TEK bir teklifin anlaşma sürecinin ilerleyebilmesi kuralı
+ * (Hizmet Alan'ın Kabul Et/Reddet aksiyonları) artık ilanın kendisini
+ * kapatarak değil, yalnızca o aksiyonların üzerinde uygulanır — bkz.
+ * isOfferPendingActionBlocked (incoming-offer-card.tsx,
+ * offers.ts#updateOfferStatus). `offers` parametresi imza uyumluluğu için
+ * korunur (çağıranlar değişmedi) ama bu fonksiyonun gövdesinde artık
+ * kullanılmaz. "kapali" değeri hâlâ `JobOfferAvailability` tipinde ve
+ * getJobAvailabilityForProvider'da (aşağıda) bir dal olarak durur — o dal
+ * bugünkü akışta bu fonksiyon tarafından hiç tetiklenmez, ama tip/etiket
+ * altyapısını bozmamak için kaldırılmadı.
  */
 export function getJobOfferAvailability(job: Job, offers: Offer[]): JobOfferAvailability {
   if (job.status === "tamamlandi") return "tamamlandi";
   if (job.status === "iptal") return "iptal";
-  return jobHasAcceptedOffer(job.id, offers) ? "kapali" : "acik";
+  return "acik";
 }
 
 export function getJobOfferAvailabilityLabel(availability: JobOfferAvailability): string {
@@ -195,9 +283,15 @@ export function getJobOfferAvailabilityTone(
   }
 }
 
-/** Bir ilanın şu anda yeni bir teklifi kabul edip edemeyeceğinin tek, birleşik kontrolü. */
+/**
+ * Bir ilanın şu anda yeni bir teklifi kabul edip edemeyeceğinin tek,
+ * birleşik kontrolü. Kabul edilmiş/devam eden bir teklifin varlığı BİLEREK
+ * artık bunu false yapmaz (bkz. getJobOfferAvailability) — yalnızca ilanın
+ * kendi durumu (job.status) belirleyicidir. `offers` parametresi imza
+ * uyumluluğu için korunur, gövdede kullanılmaz.
+ */
 export function isJobAcceptingNewOffers(job: Job, offers: Offer[]): boolean {
-  return isJobOpenForOffers(job.status) && !jobHasAcceptedOffer(job.id, offers);
+  return isJobOpenForOffers(job.status);
 }
 
 export type ProviderClosedReason = "gorusme-bekleniyor" | "is-devam-ediyor" | "tekrar-teklif-veremez";
@@ -289,7 +383,29 @@ export function getJobRequestFilterTone(
   }
 }
 
-export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi";
+export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi" | "kapanan-teklifler";
+
+/**
+ * Bir "pending" kardeş teklifin (aynı ilana verilmiş, kabul edilmemiş başka
+ * bir teklif), ilanın kabul edilmiş teklifi fiilen İŞE BAŞLADIĞI için artık
+ * anlamsız kaldığını söyler — TEK ortak doğruluk kaynağı, yeni bir
+ * Offer.status İCAT ETMEZ. getSettledOfferForJob'ı (üstteki, tek doğruluk
+ * kaynağı) tekrar yazmaz, üzerine tek bir ek koşulla inşa eder: settled
+ * teklif hâlâ yalnızca "accepted" ise (kabul edildi ama işe henüz
+ * başlanmadı) bu BİLEREK false döner — kardeş teklif "aktif" kalmaya devam
+ * eder, tıpkı işe başlamadan önceki mevcut davranışta olduğu gibi. Settled
+ * teklif "in_progress"/"completion_requested"/"completion_disputed"/
+ * "completed" olduğunda true döner. Settled teklif sonradan "cancelled"
+ * sonucuyla biterse (bkz. offers.ts#resolveCompletionDispute)
+ * getSettledOfferForJob onu artık döndürmez, bu da kardeş teklifi otomatik
+ * olarak yeniden "aktif"e döndürür — isOfferPendingActionBlocked'daki aynı
+ * yeniden-açılma deseniyle (Hizmet Alan tarafında Kabul Et/Reddet
+ * butonlarının yeniden görünmesiyle) tutarlıdır.
+ */
+function isOfferClosedByJobProgress(offer: Offer, offers: Offer[]): boolean {
+  const settled = getSettledOfferForJob(offer.jobId, offers);
+  return settled !== null && settled.id !== offer.id && settled.status !== "accepted";
+}
 
 /**
  * Hizmet Veren'in "Verdiğim Teklifler" sayfasındaki sekme filtrelemesinin tek
@@ -297,24 +413,42 @@ export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi";
  * (birden fazla teklifi birleştiren) muadili değil, TEK bir teklifin kendi
  * durumuna bakan Offer-seviyesi hali. IN_PROGRESS_OFFER_STATUSES/
  * COMPLETED_OFFER_STATUSES'ı (yukarıda tanımlı, tek doğruluk kaynağı)
- * doğrudan kullanır, yeni bir status kümesi icat etmez.
+ * doğrudan kullanır, yeni bir status kümesi icat etmez. İkinci parametre
+ * (`offers`, ilana ait TÜM teklifler — yalnızca çağıranın kendi teklifleri
+ * değil) `isOfferClosedByJobProgress` için gereklidir; tek bir Offer'ın
+ * kendi durumuna bakmak yetmez, kardeş tekliflerin durumuna da bakılmalıdır.
  *
  * "accepted" (kabul edildi ama iş henüz başlamadı) burada `getJobRequestFilter`
  * ile aynı şekilde kendi başına bir sekme değildir — ayrı bir "Kabul Edilen"
  * sekmesi kaldırıldığı için "aktif"e düşer (bkz. my-offers-panel.tsx).
- * "pending"/"rejected"/"agreement_failed"/"cancelled" (henüz kabul edilmemiş
- * ya da olumsuz sonuçlanmış teklifler) de aynı şekilde "aktif" sekmesine
- * düşer — kesin bir sonuca varmamış ya da kabul dışında sonuçlanmış her
- * şeyin toplandığı sekme. "withdrawn" ise (bkz. isOfferVisibleInNormalLists)
- * `null` döner — `getJobRequestFilter`in "iptal" ilan için null dönmesiyle
- * aynı desen: hiçbir sekmede görünmesin diye BİLEREK herhangi bir TabKey ile
- * eşleşmez (my-offers-panel.tsx'teki `=== activeTab` karşılaştırması bu
- * yüzden ek bir filtre satırına gerek duymadan withdrawn'ı otomatik eler).
+ * "rejected" (henüz kesin bir sonuca varmamış/kabul dışında sonuçlanmış her
+ * şeyin toplandığı "aktif" sekmesinde kalır) DIŞINDA, kalıcı/olumsuz
+ * sonuçlanan ÜÇ durum "kapanan-teklifler"e düşer: "agreement_failed" (kendi
+ * kabulü sonradan bozulmuş), "cancelled" (kabul edilip iş başlamış, itiraz
+ * edilmiş ve Hizmet Alan'ın "İptal Olarak Sonuçlandır" kararıyla kapanmış —
+ * bkz. offers.ts#resolveCompletionDispute) ve "pending" bir kardeş teklif
+ * (aynı ilandaki başka bir teklif fiilen işe başladıysa, bkz.
+ * isOfferClosedByJobProgress — henüz kabul aşamasında ya da hiç kabul
+ * yokken "aktif" kalır). Üçünde de kullanıcının üzerinde yapabileceği
+ * hiçbir işlem kalmamıştır (bkz. my-offers-panel.tsx — bu durumlarda zaten
+ * hiçbir aksiyon butonu render edilmez). Bu üç "kapanan-teklifler" durumu
+ * ayrı gösterilir — my-offers-panel.tsx yalnızca "pending" olanı "Başka Bir
+ * Hizmet Verenle Anlaşıldı" ile geçersiz kılar; "agreement_failed" ve
+ * "cancelled" kendi getOfferStatusLabel'ını ("Anlaşma Sağlanamadı"/"İptal
+ * Edildi") korur, "cancelled" ayrıca kartta "İtiraz sonrası iş iptal
+ * edildi." bilgi satırını gösterir. "withdrawn" ise (bkz.
+ * isOfferVisibleInNormalLists) `null` döner — `getJobRequestFilter`in
+ * "iptal" ilan için null dönmesiyle aynı desen: hiçbir sekmede görünmesin
+ * diye BİLEREK herhangi bir TabKey ile eşleşmez (my-offers-panel.tsx'teki
+ * `=== activeTab` karşılaştırması bu yüzden ek bir filtre satırına gerek
+ * duymadan withdrawn'ı otomatik eler).
  */
-export function getProviderOfferFilter(offer: Offer): ProviderOfferFilter | null {
+export function getProviderOfferFilter(offer: Offer, offers: Offer[]): ProviderOfferFilter | null {
   if (!isOfferVisibleInNormalLists(offer)) return null;
   if (IN_PROGRESS_OFFER_STATUSES.includes(offer.status)) return "devam-eden";
   if (COMPLETED_OFFER_STATUSES.includes(offer.status)) return "tamamlandi";
+  if (offer.status === "agreement_failed" || offer.status === "cancelled") return "kapanan-teklifler";
+  if (offer.status === "pending" && isOfferClosedByJobProgress(offer, offers)) return "kapanan-teklifler";
   return "aktif";
 }
 
@@ -336,13 +470,22 @@ export function getProviderOffersTabHref(filter: ProviderOfferFilter): string {
  * `getProviderOfferFilter` + `getProviderOffersTabHref`'in birleşimi.
  * Bildirim hedefleri (notifications.ts) bunu kullanır, böylece bir
  * bildirimin yönlendirdiği sekme her zaman aynı teklifin GERÇEKTEN
- * göründüğü sekmeyle birebir eşleşir. `?? "aktif"` yalnızca tip güvenliği
- * içindir — bu fonksiyonu çağıran hiçbir bildirim türü "withdrawn" bir
- * teklif için üretilmez (bkz. notifications.ts), o yüzden pratikte hiç
- * tetiklenmez.
+ * göründüğü sekmeyle birebir eşleşir. `offers` (ilana ait TÜM teklifler)
+ * `getProviderOfferFilter`e aktarmak için vardır — bu fonksiyonu çağıran
+ * bildirim türlerinden ("kabul/ret/işe başlama/anlaşma sağlanamadı/
+ * tamamlanma/itiraz/iptal") hiçbiri "pending" bir teklif için üretilmez, o
+ * yüzden "kapanan-teklifler" dalının "pending" (kardeş teklif) kolu buradan
+ * hiç tetiklenmez; ANCAK "anlasma_saglanamadi" bildirimi "agreement_failed",
+ * "is_iptal_edildi" bildirimi ise "cancelled" durumundaki teklif için
+ * üretilir ve bu iki durum da "kapanan-teklifler"e eşlenir (bkz.
+ * getProviderOfferFilter) — yani bu dal GERÇEKTEN tetiklenir, yalnızca
+ * "pending" kolundan değil "agreement_failed"/"cancelled" kollarından da.
+ * `?? "aktif"` yalnızca tip güvenliği içindir — bu fonksiyonu çağıran hiçbir
+ * bildirim türü "withdrawn" bir teklif için üretilmez (bkz. notifications.ts),
+ * o yüzden pratikte hiç tetiklenmez.
  */
-export function getProviderOfferNotificationHref(offer: Offer): string {
-  return getProviderOffersTabHref(getProviderOfferFilter(offer) ?? "aktif");
+export function getProviderOfferNotificationHref(offer: Offer, offers: Offer[]): string {
+  return getProviderOffersTabHref(getProviderOfferFilter(offer, offers) ?? "aktif");
 }
 
 /**

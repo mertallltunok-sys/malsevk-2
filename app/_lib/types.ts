@@ -6,6 +6,12 @@ export type Session = {
   role: UserRole;
 };
 
+/** Bkz. service-catalog.ts#SERVICE_FEATURE_OPTIONS. */
+export type ServiceFeature = "operatorlu" | "operatorsuz" | "7-24" | "acil-hizmet" | "faturali";
+
+/** Bkz. service-catalog.ts#EXPERIENCE_RANGE_OPTIONS. */
+export type ExperienceRange = "0-1" | "1-3" | "3-5" | "5-10" | "10+";
+
 /**
  * Yalnızca hizmet-veren kullanıcılarda anlamlı, tamamen opsiyonel bir
  * profil eki (bkz. users.ts#StoredUser). Kullanıcı kaydını oluştururken
@@ -19,10 +25,35 @@ export type ProviderProfile = {
   bio: string;
   /** 1900 ile mevcut yıl arasında olmalıdır (bkz. provider-profile.ts); belirtilmemişse yoktur. */
   foundedYear?: number;
-  /** İl adları (bkz. turkey-locations.ts#getProvinces) — hizmet verilen bölgeler. */
+  /** İl adları (bkz. turkey-locations.ts#getProvinces) — hizmet verilen bölgeler. Panel > Profilim > Hizmet Bilgilerim'den de düzenlenir (bkz. users.ts#updateProviderServiceInfo). */
   regions: string[];
-  /** jobs.ts#SERVICE_CATEGORIES içinden seçilmiş uzmanlık alanları. */
+  /**
+   * ESKİ, jobs.ts#SERVICE_CATEGORIES'ten (8 elemanlı düz liste) seçilmiş
+   * uzmanlık alanları — Hesap Ayarları > Firma Profili'ndeki "Uzmanlık
+   * Alanları" chip'leri hâlâ bunu okur/yazar (bkz. provider-profile-editor.tsx),
+   * DEPRECATED ama kaldırılmadı (bkz. service-catalog.ts başındaki not).
+   * Yeni kod bu alana YAZMAMALI — yalnızca `serviceCategories`e yazılır;
+   * bu alan yalnızca geriye dönük okuma için var, migrasyonu
+   * service-catalog.ts#migrateLegacyExpertiseToServiceCategoryIds yapar.
+   */
   expertise: string[];
+  /**
+   * Platformun tek merkezi hizmet kataloğundan (service-catalog.ts#
+   * SERVICE_CATEGORY_GROUPS) seçilmiş hizmet id'leri — hem "Hizmet
+   * Bilgilerim" hem (aynı id'ler üzerinden) ilan kategorisi ile ortak
+   * veri temelini paylaşır. Yeni kayıt/güncellemelerde ESAS ALINAN
+   * alandır (bkz. users.ts#updateProviderServiceInfo). Bu alandan önce
+   * oluşturulmuş profillerde yoktur — böyle profiller açıldığında
+   * `expertise`ten migrateLegacyExpertiseToServiceCategoryIds ile
+   * türetilen değerlerle BİRLEŞTİRİLEREK gösterilir (bkz.
+   * service-info-editor.tsx), ama bu alanın kendisi yalnızca kullanıcı
+   * kaydettiğinde yazılır.
+   */
+  serviceCategories?: string[];
+  /** Yeni (Aşama 2): hizmet özellikleri çoklu seçimi. Bu alandan önce oluşturulmuş profillerde yoktur. */
+  serviceFeatures?: ServiceFeature[];
+  /** Yeni (Aşama 2): deneyim aralığı. Bu alandan önce oluşturulmuş profillerde yoktur. */
+  experienceRange?: ExperienceRange;
 };
 
 export type Currency = "TRY" | "USD";

@@ -2,11 +2,11 @@
 
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useId, useMemo, useState } from "react";
-import { validateJobForm, type JobFormErrors } from "../_lib/job-form-validation";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { clearJobFormErrors, validateJobForm, type JobFormErrors } from "../_lib/job-form-validation";
 import { createJob } from "../_lib/job-store";
-import { SERVICE_CATEGORIES } from "../_lib/jobs";
 import { MIN_PHOTOS } from "../_lib/photo-validation";
+import { SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import {
   FACILITY_TYPE_OPTIONS,
   getDistrictId,
@@ -58,6 +58,24 @@ export function JobRequestForm() {
   const [errors, setErrors] = useState<JobFormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // React state (submitting) yalnızca UI'yi (buton disabled/metin) sürer —
+  // aynı JS event-loop turunda art arda iki tıklama, ikisi de state commit
+  // edilmeden ÖNCE handleSubmit'e ulaşabilir, bu yüzden çift-gönderim
+  // koruması BUNA dayanamaz. `submitLockRef` senkron, render'dan bağımsız
+  // bir kilit: ilk geçerli submit anında hemen kapanır, ikinci çağrı state
+  // güncellemesini beklemeden bu kilidi görüp döner (bkz. handleSubmit).
+  const submitLockRef = useRef(false);
+  // Kullanıcı createJob() sonucu beklenirken sayfadan ayrılırsa (ör. bir
+  // linke tıklarsa) component unmount olabilir; bu durumda await sonrası
+  // setSubmitting/setSubmitError çağrısı React'in "unmounted component'te
+  // state güncelleme" uyarısını tetikler. isMountedRef bunu engeller.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const provinces = useMemo(() => getProvinces(), []);
   const provinceName = provinces.find((item) => item.code === provinceCode)?.name ?? "";
@@ -120,14 +138,9 @@ export function JobRequestForm() {
     setDistrict("");
     setFacilityType("");
     setWorkLocationType("");
-    setErrors((current) => {
-      const next = { ...current };
-      delete next.province;
-      delete next.district;
-      delete next.facilityType;
-      delete next.workLocationType;
-      return next;
-    });
+    setErrors((current) =>
+      clearJobFormErrors(current, ["province", "district", "facilityType", "workLocationType"]),
+    );
   }
 
   // İlçe değiştiğinde: yer türü seçimi KORUNUR (kullanıcı "Liman" arıyorsa,
@@ -136,12 +149,7 @@ export function JobRequestForm() {
   function handleDistrictChange(nextDistrict: string) {
     setDistrict(nextDistrict);
     setWorkLocationType("");
-    setErrors((current) => {
-      const next = { ...current };
-      delete next.district;
-      delete next.workLocationType;
-      return next;
-    });
+    setErrors((current) => clearJobFormErrors(current, ["district", "workLocationType"]));
   }
 
   // Yer türü değiştiğinde: eski tesis seçimi temizlenir, yeni filtre
@@ -149,12 +157,7 @@ export function JobRequestForm() {
   function handleFacilityTypeChange(nextType: FacilityType | "") {
     setFacilityType(nextType);
     setWorkLocationType("");
-    setErrors((current) => {
-      const next = { ...current };
-      delete next.facilityType;
-      delete next.workLocationType;
-      return next;
-    });
+    setErrors((current) => clearJobFormErrors(current, ["facilityType", "workLocationType"]));
   }
 
   /** İlk hatalı/eksik zorunlu alana kaydırır ve odak verir (bkz. FIELD_ORDER). */
@@ -212,7 +215,9 @@ export function JobRequestForm() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting || photosProcessing) return;
+    // Senkron kilit: state (submitting) commit edilmeden önce gelebilecek
+    // ikinci bir çağrıyı da hemen durdurur (bkz. submitLockRef tanımı).
+    if (submitLockRef.current || photosProcessing) return;
 
     const fieldErrors = validateJobForm({
       category,
@@ -230,30 +235,41 @@ export function JobRequestForm() {
     setSubmitError(null);
 
     if (Object.keys(fieldErrors).length > 0) {
+      // Doğrulama hatası varsa kilit hiç kapatılmadan akış sonlanır.
       focusFirstError(fieldErrors);
       return;
     }
 
+    // İlk geçerli submit anında kilit SENKRON olarak kapanır — aynı anda
+    // gelen ikinci bir çağrı, henüz bir sonraki render gerçekleşmemiş olsa
+    // bile bu satırı görüp yukarıdaki guard'da döner.
+    submitLockRef.current = true;
     setSubmitting(true);
-    const result = await createJob(session, {
-      category,
-      title,
-      description,
-      province: provinceName,
-      district,
-      workLocationType,
-      workDate,
-      operationDetails,
-      photos,
-    });
-    setSubmitting(false);
+    try {
+      const result = await createJob(session, {
+        category,
+        title,
+        description,
+        province: provinceName,
+        district,
+        workLocationType,
+        workDate,
+        operationDetails,
+        photos,
+      });
 
-    if (!result.ok) {
-      setSubmitError(result.error);
-      return;
+      if (!result.ok) {
+        if (isMountedRef.current) setSubmitError(result.error);
+        return;
+      }
+
+      router.push(`/ilanlar/${result.job.id}`);
+    } finally {
+      // createJob() beklenmedik şekilde reddedilse/hata fırlatsa bile kilit
+      // burada mutlaka açılır — takılı kalmaz.
+      submitLockRef.current = false;
+      if (isMountedRef.current) setSubmitting(false);
     }
-
-    router.push(`/ilanlar/${result.job.id}`);
   }
 
   return (
@@ -278,10 +294,14 @@ export function JobRequestForm() {
             }`}
           >
             <option value="">Kategori seçiniz</option>
-            {SERVICE_CATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
+            {SERVICE_CATEGORY_GROUPS.map((group) => (
+              <optgroup key={group.id} label={group.label}>
+                {group.categories.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
           {errors.category && (
@@ -394,6 +414,7 @@ export function JobRequestForm() {
             role={session.role}
             onPhotosChange={handlePhotosChange}
             onBusyChange={setPhotosProcessing}
+            disabled={submitting || photosProcessing}
             errorId={errors.photoCount ? `${photosId}-error` : undefined}
           />
         </div>

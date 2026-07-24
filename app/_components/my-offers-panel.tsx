@@ -12,8 +12,8 @@ import {
 } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
+import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import {
-  getOffersByProvider,
   getOfferStatusLabel,
   getOfferStatusTone,
   requestCompletion,
@@ -22,6 +22,7 @@ import {
 import { getCompletionDeadlineIso } from "../_lib/time-remaining";
 import type { Offer } from "../_lib/types";
 import { useAllJobs } from "../_lib/use-jobs";
+import { useAllOffers } from "../_lib/use-offers";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { CompletionCountdown } from "./completion-countdown";
@@ -29,6 +30,20 @@ import { ContactInfoBlock } from "./contact-info-block";
 import { StatusBadge } from "./status-badge";
 
 const DESCRIPTION_PREVIEW_LENGTH = 140;
+
+/**
+ * "Kapanan Teklifler" sekmesinde YALNIZCA hâlâ "pending" olan (başka bir
+ * teklif işe başladığı için kapanan kardeş) tekliflerde kullanılır — o
+ * durumda offer.status hâlâ "pending" olduğu için getOfferStatusLabel
+ * "Beklemede" döndürürdü, bu da yanıltıcı olurdu; bu yalnızca bu sekmede
+ * geçerli görsel bir geçersiz kılmadır (yeni bir Offer.status yok).
+ * Aynı sekmedeki "agreement_failed" teklifler bu geçersiz kılmayı KULLANMAZ
+ * — kendi gerçek durum etiketini ("Anlaşma Sağlanamadı") gösterir (bkz.
+ * aşağıdaki isClosedSiblingOffer ayrımı). getOfferStatusLabel'ın kendisi
+ * değiştirilmez; o hâlâ incoming-offer-card.tsx gibi diğer ekranlarda
+ * "pending" için "Beklemede" döndürmeye devam eder.
+ */
+const CLOSED_SIBLING_OFFER_LABEL = "Başka Bir Hizmet Verenle Anlaşıldı";
 
 /** Mevcut "Görüşme Sonucu" diyaloglarıyla (offer-outcome-panel.tsx) aynı desen. */
 function RequestCompletionDialog({
@@ -179,17 +194,30 @@ type TabKey = ProviderOfferFilter;
 // Job tarafındaki (job-requests-panel.tsx) "aktif/devam-eden/tamamlandi" sekme
 // deseniyle aynı yapı. Kabul edilmiş ama iş henüz başlamamış teklifler ayrı
 // bir sekme değil, "aktif" içinde gösterilir (bkz.
-// job-requests.ts#getProviderOfferFilter).
+// job-requests.ts#getProviderOfferFilter). "Kapanan Teklifler" üç farklı
+// durumu birleştirir: (1) aynı ilana verilmiş ama başka bir teklif işe
+// başladığı için artık anlamsız kalan "pending" kardeş teklifler (bkz.
+// job-requests.ts#isOfferClosedByJobProgress — kabul edilmiş ama işe henüz
+// başlanmamışken, yalnızca "accepted", kardeş teklifler hâlâ "aktif"te
+// kalır), (2) kendi kabulü sonradan "agreement_failed" olan teklifler (bkz.
+// offers.ts#recordAgreementFailure, notifications.ts#
+// agreementFailedNotifications) ve (3) kabul edilip iş başlamış, itiraz
+// edilmiş ve Hizmet Alan'ın "İptal Olarak Sonuçlandır" kararıyla kapanmış
+// "cancelled" teklifler (bkz. offers.ts#resolveCompletionDispute,
+// notifications.ts#cancelledNotifications). Üçü de kartta farklı gösterilir
+// (bkz. isClosedSiblingOffer ve "cancelled" bilgi satırı, aşağıda).
 const TABS: { key: TabKey; label: string }[] = [
   { key: "aktif", label: "Aktif" },
   { key: "devam-eden", label: "Devam Eden" },
   { key: "tamamlandi", label: "Tamamlanan" },
+  { key: "kapanan-teklifler", label: "Kapanan Teklifler" },
 ];
 
 const EMPTY_MESSAGES: Record<TabKey, string> = {
   aktif: "Henüz herhangi bir ilana teklif vermediniz.",
   "devam-eden": "Devam eden işiniz bulunmuyor.",
   tamamlandi: "Tamamlanan işiniz bulunmuyor.",
+  "kapanan-teklifler": "Kapanan teklifiniz bulunmuyor.",
 };
 
 const tabHref = getProviderOffersTabHref;
@@ -199,6 +227,11 @@ export function MyOffersPanel() {
   const jobs = useAllJobs();
   const jobById = new Map(jobs.map((job) => [job.id, job]));
   const searchParams = useSearchParams();
+  // Yalnızca kendi tekliflerimiz değil, TÜM teklifler gerekli — "Kapanan
+  // Teklifler" sekmesi bir kardeş teklifin (başka bir Hizmet Veren'e ait)
+  // işe başlayıp başlamadığına bakar (bkz. job-requests.ts#
+  // getProviderOfferFilter'ın ikinci parametresi).
+  const allOffers = useAllOffers();
 
   const [completionTarget, setCompletionTarget] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -271,13 +304,18 @@ export function MyOffersPanel() {
     setWithdrawTarget(null);
   }
 
-  const offers = getOffersByProvider(session.id);
+  const offers = allOffers
+    .filter((offer) => offer.providerId === session.id)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   const rawDurum = searchParams.get("durum");
   const activeTab: TabKey =
-    rawDurum === "devam-eden" || rawDurum === "tamamlandi" ? rawDurum : "aktif";
+    rawDurum === "devam-eden" || rawDurum === "tamamlandi" || rawDurum === "kapanan-teklifler"
+      ? rawDurum
+      : "aktif";
+  const isClosedTab = activeTab === "kapanan-teklifler";
 
-  const visible = offers.filter((offer) => getProviderOfferFilter(offer) === activeTab);
+  const visible = offers.filter((offer) => getProviderOfferFilter(offer, allOffers) === activeTab);
 
   return (
     <div>
@@ -326,6 +364,14 @@ export function MyOffersPanel() {
               const preview = isLong
                 ? `${offer.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`
                 : offer.description;
+              // "Kapanan Teklifler" sekmesi iki farklı durumu bir arada
+              // gösterir (bkz. job-requests.ts#getProviderOfferFilter): hâlâ
+              // "pending" olan ama başka bir teklif işe başladığı için kapanan
+              // kardeş teklifler VE kendi kabulü sonradan "agreement_failed"
+              // olan teklifler. Yalnızca ilki "Başka Bir Hizmet Verenle
+              // Anlaşıldı" ile geçersiz kılınır — "agreement_failed" kendi
+              // gerçek durum etiketini ("Anlaşma Sağlanamadı") korur.
+              const isClosedSiblingOffer = isClosedTab && offer.status === "pending";
 
               return (
                 <div
@@ -336,7 +382,7 @@ export function MyOffersPanel() {
                     <div>
                       {job && (
                         <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-                          {job.category}
+                          {getCategoryDisplayLabel(job.category)}
                         </span>
                       )}
                       <h3 className="mt-2 text-lg font-semibold text-foreground">
@@ -344,8 +390,8 @@ export function MyOffersPanel() {
                       </h3>
                     </div>
                     <StatusBadge
-                      label={getOfferStatusLabel(offer.status)}
-                      tone={getOfferStatusTone(offer.status)}
+                      label={isClosedSiblingOffer ? CLOSED_SIBLING_OFFER_LABEL : getOfferStatusLabel(offer.status)}
+                      tone={isClosedSiblingOffer ? "neutral" : getOfferStatusTone(offer.status)}
                     />
                   </div>
 
@@ -386,7 +432,7 @@ export function MyOffersPanel() {
                       >
                         İlan detayına git
                       </Link>
-                      {offer.status === "pending" && (
+                      {offer.status === "pending" && !isClosedTab && (
                         <button
                           type="button"
                           onClick={() => openWithdrawDialog(offer)}
@@ -427,6 +473,12 @@ export function MyOffersPanel() {
                       İtiraz edildi
                       {offer.completionDisputeNote ? `: "${offer.completionDisputeNote}"` : "."} Hizmet
                       Alan sonucu belirleyecek.
+                    </p>
+                  )}
+
+                  {offer.status === "cancelled" && (
+                    <p className="mt-4 break-words text-sm leading-relaxed text-muted-foreground">
+                      İtiraz sonrası iş iptal edildi.
                     </p>
                   )}
                 </div>

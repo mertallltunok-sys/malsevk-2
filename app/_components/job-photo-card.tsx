@@ -41,7 +41,7 @@ export function JobPhotoCard({
         type="button"
         onClick={onDelete}
         aria-label={`${fileName} fotoğrafını sil`}
-        className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow-sm transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="absolute right-2 top-2 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow-sm transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-8 sm:w-8"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>
@@ -77,7 +77,7 @@ export function JobPhotoCard({
             onClick={onMoveUp}
             disabled={!canMoveUp}
             aria-label="Sırada öne al"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40 sm:h-7 sm:w-7"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -86,7 +86,7 @@ export function JobPhotoCard({
             onClick={onMoveDown}
             disabled={!canMoveDown}
             aria-label="Sırada geri al"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40 sm:h-7 sm:w-7"
           >
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </button>

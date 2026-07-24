@@ -408,6 +408,13 @@ export function OfferOutcomePanel({
       return;
     }
     setModal("none");
+    // Yalnızca itiraz "completed" ile sonuçlandığında, handleConfirmCompletion
+    // ile AYNI desen: değerlendirme modalını hemen tetikle. "cancelled"
+    // sonucunda iş hiç tamamlanmadığı için puanlanabilir değildir — onCompleted
+    // bilerek çağrılmaz.
+    if (resolution === "completed") {
+      onCompleted?.(result.offer);
+    }
   }
 
   if (offer.status === "accepted") {

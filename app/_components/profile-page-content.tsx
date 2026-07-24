@@ -9,6 +9,7 @@ import { findUserById } from "../_lib/users";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { ProfileInfoCard } from "./profile-info-card";
 import { ProviderRatingSummaryCard } from "./provider-rating-summary-card";
+import { ServiceInfoEditor } from "./service-info-editor";
 
 /**
  * Veriler yalnızca oturumdaki kullanıcının kendi id'sinden (`session.id`)
@@ -44,12 +45,15 @@ export function ProfilePageContent() {
       <p className="mt-3 text-base leading-relaxed text-muted-foreground">
         Hesabınıza ait temel bilgileri görüntüleyin.
       </p>
-      <div className="mt-8">
+      <div className="mt-8 flex flex-col gap-6">
         <ProfileInfoCard profile={getProfileInfo(user)} />
+        {user.role === "hizmet-veren" && (
+          <>
+            <ProviderRatingSummaryCard summary={getProviderRatingSummary(user.id, offers, ratings)} />
+            <ServiceInfoEditor session={session} user={user} />
+          </>
+        )}
       </div>
-      {user.role === "hizmet-veren" && (
-        <ProviderRatingSummaryCard summary={getProviderRatingSummary(user.id, offers, ratings)} />
-      )}
     </div>
   );
 }

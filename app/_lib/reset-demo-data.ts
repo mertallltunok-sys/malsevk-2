@@ -1,8 +1,9 @@
 /**
  * Yalnızca demo/seed hesaplara (bkz. users.ts#DEV_ACCOUNT_EMAILS) ait
- * işlem verilerini (ilan, teklif, bildirim okunma durumu, ilan
- * fotoğrafları) temizleyen, dev-only bir yardımcı modül. Demo hesap
- * kayıtlarının kendisine (kullanıcı/giriş bilgileri) HİÇ dokunmaz.
+ * işlem verilerini (ilan, teklif, değerlendirme/rating, bildirim okunma
+ * durumu, ilan fotoğrafları) temizleyen, dev-only bir yardımcı modül. Demo
+ * hesap kayıtlarının kendisine (kullanıcı/giriş bilgileri, ProviderProfile)
+ * HİÇ dokunmaz.
  *
  * İki kullanım şekli vardır:
  *  1. Manuel, tekrar tekrar çalıştırılabilir: `planDemoDataReset()` +
@@ -18,6 +19,7 @@
  */
 import { getAllUserCreatedJobs, removeUserCreatedJobsByIds } from "./job-store";
 import { getAllOffers, removeOffersByIds } from "./offers";
+import { getAllRatings, removeRatingsByIds } from "./ratings";
 import { clearDismissedNotifications } from "./notification-dismissals";
 import { clearReadNotifications } from "./notification-reads";
 import { DEV_ACCOUNT_EMAILS, findUserByEmail, getAllUsers } from "./users";
@@ -30,6 +32,8 @@ export type DemoDataCounts = {
   demoJobs: number;
   totalOffers: number;
   demoOffers: number;
+  totalRatings: number;
+  demoRatings: number;
   demoPhotoCount: number;
 };
 
@@ -46,6 +50,7 @@ export type DemoDataPlan = {
   demoUserEmails: string[];
   jobIdsToRemove: string[];
   offerIdsToRemove: string[];
+  ratingIdsToRemove: string[];
   photoStorageKeysToRemove: string[];
   before: DemoDataCounts;
   duplicateOfferPairs: DuplicateOfferPair[];
@@ -62,12 +67,21 @@ function computeCounts(demoUserIdSet: Set<string>): DemoDataCounts {
   const users = getAllUsers();
   const jobs = getAllUserCreatedJobs();
   const offers = getAllOffers();
+  const ratings = getAllRatings();
 
   const demoJobIdSet = new Set(
     jobs.filter((job) => job.requesterId !== null && demoUserIdSet.has(job.requesterId)).map((job) => job.id),
   );
   const demoOffers = offers.filter(
     (offer) => demoUserIdSet.has(offer.providerId) || demoJobIdSet.has(offer.jobId),
+  ).length;
+  // Aynı iki koşulla (demo ilan YA DA demo Hizmet Veren) süzülür — bir
+  // Rating her zaman tam olarak bir Offer'a karşılık geldiği için (bkz.
+  // ratings.ts#submitRating, offerId başına tek kayıt) demo sayılan teklif
+  // kümesiyle birebir aynı mantık kullanılır, ayrıca bir "hangi teklifler
+  // silinecek" arama tablosuna gerek kalmaz.
+  const demoRatings = ratings.filter(
+    (rating) => demoUserIdSet.has(rating.providerId) || demoJobIdSet.has(rating.jobId),
   ).length;
   const demoPhotoCount = jobs
     .filter((job) => demoJobIdSet.has(job.id))
@@ -80,6 +94,8 @@ function computeCounts(demoUserIdSet: Set<string>): DemoDataCounts {
     demoJobs: demoJobIdSet.size,
     totalOffers: offers.length,
     demoOffers,
+    totalRatings: ratings.length,
+    demoRatings,
     demoPhotoCount,
   };
 }
@@ -121,6 +137,10 @@ export function getDemoDataCounts(): DemoDataCounts {
  * silinince orphan kalmasınlar diye) VE demo bir Hizmet Veren'in verdiği
  * TÜM teklifler (ilan gerçek bir kullanıcıya ait olsa bile — ilan ve
  * ilanın diğer teklifleri KORUNUR, yalnızca bu tek teklif kaydı silinir).
+ * Silinecek değerlendirmeler (Rating) AYNI iki koşulu kullanır — bir
+ * Rating her zaman tam olarak bir Offer'a karşılık geldiği için (bkz.
+ * ratings.ts#submitRating) mantık tekrar yazılmaz, offersToRemove'daki
+ * aynı iki koşul (demoJobIdSet / demoUserIdSet) doğrudan uygulanır.
  */
 export function planDemoDataReset(): DemoDataPlan {
   const demoAccounts = resolveDemoAccounts();
@@ -129,12 +149,17 @@ export function planDemoDataReset(): DemoDataPlan {
 
   const jobs = getAllUserCreatedJobs();
   const offers = getAllOffers();
+  const ratings = getAllRatings();
 
   const demoJobs = jobs.filter((job) => job.requesterId !== null && demoUserIdSet.has(job.requesterId));
   const demoJobIdSet = new Set(demoJobs.map((job) => job.id));
 
   const offersToRemove = offers.filter(
     (offer) => demoJobIdSet.has(offer.jobId) || demoUserIdSet.has(offer.providerId),
+  );
+
+  const ratingsToRemove = ratings.filter(
+    (rating) => demoJobIdSet.has(rating.jobId) || demoUserIdSet.has(rating.providerId),
   );
 
   const photoStorageKeysToRemove = demoJobs.flatMap((job) => job.photos.map((photo) => photo.storageKey));
@@ -144,6 +169,7 @@ export function planDemoDataReset(): DemoDataPlan {
     demoUserEmails: demoAccounts.map((account) => account.email),
     jobIdsToRemove: demoJobs.map((job) => job.id),
     offerIdsToRemove: offersToRemove.map((offer) => offer.id),
+    ratingIdsToRemove: ratingsToRemove.map((rating) => rating.id),
     photoStorageKeysToRemove,
     before: computeCounts(demoUserIdSet),
     duplicateOfferPairs: findDuplicateOfferPairs(offers, demoUserIdSet),
@@ -160,6 +186,7 @@ export function planDemoDataReset(): DemoDataPlan {
 export async function executeDemoDataReset(plan: DemoDataPlan): Promise<DemoDataCounts> {
   await removeUserCreatedJobsByIds(plan.jobIdsToRemove);
   removeOffersByIds(plan.offerIdsToRemove);
+  removeRatingsByIds(plan.ratingIdsToRemove);
   for (const userId of plan.demoUserIds) {
     clearReadNotifications(userId);
     clearDismissedNotifications(userId);
@@ -171,16 +198,29 @@ export async function executeDemoDataReset(plan: DemoDataPlan): Promise<DemoData
 
 const DEMO_DATA_RESET_MIGRATION_KEY = "malsevk.demo_data_reset_version";
 /**
- * Bu değeri değiştirmek (ör. "demo-data-reset-v3"), önceki sürümde bu
+ * Bu değeri değiştirmek (ör. "demo-data-reset-v4"), önceki sürümde bu
  * migration'ı zaten çalıştırmış tarayıcılarda da yeniden bir kez daha
  * çalıştırır — eski bir anahtar/versiyon varsa tarayıcı "zaten çalıştı"
  * sanıp temizliği atlamasın diye.
+ *
+ * v2 -> v3: `planDemoDataReset`/`executeDemoDataReset` artık Rating
+ * kayıtlarını da temizliyor (bkz. yukarısı) — v2'yi zaten tamamlamış bir
+ * tarayıcıda demo hesaplara ait eski değerlendirmeler (ve v2'den SONRA,
+ * manuel test sırasında birikmiş yeni ilan/teklif/rating verileri) hâlâ
+ * kalmış olabilir; version bump bunları da bir kerelik yakalar.
+ *
+ * v3 -> v4: Mantıkta bir değişiklik YOK — yalnızca tekrar bir "temiz
+ * başlangıç" talebi üzerine yeniden tetikleme. v3'ü zaten tamamlamış bir
+ * tarayıcıda, o tarihten SONRA yapılan manuel özellik testleri (kapanan
+ * teklifler sekmesi, bildirim yönlendirmeleri vb.) sırasında demo
+ * hesaplara ait yeni ilan/teklif/rating verisi birikmiş olabilir; version
+ * bump bunları da bir kerelik yakalar.
  */
-const DEMO_DATA_RESET_VERSION = "demo-data-reset-v2";
+const DEMO_DATA_RESET_VERSION = "demo-data-reset-v4";
 
 /**
- * Demo hesaplara ait eski ilan/teklif/bildirim-okunma/fotoğraf verilerini
- * OTOMATİK ama yalnızca BİR KEZ (bu tarayıcıda, bu versiyon için) temizler.
+ * Demo hesaplara ait eski ilan/teklif/değerlendirme/bildirim-okunma/fotoğraf
+ * verilerini OTOMATİK ama yalnızca BİR KEZ (bu tarayıcıda, bu versiyon için) temizler.
  * `DEMO_DATA_RESET_MIGRATION_KEY` altında saklanan bayrak
  * `DEMO_DATA_RESET_VERSION`'a eşitse hiçbir şey yapmadan hemen döner —
  * "uygulama her açıldığında temizlenir" DEĞİLDİR, tek seferlik bir geçiştir.

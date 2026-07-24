@@ -33,7 +33,7 @@ async function login(page, email, password) {
 }
 
 async function fillBaseFormFields(page, titleSuffix) {
-  await page.getByLabel("Hizmet Kategorisi").selectOption({ label: "Depolama" });
+  await page.getByLabel("Hizmet Kategorisi").selectOption({ label: "Depo Personeli" });
   await page.getByLabel("İş Tarihi").fill("2026-09-15");
   await page.getByLabel("İlan Başlığı").fill(`Foto Test İlanı ${titleSuffix}`);
   await page
@@ -86,6 +86,20 @@ async function main() {
   });
   page.on("pageerror", (err) => consoleErrors.push(String(err)));
 
+  // Testlerden herhangi biri başarısız olup fırlatırsa bile (assert.*,
+  // .waitFor timeout vb.) tarayıcının kapanmasını garanti eder — aksi
+  // halde açık kalan bir Chromium bağlantısı Node sürecinin asla
+  // çıkmamasına (sonsuza kadar "takılı" görünmesine) yol açar; hata zaten
+  // aşağıdaki main().catch()'te raporlanır, yalnızca süreç düzgün sona ermezdi.
+  try {
+    await runTests();
+  } finally {
+    await browser.close();
+  }
+
+  console.log(`\n[browser-test-job-photos] ${passed}/${passed} test geçti.`);
+
+  async function runTests() {
   console.log("[browser-test-job-photos] Hizmet Alan olarak giriş yapılıyor...");
   await login(page, "zeynep@test.com", "Zeynep1!");
   ok("Giriş başarılı (zeynep@test.com / hizmet-alan)");
@@ -109,7 +123,7 @@ async function main() {
   await page.getByRole("button", { name: "İlanı Yayınla" }).click();
   await page.waitForURL(/\/ilanlar\/.+/, { timeout: 15000 });
   const firstJobUrl = page.url();
-  await assert.doesNotReject(page.locator("img[alt$='kapak fotoğrafı']").waitFor({ state: "visible", timeout: 10000 }));
+  await assert.doesNotReject(page.locator("img[alt*=' - fotoğraf ']").waitFor({ state: "visible", timeout: 10000 }));
   ok("TEST 2: 1 geçerli fotoğrafla ilan başarıyla oluşturuldu, detay sayfasında kapak fotoğrafı görünüyor");
 
   // TEST 3: Birden fazla fotoğraf, sıralama değiştir, birini sil
@@ -168,7 +182,7 @@ async function main() {
   // IndexedDB'den blob okuma + object URL oluşturma asenkrondur; <img>
   // etiketi DOM'a yalnızca çözüldükten sonra eklenir — önce kapak
   // görselinin göründüğünü bekle, sonra küçük resmi say.
-  await page.locator("img[alt$='kapak fotoğrafı']").waitFor({ state: "visible", timeout: 10000 });
+  await page.locator("img[alt*=' - fotoğraf ']").waitFor({ state: "visible", timeout: 10000 });
   await page.locator("img[alt*='fotoğraf 2']").waitFor({ state: "visible", timeout: 10000 });
   const thumbnailCount = await page.locator("img[alt*='fotoğraf 2']").count();
   assert.equal(thumbnailCount, 1, "Beklenen tam olarak 2 fotoğraf (1 kapak + 1 küçük resim) kalmalı");
@@ -214,7 +228,7 @@ async function main() {
   assert.ok(naturalWidth > 0, "HEIC önizlemesi gerçek bir görüntü olarak yüklenemedi");
   await page.getByRole("button", { name: "İlanı Yayınla" }).click();
   await page.waitForURL(/\/ilanlar\/.+/, { timeout: 15000 });
-  const detailCoverImg = page.locator("img[alt$='kapak fotoğrafı']");
+  const detailCoverImg = page.locator("img[alt*=' - fotoğraf ']");
   await assert.doesNotReject(detailCoverImg.waitFor({ state: "visible", timeout: 10000 }));
   const detailNaturalWidth = await detailCoverImg.evaluate((img) => img.naturalWidth);
   assert.ok(detailNaturalWidth > 0, "İlan detayında HEIC'ten dönüştürülen fotoğraf açılmadı");
@@ -230,7 +244,7 @@ async function main() {
   await page.getByRole("button", { name: "Giriş Yap" }).click();
   await page.waitForURL(BASE_URL + "/");
   await page.goto(firstJobUrl);
-  await assert.doesNotReject(page.locator("img[alt$='kapak fotoğrafı']").waitFor({ state: "visible", timeout: 10000 }));
+  await assert.doesNotReject(page.locator("img[alt*=' - fotoğraf ']").waitFor({ state: "visible", timeout: 10000 }));
   const deleteButtonsVisibleToProvider = await page.locator('[aria-label$="fotoğrafını sil"]').count();
   assert.equal(deleteButtonsVisibleToProvider, 0, "Hizmet Veren'e silme kontrolü gösterilmemeli");
   ok("TEST 9: Hizmet Veren, ilan detayında fotoğrafları görüyor; düzenleme/silme kontrolü yok");
@@ -266,9 +280,7 @@ async function main() {
   } else {
     console.log("\n[browser-test-job-photos] Konsolda hiç JS hatası yakalanmadı.");
   }
-
-  await browser.close();
-  console.log(`\n[browser-test-job-photos] ${passed}/${passed} test geçti.`);
+  }
 }
 
 main().catch((error) => {

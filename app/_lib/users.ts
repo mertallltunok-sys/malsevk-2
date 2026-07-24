@@ -1,9 +1,11 @@
+import { isCompanyType, type CompanyType } from "./company-type";
 import { readJson, writeJson } from "./local-storage";
 import { deletePhotoBlob, putPhotoBlob } from "./photo-blob-store";
 import { isPasswordValid } from "./password-rules";
 import { normalizePhoneNumber } from "./phone";
 import { validateProviderProfileForm } from "./provider-profile";
-import type { ProviderProfile, Session, UserRole } from "./types";
+import { isExperienceRange, isServiceFeature } from "./service-catalog";
+import type { ExperienceRange, ProviderProfile, ServiceFeature, Session, UserRole } from "./types";
 
 const USERS_STORAGE_KEY = "malsevk.users.v1";
 
@@ -31,6 +33,21 @@ export type StoredUser = {
    * kayıtlarda ve bir sonraki `upsertDevAccount` senkronunda eklenir.
    */
   createdAt?: string;
+  /**
+   * Kayıt formunda toplanan, her iki rol için de ortak "Firma Adı" alanı.
+   * `providerProfile.companyName`'den KASITLI OLARAK AYRIDIR: bu, kayıt
+   * anında bir kerelik girilen ham değerdir; `providerProfile` ise yalnızca
+   * hizmet-veren'in Hesap Ayarları'ndan sonradan düzenlediği, bio/logo/
+   * uzmanlık içeren daha zengin ve tamamen opsiyonel profildir. Bu alandan
+   * önce oluşturulmuş kayıtlarda (ör. demo hesaplar) hiç yoktur.
+   */
+  companyName?: string;
+  /** Kayıt formundaki "Kullanıcı Tipi" / "Hizmet Veren Tipi" seçimi (bkz. company-type.ts). Bu alandan önce oluşturulmuş kayıtlarda hiç yoktur. */
+  companyType?: CompanyType;
+  /** Kayıt formunda seçilen il adı. Bu alandan önce oluşturulmuş kayıtlarda hiç yoktur. */
+  province?: string;
+  /** Kayıt formunda seçilen ilçe adı. Bu alandan önce oluşturulmuş kayıtlarda hiç yoktur. */
+  district?: string;
   /** Yalnızca hizmet-veren kullanıcılarda anlamlıdır; opsiyoneldir (bkz. normalizeStoredUser). */
   providerProfile?: ProviderProfile;
 };
@@ -59,24 +76,45 @@ function isValidProviderProfile(value: unknown): value is ProviderProfile {
     Array.isArray(profile.expertise) &&
     profile.expertise.every((item) => typeof item === "string") &&
     (profile.foundedYear === undefined || typeof profile.foundedYear === "number") &&
-    (profile.logoStorageKey === undefined || typeof profile.logoStorageKey === "string")
+    (profile.logoStorageKey === undefined || typeof profile.logoStorageKey === "string") &&
+    (profile.serviceCategories === undefined ||
+      (Array.isArray(profile.serviceCategories) &&
+        profile.serviceCategories.every((item) => typeof item === "string"))) &&
+    (profile.serviceFeatures === undefined ||
+      (Array.isArray(profile.serviceFeatures) && profile.serviceFeatures.every((item) => isServiceFeature(item)))) &&
+    (profile.experienceRange === undefined || isExperienceRange(profile.experienceRange))
   );
 }
 
 /**
- * `createdAt`/`providerProfile` bu özelliklerden önce oluşturulmuş
- * kayıtlarda hiç yoktur. Geriye dönük uyumluluk için ikisi de opsiyonel
- * kabul edilir ve eksik/bozuksa sessizce `undefined`a normalize edilir —
- * kayıt yine de geçerli sayılır (job-store.ts#normalizeStoredJob'daki
- * "photos" alanıyla aynı desen); tek başına bu iki alanın eksikliği bir
- * kullanıcı kaydının tamamen kaybolmasına (filtrelenip silinmesine) asla
- * yol açmaz.
+ * `createdAt`/`providerProfile`/`companyName`/`companyType`/`province`/
+ * `district` bu özelliklerden önce oluşturulmuş kayıtlarda hiç yoktur.
+ * Geriye dönük uyumluluk için hepsi opsiyonel kabul edilir ve eksik/bozuksa
+ * sessizce `undefined`a normalize edilir — kayıt yine de geçerli sayılır
+ * (job-store.ts#normalizeStoredJob'daki "photos" alanıyla aynı desen); tek
+ * başına bu alanların eksikliği bir kullanıcı kaydının tamamen
+ * kaybolmasına (filtrelenip silinmesine) asla yol açmaz.
  */
 function normalizeStoredUser(value: unknown): StoredUser | null {
   if (!isStoredUserCore(value)) return null;
   const createdAt = typeof value.createdAt === "string" ? value.createdAt : undefined;
   const providerProfile = isValidProviderProfile(value.providerProfile) ? value.providerProfile : undefined;
-  return { ...(value as Omit<StoredUser, "createdAt" | "providerProfile">), createdAt, providerProfile };
+  const companyName = typeof value.companyName === "string" ? value.companyName : undefined;
+  const companyType = isCompanyType(value.companyType) ? value.companyType : undefined;
+  const province = typeof value.province === "string" ? value.province : undefined;
+  const district = typeof value.district === "string" ? value.district : undefined;
+  return {
+    ...(value as Omit<
+      StoredUser,
+      "createdAt" | "providerProfile" | "companyName" | "companyType" | "province" | "district"
+    >),
+    createdAt,
+    providerProfile,
+    companyName,
+    companyType,
+    province,
+    district,
+  };
 }
 
 function readUsers(): StoredUser[] {
@@ -126,6 +164,11 @@ export type RegisterInput = {
   phone: string;
   password: string;
   role: UserRole;
+  /** Bkz. StoredUser.companyName — opsiyonel, yalnızca kayıt formu doldurursa gönderilir. */
+  companyName?: string;
+  companyType?: CompanyType;
+  province?: string;
+  district?: string;
 };
 
 export type RegisterResult =
@@ -164,6 +207,10 @@ export async function registerUser(input: RegisterInput): Promise<RegisterResult
     passwordHash,
     role: input.role,
     createdAt: new Date().toISOString(),
+    companyName: input.companyName?.trim() || undefined,
+    companyType: input.companyType,
+    province: input.province?.trim() || undefined,
+    district: input.district?.trim() || undefined,
   };
 
   writeUsers([...readUsers(), user]);
@@ -363,6 +410,14 @@ export async function updateProviderProfile(
     regions: input.regions,
     expertise: input.expertise,
     logoStorageKey,
+    // Bu form (Hesap Ayarları > Firma Profili) serviceCategories/
+    // serviceFeatures/experienceRange'i hiç düzenlemez (bkz. Panel >
+    // Profilim > Hizmet Bilgilerim, updateProviderServiceInfo aşağıda) —
+    // var olan değerleri olduğu gibi taşımazsak bu form kaydedildiğinde
+    // diğer ekranda girilmiş veriler sessizce silinmiş olurdu.
+    serviceCategories: existing.providerProfile?.serviceCategories,
+    serviceFeatures: existing.providerProfile?.serviceFeatures,
+    experienceRange: existing.providerProfile?.experienceRange,
   };
 
   const updated: StoredUser = { ...existing, providerProfile: profile };
@@ -371,6 +426,68 @@ export async function updateProviderProfile(
   if (previousLogoStorageKey && previousLogoStorageKey !== logoStorageKey) {
     await deletePhotoBlob(previousLogoStorageKey);
   }
+
+  return { ok: true, profile };
+}
+
+export type UpdateProviderServiceInfoInput = {
+  regions: string[];
+  serviceCategories: string[];
+  serviceFeatures: ServiceFeature[];
+  experienceRange: ExperienceRange | null;
+};
+
+export type UpdateProviderServiceInfoResult =
+  | { ok: true; profile: ProviderProfile }
+  | { ok: false; error: string };
+
+/**
+ * "Hizmet Bilgilerim" (Panel > Profilim) formunu kaydeder —
+ * `updateProviderProfile`den (Hesap Ayarları > Firma Profili) KASITLI
+ * OLARAK AYRI bir fonksiyondur: o form companyName/bio'yu ZORUNLU kılar
+ * (bkz. provider-profile.ts#validateProviderProfileForm, 50-500 karakter
+ * bio), ama "Hizmet Bilgilerim" bir tamamlama akışıdır — kullanıcı Firma
+ * Profili'ni hiç doldurmamış olsa bile yalnızca hizmet/bölge/deneyim
+ * bilgisini kaydedebilmelidir. Bu yüzden companyName/bio/foundedYear/
+ * logoStorageKey/expertise (bu formun sahibi olmadığı alanlar) var olan
+ * profilden olduğu gibi taşınır, hiç doğrulanmaz/değiştirilmez; profil
+ * daha önce hiç oluşturulmamışsa boş companyName/bio ile başlar (ekranlar
+ * bunu zaten "Belirtilmemiş" gibi gösterip sahte veri üretmeden ele alır,
+ * bkz. incoming-offer-card.tsx). `regions` de bilerek burada
+ * düzenlenebilir — Hesap Ayarları'ndaki aynı alanla aynı veriyi paylaşır,
+ * iki farklı ekrandan aynı tek doğruluk kaynağına yazılır.
+ */
+export async function updateProviderServiceInfo(
+  session: Session | null,
+  input: UpdateProviderServiceInfoInput,
+): Promise<UpdateProviderServiceInfoResult> {
+  if (!session) {
+    return { ok: false, error: "Hizmet bilgilerinizi güncellemek için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-veren") {
+    return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar hizmet bilgilerini düzenleyebilir." };
+  }
+
+  const existing = findUserById(session.id);
+  if (!existing) {
+    return { ok: false, error: "Kullanıcı bulunamadı." };
+  }
+
+  const currentProfile = existing.providerProfile;
+  const profile: ProviderProfile = {
+    companyName: currentProfile?.companyName ?? "",
+    bio: currentProfile?.bio ?? "",
+    foundedYear: currentProfile?.foundedYear,
+    logoStorageKey: currentProfile?.logoStorageKey,
+    expertise: currentProfile?.expertise ?? [],
+    regions: input.regions,
+    serviceCategories: input.serviceCategories,
+    serviceFeatures: input.serviceFeatures,
+    experienceRange: input.experienceRange ?? undefined,
+  };
+
+  const updated: StoredUser = { ...existing, providerProfile: profile };
+  writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)));
 
   return { ok: true, profile };
 }

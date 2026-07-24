@@ -11,9 +11,11 @@ import {
   getJobRequestFilter,
   getJobRequestFilterLabel,
   getJobRequestFilterTone,
+  isJobEditable,
   type JobRequestFilter,
 } from "../_lib/job-requests";
 import { deleteJobWithOffers } from "../_lib/offers";
+import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { AUTO_DISMISS_FADE_MS, useAutoDismissBanner } from "../_lib/use-auto-dismiss-banner";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
@@ -138,6 +140,7 @@ function JobRequestCard({
   filter,
   engagedOffer,
   completedOffer,
+  editable,
   session,
   highlighted,
   onOpenDelete,
@@ -147,6 +150,8 @@ function JobRequestCard({
   filter: JobRequestFilter | null;
   engagedOffer: Offer | null;
   completedOffer: Offer | null;
+  /** bkz. job-requests.ts#isJobEditable — teklif süreci başlamışsa (kabul edilmiş/devam eden/tamamlanmış/iptal edilmiş) false. */
+  editable: boolean;
   session: Session;
   highlighted: boolean;
   onOpenDelete: (job: Job) => void;
@@ -173,7 +178,7 @@ function JobRequestCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-            {job.category}
+            {getCategoryDisplayLabel(job.category)}
           </span>
           <h3 className="mt-2 break-words text-lg font-semibold leading-snug text-foreground">
             {job.title}
@@ -217,25 +222,29 @@ function JobRequestCard({
         >
           İlan detayına git
         </Link>
-        {/* Düzenle/Sil yalnızca "Aktif" ilanlarda gösterilir — iş
-            başladıktan (ya da teklif kabul edildikten) sonra ilan
-            artık değiştirilemez/silinemez (bkz. matchesTab). */}
+        {/* Düzenle: yalnızca teklif süreci başlamamış ilanlarda (bkz.
+            job-requests.ts#isJobEditable) — bu, düzenleme route'unun
+            kendisiyle (job-edit-form.tsx) ve veri katmanıyla
+            (job-store.ts#updateJob) AYNI kuralı kullanır. */}
+        {editable && (
+          <Link
+            href={`/panel/hizmet-taleplerim/${job.id}/duzenle`}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          >
+            İlanı Düzenle
+          </Link>
+        )}
+        {/* Sil: yalnızca "Aktif" ilanlarda gösterilir — bu görevin kapsamı
+            dışında, kendi mevcut kısıtlamasıyla (bkz. matchesTab) değişmeden
+            kalır. */}
         {filter === "aktif" && (
-          <>
-            <Link
-              href={`/panel/hizmet-taleplerim/${job.id}/duzenle`}
-              className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-            >
-              İlanı Düzenle
-            </Link>
-            <button
-              type="button"
-              onClick={() => onOpenDelete(job)}
-              className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-            >
-              İlanı Sil
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => onOpenDelete(job)}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          >
+            İlanı Sil
+          </button>
         )}
       </div>
     </li>
@@ -276,7 +285,7 @@ function JobRequestsList({ session }: { session: Session }) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deletedBanner = useAutoDismissBanner();
   const [ratingModalOffer, setRatingModalOffer] = useState<Offer | null>(null);
-  const [justRated, setJustRated] = useState(false);
+  const justRatedBanner = useAutoDismissBanner();
 
   function openDeleteDialog(job: Job) {
     setDeleteTarget(job);
@@ -310,6 +319,7 @@ function JobRequestsList({ session }: { session: Session }) {
       filter: getJobRequestFilter(job, offers),
       engagedOffer: getEngagedOfferForJob(job.id, offers),
       completedOffer: getCompletedOfferForJob(job.id, offers),
+      editable: isJobEditable(job.id, offers),
     }));
 
   const visible = myEntries.filter((entry) => matchesTab(entry.filter, activeTab));
@@ -342,11 +352,15 @@ function JobRequestsList({ session }: { session: Session }) {
         </p>
       )}
 
-      {justRated && (
+      {justRatedBanner.visible && (
         <p
           role="status"
           aria-live="polite"
-          className="mb-4 flex items-center gap-2 rounded-md bg-success-soft px-4 py-3 text-sm font-medium text-success"
+          style={{
+            transitionDuration: `${AUTO_DISMISS_FADE_MS}ms`,
+            opacity: justRatedBanner.fadingOut ? 0 : 1,
+          }}
+          className="mb-4 flex items-center gap-2 rounded-md bg-success-soft px-4 py-3 text-sm font-medium text-success transition-opacity ease-out motion-reduce:transition-none"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
           Değerlendirmeniz için teşekkür ederiz.
@@ -391,13 +405,14 @@ function JobRequestsList({ session }: { session: Session }) {
           </div>
         ) : (
           <ul className="flex flex-col gap-4">
-            {visible.map(({ job, filter, engagedOffer, completedOffer }) => (
+            {visible.map(({ job, filter, engagedOffer, completedOffer, editable }) => (
               <JobRequestCard
                 key={job.id}
                 job={job}
                 filter={filter}
                 engagedOffer={engagedOffer}
                 completedOffer={completedOffer}
+                editable={editable}
                 session={session}
                 highlighted={job.id === highlightJobId}
                 onOpenDelete={openDeleteDialog}
@@ -424,7 +439,7 @@ function JobRequestsList({ session }: { session: Session }) {
           session={session}
           onClose={(submitted) => {
             setRatingModalOffer(null);
-            if (submitted) setJustRated(true);
+            if (submitted) justRatedBanner.trigger();
           }}
         />
       )}

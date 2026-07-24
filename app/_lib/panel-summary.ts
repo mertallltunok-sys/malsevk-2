@@ -3,7 +3,6 @@ import {
   IN_PROGRESS_OFFER_STATUSES,
   getJobRequestFilter,
   isOfferVisibleInNormalLists,
-  jobHasAcceptedOffer,
 } from "./job-requests";
 import { isJobOpenForOffers } from "./jobs";
 import type { Job, Offer, OfferStatus, Session } from "./types";
@@ -148,11 +147,11 @@ export function getHizmetVerenPanelSummary(
   const myOfferedJobIds = new Set(myOffers.map((offer) => offer.jobId));
   const visibleMyOffers = myOffers.filter(isOfferVisibleInNormalLists);
 
+  // Bir ilana kabul edilmiş/devam eden bir teklif olması artık bu sayaçtan
+  // düşürmez — o ilan diğer Hizmet Verenlere hâlâ teklife açıktır (bkz.
+  // job-requests.ts#getJobOfferAvailability).
   const availableListingCount = jobs.filter(
-    (job) =>
-      isJobOpenForOffers(job.status) &&
-      !myOfferedJobIds.has(job.id) &&
-      !jobHasAcceptedOffer(job.id, offers),
+    (job) => isJobOpenForOffers(job.status) && !myOfferedJobIds.has(job.id),
   ).length;
 
   const acceptedOffers = visibleMyOffers.filter((offer) => offer.status === "accepted");

@@ -1,6 +1,8 @@
 import {
   COMPLETION_AUTO_APPROVE_DAYS,
+  OFFER_PENDING_BLOCKED_MESSAGE,
   REOFFER_COOLDOWN_DAYS,
+  isOfferPendingActionBlocked,
   isReofferCooldownStatus,
   jobHasAcceptedOffer,
 } from "./job-requests";
@@ -309,9 +311,12 @@ export function createOffer(
     }
   }
 
-  if (jobHasAcceptedOffer(job.id, all)) {
-    return { ok: false, error: "Bu ilan için artık teklif kabul edilmemektedir." };
-  }
+  // Bir ilana kabul edilmiş/devam eden bir teklif olması artık YENİ teklif
+  // vermeyi engellemez (bkz. job-requests.ts#jobHasAcceptedOffer'ın
+  // güncellenmiş doküman notu) — diğer Hizmet Verenler de bu ilana teklif
+  // verebilir; aynı anda yalnızca TEK teklifin anlaşma sürecinin
+  // ilerleyebilmesi kuralı artık yalnızca Kabul Et/Reddet aksiyonu
+  // üzerinde uygulanır (bkz. updateOfferStatus#isOfferPendingActionBlocked).
   if (!isJobOpenForOffers(job.status)) {
     return { ok: false, error: "Bu ilan artık teklif almaya açık değil." };
   }
@@ -379,10 +384,11 @@ export type WithdrawOfferResult = { ok: true; offer: Offer } | { ok: false; erro
  * Kayıt silinmez, yalnızca status "withdrawn" olur — geçmiş korunur.
  * "withdrawn" ENGAGED_OFFER_STATUSES dışında olduğu için aktif iş
  * kapasitesine hiç girmemiş sayılır, iletişim bilgisi zaten hiç açılmamıştı
- * (bkz. contact-access.ts), ilanı da kilitlemez (bkz. jobHasAcceptedOffer) —
- * ilan diğer Hizmet Verenlere açık kalır. Ancak "withdrawn" bu Hizmet
- * Veren'e yeniden teklif hakkı VERMEZ: createOffer, (providerId, jobId)
- * çifti için status'tan bağımsız tek kayıt kuralını uygular.
+ * (bkz. contact-access.ts). İlan zaten diğer Hizmet Verenlere her zaman açık
+ * kalır (bkz. job-requests.ts#getJobOfferAvailability), bu geri çekme
+ * işlemiyle ayrıca bir ilişkisi yoktur. Ancak "withdrawn" bu Hizmet Veren'e
+ * yeniden teklif hakkı VERMEZ: createOffer, (providerId, jobId) çifti için
+ * status'tan bağımsız tek kayıt kuralını uygular.
  */
 export function withdrawOffer(session: Session | null, offerId: string): WithdrawOfferResult {
   if (!session) {
@@ -418,21 +424,19 @@ export type UpdateOfferStatusResult =
  * teklifin verildiği ilanın sahibi olan Hizmet Alan işlem yapabilir, yalnızca
  * "pending" durumundaki bir teklif değiştirilebilir.
  *
- * TEK KABUL KURALI (Aşama 4.2A): bir ilana aynı anda en fazla bir teklif
- * "meşgul" (ENGAGED_OFFER_STATUSES) durumda olabilir — createOffer'daki
- * "ilan zaten kabul edilmiş bir teklife sahipse yeni teklif engellenir"
- * kuralının kabul ANINDAKİ eşdeğeri, AYNI ortak doğruluk kaynağını
- * (job-requests.ts#jobHasAcceptedOffer) kullanır. `offer` bu noktada henüz
- * "pending" olduğu (yukarıdaki kontrolden geçtiği) için ENGAGED_OFFER_STATUSES
- * içinde hiçbir zaman yer almaz — kontrol kendi kendini yanlışlıkla "başka
- * meşgul teklif" saymaz. Kabul başarılı olduğunda, aynı ilana ait diğer TÜM
- * "pending" teklifler otomatik "rejected" olur (withdrawn/agreement_failed/
- * cancelled/completed gibi zaten sonuçlanmış tekliflere dokunulmaz) — kabul
- * edilen teklif ve otomatik reddedilen kardeşleri TEK bir hesaplanmış dizi
- * ve TEK bir writeAllOffers çağrısıyla yazılır, ara (yarım) bir veri durumu
- * hiç oluşmaz. Mevcut "teklif reddedildi" bildirim türetmesi (notifications.ts)
- * offer.status'a bakarak çalıştığı için otomatik reddedilen teklifler de
- * aynı bildirimi kendiliğinden alır — ayrı bir bildirim türü icat edilmez.
+ * TEK AKTİF KABUL KURALI (Aşama 5.2): bir ilana aynı anda en fazla bir
+ * teklifin anlaşma süreci ilerleyebilir — job-requests.ts#
+ * isOfferPendingActionBlocked (TEK ortak doğruluk kaynağı,
+ * incoming-offer-card.tsx'teki buton görünürlüğüyle AYNI fonksiyon) bunu
+ * mevcut Offer durumlarından CANLI türetir; ayrı bir kilit alanı/bayrağı
+ * yazılmaz. Bu yüzden kardeş "pending" tekliflere hiç dokunulmaz — yalnızca
+ * işlem yapılan TEK teklif güncellenir. Sonuç: "anlaşma sağlanamadı"
+ * (agreement_failed) durumunda, diğer bekleyen teklifler hâlbihazırda
+ * "pending" kaldıkları için (hiç "rejected" yapılmamışlardı) otomatik ve
+ * anında yeniden aksiyon alınabilir hâle gelir — job-requests.ts#
+ * getSettledOfferForJob artık onları döndürmediği için. "completed" de
+ * settled sayıldığından (bkz. getSettledOfferForJob), iş tamamen bittikten
+ * sonra da kardeş teklifler kalıcı olarak askıda kalır.
  */
 export function updateOfferStatus(
   session: Session | null,
@@ -461,28 +465,12 @@ export function updateOfferStatus(
     return { ok: false, error: "Bu teklif zaten değerlendirilmiş." };
   }
 
-  if (nextStatus === "accepted" && jobHasAcceptedOffer(offer.jobId, all)) {
-    return {
-      ok: false,
-      error: "Bu ilan için zaten kabul edilmiş veya devam eden bir teklif var.",
-    };
+  if (isOfferPendingActionBlocked(offer, all)) {
+    return { ok: false, error: OFFER_PENDING_BLOCKED_MESSAGE };
   }
 
-  const now = new Date().toISOString();
-  const updated: Offer = { ...offer, status: nextStatus, updatedAt: now };
-
-  const next: Offer[] =
-    nextStatus === "accepted"
-      ? all.map((item): Offer => {
-          if (item.id === offerId) return updated;
-          if (item.jobId === offer.jobId && item.status === "pending") {
-            return { ...item, status: "rejected", updatedAt: now };
-          }
-          return item;
-        })
-      : all.map((item) => (item.id === offerId ? updated : item));
-
-  writeAllOffers(next);
+  const updated: Offer = { ...offer, status: nextStatus, updatedAt: new Date().toISOString() };
+  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
   return { ok: true, offer: updated };
 }
 
@@ -528,11 +516,14 @@ export type RecordAgreementFailureResult = { ok: true; offer: Offer } | { ok: fa
 /**
  * "Anlaşma Sağlanamadı": kabul edilmiş bir teklifi "agreement_failed"e
  * taşır ve nedeni kaydeder. Job.status'a hiç dokunmaz — ilan zaten hep
- * "yayinda" kalmıştı; bu teklif artık "accepted"/"in_progress" olmadığı
- * için `jobHasAcceptedOffer` otomatik olarak false döner ve ilan, mevcut
- * yetkilendirme/etiket fonksiyonları üzerinden kendiliğinden yeniden
- * teklife açık hale gelir (bkz. job-requests.ts). İlanın başlığı, fotoğrafı,
- * açıklaması vb. hiçbir alanı değişmez — zaten bunlara hiç dokunulmuyor.
+ * "yayinda" kalmıştı ve zaten hiç kapanmamıştı (bkz.
+ * job-requests.ts#getJobOfferAvailability). Bu geçişin asıl etkisi, bu
+ * teklifin artık ENGAGED_OFFER_STATUSES dışında kalması sayesinde
+ * getSettledOfferForJob'ın onu bir daha döndürmemesidir — bu da AYNI ilana
+ * verilmiş, hâlâ "pending" bekleyen diğer tekliflerin Kabul Et/Reddet
+ * aksiyonlarını (bkz. isOfferPendingActionBlocked) otomatik olarak yeniden
+ * aktif hale getirir. İlanın başlığı, fotoğrafı, açıklaması vb. hiçbir alanı
+ * değişmez — zaten bunlara hiç dokunulmuyor.
  */
 export function recordAgreementFailure(
   session: Session | null,

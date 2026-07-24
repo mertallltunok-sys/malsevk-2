@@ -103,6 +103,22 @@ export function getRatingForOffer(offerId: string): Rating | null {
   return readAllRatingsSnapshot().find((rating) => rating.offerId === offerId) ?? null;
 }
 
+/**
+ * Verilen id'lere sahip değerlendirme kayıtlarını doğrudan kaldırır — normal
+ * kullanıcı akışlarındaki hiçbir yetkilendirme/geçiş kontrolü uygulanmaz.
+ * Yalnızca dev-only demo veri sıfırlama aracı (bkz. reset-demo-data.ts,
+ * offers.ts#removeOffersByIds ile AYNI desen) için vardır; gerçek kullanıcı
+ * akışları hâlâ submitRating gibi yetkilendirilmiş fonksiyonları kullanmalıdır.
+ */
+export function removeRatingsByIds(ids: string[]): void {
+  if (ids.length === 0) return;
+  const idSet = new Set(ids);
+  const all = readAllRatingsSnapshot();
+  const next = all.filter((rating) => !idSet.has(rating.id));
+  if (next.length === all.length) return;
+  writeAllRatings(next);
+}
+
 export type ProviderRatingSummary = {
   /** null = hiç değerlendirme yok ("Henüz değerlendirme bulunmuyor."). Aritmetik ortalama, 1 ondalık basamağa yuvarlanmış. */
   averageStars: number | null;

@@ -1,7 +1,8 @@
+import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "./job-requests";
 import { writeJson } from "./local-storage";
 import { deletePhotoBlob, deletePhotoBlobs, putPhotoBlob } from "./photo-blob-store";
 import { MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
-import type { Job, JobPhoto, JobStatus, Session } from "./types";
+import type { Job, JobPhoto, JobStatus, Offer, Session } from "./types";
 
 const USER_JOBS_STORAGE_KEY = "malsevk.jobs.v1";
 
@@ -270,18 +271,25 @@ export type UpdateJobInput = {
 
 /**
  * Mevcut bir ilanı günceller — id, status ve requesterId hiç değişmez, yeni
- * bir ilan oluşturulmaz. Yalnızca ilanın sahibi olan Hizmet Alan
- * çağırabilir. Fotoğraflarda: `keptPhotoIds`'te olmayan eski fotoğrafların
- * blob'ları silinir, `newPhotos` işlenip eklenir, `keptPhotoIds`'teki
- * fotoğraflara hiç dokunulmaz (yeniden yüklenmez/yeniden işlenmez).
- * Teklifler (Offer kayıtları) bu fonksiyonun hiç bilmediği, ayrı bir
- * depoda (offers.ts) tutulduğu için burada dokunulmaz — ilan id'si
- * değişmediğinden bağlantıları kendiliğinden korunur.
+ * bir ilan oluşturulmaz. Yalnızca ilanın sahibi olan Hizmet Alan, VE
+ * yalnızca ilan hâlâ düzenlenebilir durumdaysa (bkz. `offers` parametresi
+ * ve job-requests.ts#isJobEditable) çağırabilir. Fotoğraflarda:
+ * `keptPhotoIds`'te olmayan eski fotoğrafların blob'ları silinir,
+ * `newPhotos` işlenip eklenir, `keptPhotoIds`'teki fotoğraflara hiç
+ * dokunulmaz (yeniden yüklenmez/yeniden işlenmez). Teklifler (Offer
+ * kayıtları) ayrı bir depoda (offers.ts) tutulduğu için bu fonksiyon
+ * onlara hiç YAZMAZ — ilan id'si değişmediğinden bağlantıları kendiliğinden
+ * korunur. `offers` parametresi yalnızca OKUMA amaçlı: çağıran taraf
+ * (job-edit-form.tsx) zaten elindeki güncel teklif listesini buraya
+ * geçirir; job-store.ts kendisi offers.ts'i import ETMEZ (offers.ts zaten
+ * job-store.ts'e bağımlı olduğu için döngüsel import olurdu, bkz. deleteJob
+ * üstündeki not) — bu yüzden liste çağıran taraftan taşınır.
  */
 export async function updateJob(
   session: Session | null,
   jobId: string,
   input: UpdateJobInput,
+  offers: Offer[],
 ): Promise<CreateJobResult> {
   if (!session) {
     return { ok: false, error: "İlanı düzenlemek için giriş yapmalısınız." };
@@ -293,6 +301,9 @@ export async function updateJob(
   const existing = findUserCreatedJobById(jobId);
   if (!existing || existing.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
+  }
+  if (!isJobEditable(jobId, offers)) {
+    return { ok: false, error: JOB_NOT_EDITABLE_MESSAGE };
   }
 
   const keptPhotos = existing.photos.filter((photo) => input.keptPhotoIds.includes(photo.id));

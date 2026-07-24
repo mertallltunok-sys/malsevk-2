@@ -3,10 +3,11 @@
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState } from "react";
-import { validateJobForm, type JobFormErrors } from "../_lib/job-form-validation";
+import { clearJobFormErrors, validateJobForm, type JobFormErrors } from "../_lib/job-form-validation";
+import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "../_lib/job-requests";
 import { updateJob } from "../_lib/job-store";
-import { SERVICE_CATEGORIES } from "../_lib/jobs";
-import type { Job, Session } from "../_lib/types";
+import { resolveLegacyJobCategoryToId, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import type { Job, Offer, Session } from "../_lib/types";
 import {
   FACILITY_TYPE_OPTIONS,
   getDistrictId,
@@ -17,6 +18,7 @@ import {
   type FacilityType,
 } from "../_lib/turkey-locations";
 import { useJobById } from "../_lib/use-jobs";
+import { useAllOffers } from "../_lib/use-offers";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { JobPhotoEditor } from "./job-photo-editor";
@@ -29,6 +31,7 @@ const OPERATION_DETAILS_MAX_LENGTH = 1000;
 export function JobEditForm({ jobId }: { jobId: string }) {
   const session = useSession();
   const job = useJobById(jobId);
+  const offers = useAllOffers();
 
   if (!session) {
     return (
@@ -47,10 +50,19 @@ export function JobEditForm({ jobId }: { jobId: string }) {
     return <AuthGateNotice message="Bu ilanı düzenleme yetkiniz yok." />;
   }
 
-  return <JobEditFormFields job={job} session={session} />;
+  // Teklif süreci başlamış (kabul edilmiş/devam eden/tamamlanmış/iptal
+  // edilmiş) bir ilan artık düzenlenemez — job-requests-panel.tsx'teki
+  // "Düzenle" linkinin görünürlüğü ve job-store.ts#updateJob'daki veri
+  // katmanı koruması ile AYNI tek doğruluk kaynağını (isJobEditable)
+  // kullanır, bu kural üç yerde ayrı ayrı yazılmaz.
+  if (!isJobEditable(job.id, offers)) {
+    return <AuthGateNotice message={JOB_NOT_EDITABLE_MESSAGE} />;
+  }
+
+  return <JobEditFormFields job={job} session={session} offers={offers} />;
 }
 
-function JobEditFormFields({ job, session }: { job: Job; session: Session }) {
+function JobEditFormFields({ job, session, offers }: { job: Job; session: Session; offers: Offer[] }) {
   const router = useRouter();
 
   const categoryId = useId();
@@ -64,7 +76,14 @@ function JobEditFormFields({ job, session }: { job: Job; session: Session }) {
   const operationDetailsId = useId();
   const photosId = useId();
 
-  const [category, setCategory] = useState(job.category);
+  // `job.category` eski (düz Türkçe metin) ya da yeni (katalog id'si)
+  // olabilir — aşağıdaki <select>'in artık yalnızca yeni id'leri seçenek
+  // olarak sunması nedeniyle, eski bir değer olduğu gibi bırakılırsa
+  // hiçbir <option> ile eşleşmez ve seçim "boş" görünürdü. Bu yüzden
+  // başlangıç değeri her zaman geçerli bir yeni id'ye (mümkünse) çözülür;
+  // eşleşme yoksa (ör. "Depolama") kullanıcı yeni katalogdan açıkça bir
+  // kategori seçmek zorunda kalır (bkz. service-catalog.ts#resolveLegacyJobCategoryToId).
+  const [category, setCategory] = useState(() => resolveLegacyJobCategoryToId(job.category) ?? "");
   const [title, setTitle] = useState(job.title);
   const [description, setDescription] = useState(job.description);
   const [provinceCode, setProvinceCode] = useState(
@@ -117,16 +136,21 @@ function JobEditFormFields({ job, session }: { job: Job; session: Session }) {
     setDistrict("");
     setFacilityType("");
     setWorkLocationType("");
+    setErrors((current) =>
+      clearJobFormErrors(current, ["province", "district", "facilityType", "workLocationType"]),
+    );
   }
 
   function handleDistrictChange(nextDistrict: string) {
     setDistrict(nextDistrict);
     setWorkLocationType("");
+    setErrors((current) => clearJobFormErrors(current, ["district", "workLocationType"]));
   }
 
   function handleFacilityTypeChange(nextType: FacilityType | "") {
     setFacilityType(nextType);
     setWorkLocationType("");
+    setErrors((current) => clearJobFormErrors(current, ["facilityType", "workLocationType"]));
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -155,18 +179,23 @@ function JobEditFormFields({ job, session }: { job: Job; session: Session }) {
     if (Object.keys(fieldErrors).length > 0) return;
 
     setSubmitting(true);
-    const result = await updateJob(session, job.id, {
-      title,
-      category,
-      province: provinceName,
-      district,
-      workLocationType,
-      workDate,
-      description,
-      operationDetails,
-      keptPhotoIds: photoState.keptPhotoIds,
-      newPhotos: photoState.newPhotos,
-    });
+    const result = await updateJob(
+      session,
+      job.id,
+      {
+        title,
+        category,
+        province: provinceName,
+        district,
+        workLocationType,
+        workDate,
+        description,
+        operationDetails,
+        keptPhotoIds: photoState.keptPhotoIds,
+        newPhotos: photoState.newPhotos,
+      },
+      offers,
+    );
     setSubmitting(false);
 
     if (!result.ok) {
@@ -202,10 +231,14 @@ function JobEditFormFields({ job, session }: { job: Job; session: Session }) {
             className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <option value="">Kategori seçiniz</option>
-            {SERVICE_CATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
+            {SERVICE_CATEGORY_GROUPS.map((group) => (
+              <optgroup key={group.id} label={group.label}>
+                {group.categories.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
           {errors.category && (

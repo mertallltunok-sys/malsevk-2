@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AUTO_COMPLETED_RATING_WINDOW_DAYS } from "../_lib/ratings";
 import { computeRemainingTime } from "../_lib/time-remaining";
 import type { Offer, Session } from "../_lib/types";
+import { AUTO_DISMISS_FADE_MS, useAutoDismissBanner } from "../_lib/use-auto-dismiss-banner";
 import { useAllRatings } from "../_lib/use-ratings";
 import { JobRatingModal } from "./job-rating-modal";
 import { StarRatingInput } from "./star-rating-input";
@@ -24,21 +25,29 @@ const AUTO_COMPLETED_RATING_WINDOW_MS = AUTO_COMPLETED_RATING_WINDOW_DAYS * 24 *
  */
 export function JobRatingWidget({ offer, session }: { offer: Offer; session: Session }) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [justRated, setJustRated] = useState(false);
+  const justRatedBanner = useAutoDismissBanner();
 
   const ratings = useAllRatings();
   const existingRating = ratings.find((rating) => rating.offerId === offer.id) ?? null;
 
   function handleModalClose(submitted: boolean) {
     setModalOpen(false);
-    if (submitted) setJustRated(true);
+    if (submitted) justRatedBanner.trigger();
   }
 
   if (existingRating) {
     return (
       <div className="mt-4 rounded-card border border-border bg-background p-4">
-        {justRated && (
-          <p role="status" aria-live="polite" className="mb-2 text-sm font-medium text-success">
+        {justRatedBanner.visible && (
+          <p
+            role="status"
+            aria-live="polite"
+            style={{
+              transitionDuration: `${AUTO_DISMISS_FADE_MS}ms`,
+              opacity: justRatedBanner.fadingOut ? 0 : 1,
+            }}
+            className="mb-2 text-sm font-medium text-success transition-opacity ease-out motion-reduce:transition-none"
+          >
             Değerlendirmeniz için teşekkür ederiz.
           </p>
         )}

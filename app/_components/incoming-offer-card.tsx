@@ -3,6 +3,7 @@
 import { Building2, Check, CheckCircle2, MapPin, Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
+import { OFFER_PENDING_BLOCKED_MESSAGE, isOfferPendingActionBlocked } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_lib/offers";
@@ -173,28 +174,31 @@ export function IncomingOfferCard({
         </p>
       )}
 
-      {offer.status === "pending" && (
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <button
-            type="button"
-            onClick={() => handleDecision("accepted")}
-            disabled={pendingAction !== null}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-success px-5 py-2.5 text-sm font-medium text-success transition-colors hover:bg-success-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Check className="h-4 w-4" aria-hidden="true" />
-            Kabul Et
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDecision("rejected")}
-            disabled={pendingAction !== null}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            Reddet
-          </button>
-        </div>
-      )}
+      {offer.status === "pending" &&
+        (isOfferPendingActionBlocked(offer, allOffers) ? (
+          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{OFFER_PENDING_BLOCKED_MESSAGE}</p>
+        ) : (
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => handleDecision("accepted")}
+              disabled={pendingAction !== null}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-success px-5 py-2.5 text-sm font-medium text-success transition-colors hover:bg-success-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Check className="h-4 w-4" aria-hidden="true" />
+              Kabul Et
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDecision("rejected")}
+              disabled={pendingAction !== null}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Reddet
+            </button>
+          </div>
+        ))}
 
       {revealedContact && <ContactInfoBlock contact={revealedContact.provider} />}
 

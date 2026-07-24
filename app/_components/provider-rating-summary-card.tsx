@@ -9,7 +9,7 @@ import type { ProviderRatingSummary } from "../_lib/ratings";
  */
 export function ProviderRatingSummaryCard({ summary }: { summary: ProviderRatingSummary }) {
   return (
-    <div className="mt-6 rounded-card border border-border bg-surface p-6">
+    <div className="rounded-card border border-border bg-surface p-6">
       <h2 className="text-sm font-semibold text-foreground">Değerlendirmeleriniz</h2>
 
       {summary.averageStars === null ? (
