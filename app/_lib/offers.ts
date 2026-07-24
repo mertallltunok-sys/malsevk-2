@@ -417,6 +417,22 @@ export type UpdateOfferStatusResult =
  * Teklif kabul/ret işlemi de arayüzden bağımsız burada doğrulanır: yalnızca
  * teklifin verildiği ilanın sahibi olan Hizmet Alan işlem yapabilir, yalnızca
  * "pending" durumundaki bir teklif değiştirilebilir.
+ *
+ * TEK KABUL KURALI (Aşama 4.2A): bir ilana aynı anda en fazla bir teklif
+ * "meşgul" (ENGAGED_OFFER_STATUSES) durumda olabilir — createOffer'daki
+ * "ilan zaten kabul edilmiş bir teklife sahipse yeni teklif engellenir"
+ * kuralının kabul ANINDAKİ eşdeğeri, AYNI ortak doğruluk kaynağını
+ * (job-requests.ts#jobHasAcceptedOffer) kullanır. `offer` bu noktada henüz
+ * "pending" olduğu (yukarıdaki kontrolden geçtiği) için ENGAGED_OFFER_STATUSES
+ * içinde hiçbir zaman yer almaz — kontrol kendi kendini yanlışlıkla "başka
+ * meşgul teklif" saymaz. Kabul başarılı olduğunda, aynı ilana ait diğer TÜM
+ * "pending" teklifler otomatik "rejected" olur (withdrawn/agreement_failed/
+ * cancelled/completed gibi zaten sonuçlanmış tekliflere dokunulmaz) — kabul
+ * edilen teklif ve otomatik reddedilen kardeşleri TEK bir hesaplanmış dizi
+ * ve TEK bir writeAllOffers çağrısıyla yazılır, ara (yarım) bir veri durumu
+ * hiç oluşmaz. Mevcut "teklif reddedildi" bildirim türetmesi (notifications.ts)
+ * offer.status'a bakarak çalıştığı için otomatik reddedilen teklifler de
+ * aynı bildirimi kendiliğinden alır — ayrı bir bildirim türü icat edilmez.
  */
 export function updateOfferStatus(
   session: Session | null,
@@ -445,8 +461,28 @@ export function updateOfferStatus(
     return { ok: false, error: "Bu teklif zaten değerlendirilmiş." };
   }
 
-  const updated: Offer = { ...offer, status: nextStatus, updatedAt: new Date().toISOString() };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (nextStatus === "accepted" && jobHasAcceptedOffer(offer.jobId, all)) {
+    return {
+      ok: false,
+      error: "Bu ilan için zaten kabul edilmiş veya devam eden bir teklif var.",
+    };
+  }
+
+  const now = new Date().toISOString();
+  const updated: Offer = { ...offer, status: nextStatus, updatedAt: now };
+
+  const next: Offer[] =
+    nextStatus === "accepted"
+      ? all.map((item): Offer => {
+          if (item.id === offerId) return updated;
+          if (item.jobId === offer.jobId && item.status === "pending") {
+            return { ...item, status: "rejected", updatedAt: now };
+          }
+          return item;
+        })
+      : all.map((item) => (item.id === offerId ? updated : item));
+
+  writeAllOffers(next);
   return { ok: true, offer: updated };
 }
 
