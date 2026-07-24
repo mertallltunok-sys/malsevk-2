@@ -1,4 +1,8 @@
-import { getJobRequestNotificationHref, getProviderOfferNotificationHref } from "./job-requests";
+import {
+  getJobRequestNotificationHref,
+  getProviderOfferNotificationHref,
+  isOfferVisibleInNormalLists,
+} from "./job-requests";
 import type { Job, Offer, Session } from "./types";
 import { findUserById } from "./users";
 
@@ -90,8 +94,17 @@ export function getNotificationsForSession(
     const myJobById = new Map(myJobs.map((job) => [job.id, job] as const));
     const myJobTitleById = new Map(myJobs.map((job) => [job.id, job.title] as const));
 
+    // "withdrawn" teklifler burada BİLEREK hariç tutulur: href'i
+    // (`/panel/gelen-teklifler?offerId=...`) her zaman sabit kalan bu
+    // bildirim, statüsü ne olursa olsun türetildiği için geri çekilmiş bir
+    // teklif için üretilmeye devam ederse Gelen Teklifler listesinde artık
+    // hiç görünmeyen (bkz. isOfferVisibleInNormalLists, job-requests.ts —
+    // tek ortak doğruluk kaynağı, aynı kural burada tekrar yazılmaz) bir
+    // teklife işaret eden ölü bir bağlantıya dönüşür. Ayrı bir
+    // "teklif_geri_cekildi" bildirimi zaten doğru (durum-farkında) href ile
+    // bu olayı karşılıyor (bkz. withdrawnNotifications, aşağıda).
     const newOfferNotifications: AppNotification[] = offers
-      .filter((offer) => myJobTitleById.has(offer.jobId))
+      .filter((offer) => myJobTitleById.has(offer.jobId) && isOfferVisibleInNormalLists(offer))
       .map((offer) => ({
         id: `offer-received-${offer.id}`,
         notificationType: "yeni_teklif",
