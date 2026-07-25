@@ -1,5 +1,5 @@
 import { isJobOpenForOffers } from "./jobs";
-import type { Job, Offer, OfferStatus } from "./types";
+import type { Job, Offer, OfferStatus, Session } from "./types";
 
 export type JobRequestFilter = "aktif" | "kabul-edildi" | "devam-eden" | "tamamlandi";
 
@@ -156,6 +156,27 @@ export function jobHasAcceptedOffer(jobId: string, offers: Offer[]): boolean {
  */
 export function getEngagedOfferForJob(jobId: string, offers: Offer[]): Offer | null {
   return offers.find((offer) => offer.jobId === jobId && ENGAGED_OFFER_STATUSES.includes(offer.status)) ?? null;
+}
+
+/**
+ * Bir ilanın açık adresini (Job.addressText) oturumdaki kullanıcının görüp
+ * göremeyeceği — contact-access.ts#getRevealedContactForOffer ile AYNI
+ * zamanlamayı (ENGAGED_OFFER_STATUSES) kullanır ama AYRI bir kapıdır (o
+ * dosya yalnızca telefon/e-posta içindir, bkz. CLAUDE.md). İki İSTİSNA:
+ *  - İlan sahibi (session.id === job.requesterId) HER ZAMAN görür, teklif
+ *    durumundan bağımsız.
+ *  - Diğer tüm kullanıcılar (Hizmet Veren dahil) yalnızca BU ilana verdiği
+ *    kendi teklifi "meşgul" durumundaysa görür.
+ */
+export function canViewJobAddress(session: Session | null, job: Job, offers: Offer[]): boolean {
+  if (!session) return false;
+  if (session.id === job.requesterId) return true;
+  return offers.some(
+    (offer) =>
+      offer.jobId === job.id &&
+      offer.providerId === session.id &&
+      ENGAGED_OFFER_STATUSES.includes(offer.status),
+  );
 }
 
 /**

@@ -6,8 +6,18 @@ export type JobFormFields = {
   description: string;
   province: string;
   district: string;
-  facilityType: string;
+  /** Bölge/Tesis GÖRÜNEN adı — katalogdan seçilmiş bir tesisin adı ("catalog") ya da kullanıcının serbestçe yazdığı tesis/işletme adı ("custom"). */
   workLocationType: string;
+  companyOrFactoryName: string;
+  addressText: string;
+  /** "catalog" — Bölge/Tesis merkezi kataloktan seçildi. "custom" — "Listede yok — tesis bilgilerini kendim gireceğim" seçildi; bu modda companyOrFactoryName zorunlu DEĞİLDİR, neighborhood/locationUrl/directionsNote isteğe bağlı olarak doğrulanır. */
+  locationMode: "catalog" | "custom";
+  /** Yalnızca locationMode "custom" olduğunda anlamlı, isteğe bağlı. */
+  neighborhood: string;
+  /** Yalnızca locationMode "custom" olduğunda anlamlı, isteğe bağlı. */
+  locationUrl: string;
+  /** Yalnızca locationMode "custom" olduğunda anlamlı, isteğe bağlı. */
+  directionsNote: string;
   workDate: string;
   operationDetails: string;
   photoCount: number;
@@ -16,7 +26,7 @@ export type JobFormFields = {
 export type JobFormErrors = Partial<Record<keyof JobFormFields, string>>;
 
 /**
- * İl/ilçe/yer türü değiştiğinde artık geçersiz kalan alanların eski hata
+ * İl/ilçe/tesis değiştiğinde artık geçersiz kalan alanların eski hata
  * mesajlarını temizler — oluşturma (job-request-form.tsx) ve düzenleme
  * (job-edit-form.tsx) formları aynı mantığı burada paylaşır. Hiçbir alan
  * silinmeyecekse aynı referansı döner (gereksiz re-render olmasın diye).
@@ -31,10 +41,7 @@ export function clearJobFormErrors(
   return next;
 }
 
-export function validateJobForm(
-  fields: JobFormFields,
-  options?: { isEdit?: boolean },
-): JobFormErrors {
+export function validateJobForm(fields: JobFormFields): JobFormErrors {
   const errors: JobFormErrors = {};
 
   if (fields.category.trim().length === 0) {
@@ -73,19 +80,63 @@ export function validateJobForm(
     errors.district = "Geçerli bir ilçe giriniz.";
   }
 
-  // Düzenlemede atlanır: Job kaydı facilityType'ı hiç saklamaz (yalnızca
-  // workLocationType/tesis metni kalıcıdır, bkz. job-edit-form.tsx), bu
-  // yüzden mevcut bir ilanı düzenlerken bu alan her zaman boş başlar ve
-  // kullanıcı konumu hiç değiştirmese bile kaydı imkansız kılardı.
-  if (!options?.isEdit && fields.facilityType.trim().length === 0) {
-    errors.facilityType = "İşin yapılacağı yer türünü seçiniz.";
-  }
+  const isCustomLocation = fields.locationMode === "custom";
 
   const workLocationType = fields.workLocationType.trim();
   if (workLocationType.length === 0) {
-    errors.workLocationType = "İşin yapılacağı yeri (tesisi) belirtiniz.";
+    errors.workLocationType = isCustomLocation
+      ? "Tesis / işletme adını belirtiniz."
+      : "Bölge / Tesis alanını belirtiniz.";
   } else if (workLocationType.length < 2) {
-    errors.workLocationType = "Geçerli bir tesis giriniz.";
+    errors.workLocationType = isCustomLocation
+      ? "Geçerli bir tesis / işletme adı giriniz."
+      : "Geçerli bir bölge / tesis giriniz.";
+  } else if (workLocationType.length > 150) {
+    errors.workLocationType = "Tesis / işletme adı en fazla 150 karakter olabilir.";
+  }
+
+  // Firma / Fabrika Adı yalnızca katalog modunda zorunludur — "custom" modda
+  // hiç gösterilmez (tek isim alanı workLocationType'tır), bu yüzden burada
+  // hiç doğrulanmaz (bkz. job-request-form.tsx/job-edit-form.tsx).
+  if (!isCustomLocation) {
+    const companyOrFactoryName = fields.companyOrFactoryName.trim();
+    if (companyOrFactoryName.length === 0) {
+      errors.companyOrFactoryName = "Firma / fabrika adını belirtiniz.";
+    } else if (companyOrFactoryName.length > 150) {
+      errors.companyOrFactoryName = "Firma / fabrika adı en fazla 150 karakter olabilir.";
+    }
+  }
+
+  const addressText = fields.addressText.trim();
+  if (addressText.length === 0) {
+    errors.addressText = "Açık adresi giriniz.";
+  } else if (addressText.length < 10) {
+    errors.addressText = "Açık adres en az 10 karakter olmalıdır.";
+  } else if (addressText.length > 500) {
+    errors.addressText = "Açık adres en fazla 500 karakter olabilir.";
+  }
+
+  // Aşağıdaki üç alan yalnızca "custom" modda gösterilir ve tamamen isteğe
+  // bağlıdır — yalnızca boşluk içeren bir değer boş sayılır (hata değil),
+  // dolu bir değer varsa yalnızca makul uzunluk (ve locationUrl için çok
+  // temel bir biçim) kontrolü yapılır.
+  if (isCustomLocation) {
+    const neighborhood = fields.neighborhood.trim();
+    if (neighborhood.length > 100) {
+      errors.neighborhood = "Bölge / mahalle en fazla 100 karakter olabilir.";
+    }
+
+    const locationUrl = fields.locationUrl.trim();
+    if (locationUrl.length > 300) {
+      errors.locationUrl = "Konum bağlantısı en fazla 300 karakter olabilir.";
+    } else if (locationUrl.length > 0 && !/^https?:\/\/\S+\.\S+/i.test(locationUrl)) {
+      errors.locationUrl = "Geçerli bir bağlantı giriniz (http:// veya https:// ile başlamalı).";
+    }
+
+    const directionsNote = fields.directionsNote.trim();
+    if (directionsNote.length > 300) {
+      errors.directionsNote = "Adres tarifi en fazla 300 karakter olabilir.";
+    }
   }
 
   if (fields.workDate.trim().length === 0) {

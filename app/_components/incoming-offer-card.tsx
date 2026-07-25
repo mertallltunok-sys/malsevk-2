@@ -3,6 +3,7 @@
 import { Building2, Check, CheckCircle2, MapPin, Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
+import { formatJobLocationLine } from "../_lib/job-location";
 import { OFFER_PENDING_BLOCKED_MESSAGE, isOfferPendingActionBlocked } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
@@ -88,6 +89,12 @@ export function IncomingOfferCard({
             <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {job ? job.title : "İlan artık mevcut değil"}
             </p>
+            {job && (
+              <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
+                {formatJobLocationLine(job)}
+              </p>
+            )}
             <p className="mt-1 truncate text-sm font-semibold text-foreground">
               {companyName}
               <span className="ml-2 font-normal text-muted-foreground">

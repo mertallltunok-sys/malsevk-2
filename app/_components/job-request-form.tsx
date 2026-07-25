@@ -4,17 +4,16 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { clearJobFormErrors, validateJobForm, type JobFormErrors } from "../_lib/job-form-validation";
+import { FACILITY_FREE_TEXT_VALUE, toFacilitySelectOptions } from "../_lib/job-location";
 import { createJob } from "../_lib/job-store";
 import { MIN_PHOTOS } from "../_lib/photo-validation";
 import { SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import {
-  FACILITY_TYPE_OPTIONS,
   getDistrictId,
   getDistrictsByProvinceCode,
-  getFacilitiesByProvinceDistrictAndType,
+  getFacilitiesByProvinceAndDistrict,
   getProvinceIdByCode,
   getProvinces,
-  type FacilityType,
 } from "../_lib/turkey-locations";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
@@ -24,6 +23,7 @@ import { SearchableSelect } from "./searchable-select";
 
 const DESCRIPTION_MAX_LENGTH = 1000;
 const OPERATION_DETAILS_MAX_LENGTH = 1000;
+const ADDRESS_MAX_LENGTH = 500;
 
 const PAGE_TITLE = "Hizmet Talebi Oluştur";
 const PAGE_DESCRIPTION =
@@ -38,8 +38,12 @@ export function JobRequestForm() {
   const descriptionId = useId();
   const provinceId = useId();
   const districtId = useId();
-  const facilityTypeId = useId();
   const workLocationTypeId = useId();
+  const companyOrFactoryNameId = useId();
+  const addressTextId = useId();
+  const neighborhoodId = useId();
+  const locationUrlId = useId();
+  const directionsNoteId = useId();
   const workDateId = useId();
   const operationDetailsId = useId();
   const photosId = useId();
@@ -49,8 +53,16 @@ export function JobRequestForm() {
   const [description, setDescription] = useState("");
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
-  const [facilityType, setFacilityType] = useState<FacilityType | "">("");
-  const [workLocationType, setWorkLocationType] = useState("");
+  const [facilityId, setFacilityId] = useState("");
+  const [otherFacilityText, setOtherFacilityText] = useState("");
+  const [companyOrFactoryName, setCompanyOrFactoryName] = useState("");
+  const [addressText, setAddressText] = useState("");
+  // Yalnızca facilityId === FACILITY_FREE_TEXT_VALUE ("Listede yok — tesis
+  // bilgilerini kendim gireceğim") seçiliyken gösterilir/doğrulanır, bkz.
+  // job-form-validation.ts#JobFormFields.locationMode.
+  const [neighborhood, setNeighborhood] = useState("");
+  const [locationUrl, setLocationUrl] = useState("");
+  const [directionsNote, setDirectionsNote] = useState("");
   const [workDate, setWorkDate] = useState("");
   const [operationDetails, setOperationDetails] = useState("");
   const [photos, setPhotos] = useState<ReadyJobPhoto[]>([]);
@@ -88,19 +100,18 @@ export function JobRequestForm() {
     [provinceCode],
   );
 
-  const workLocationOptions = useMemo(() => {
-    if (!provinceCode || !district || !facilityType) return [];
+  // Bölge/Tesis: seçilen il+ilçe kapsamındaki TÜM tesis türleri tek listede
+  // sunulur (bkz. job-location.ts) — Aktif İlanlar ekranındaki Bölge/Tesis
+  // filtresiyle (job-listing-filters.ts) AYNI merkezi kaynak ve AYNI
+  // il/ilçe anahtar şeması kullanılır, ayrı bir "yer türü" ön adımı yoktur.
+  const candidateFacilities = useMemo(() => {
+    if (!provinceCode || !district) return [];
     const provinceIdValue = getProvinceIdByCode(provinceCode);
     if (!provinceIdValue) return [];
-    const districtIdValue = getDistrictId(district);
-    return getFacilitiesByProvinceDistrictAndType(provinceIdValue, districtIdValue, facilityType).map(
-      (facility) => ({
-        value: facility.name,
-        label: facility.name,
-        keywords: facility.aliases,
-      }),
-    );
-  }, [provinceCode, district, facilityType]);
+    return getFacilitiesByProvinceAndDistrict(provinceIdValue, getDistrictId(district));
+  }, [provinceCode, district]);
+
+  const facilityOptions = useMemo(() => toFacilitySelectOptions(candidateFacilities), [candidateFacilities]);
 
   /** Kullanıcı bir alanı düzelttiğinde o alanın hata durumu hemen kalksın diye. */
   function clearFieldError(field: keyof JobFormErrors) {
@@ -131,33 +142,61 @@ export function JobRequestForm() {
     }
   }, []);
 
-  // İl değiştiğinde: ilçe, yer türü ve tesis seçimi TAMAMEN temizlenir —
-  // hepsi seçilen ile bağlı olduğu için eskisi artık anlamsızdır.
+  /** Özel tesis (custom) alanlarını temizler — İl/İlçe/Bölge-Tesis değiştiğinde, eski modun artık anlamsız kalan verisi bir sonrakine sızmasın diye. */
+  function resetCustomFacilityFields() {
+    setNeighborhood("");
+    setLocationUrl("");
+    setDirectionsNote("");
+  }
+
+  // İl değiştiğinde: ilçe ve Bölge/Tesis seçimi TAMAMEN temizlenir — ikisi
+  // de seçilen ile bağlı olduğu için eskisi artık anlamsızdır.
   function handleProvinceChange(nextCode: string) {
     setProvinceCode(nextCode);
     setDistrict("");
-    setFacilityType("");
-    setWorkLocationType("");
+    setFacilityId("");
+    setOtherFacilityText("");
+    resetCustomFacilityFields();
     setErrors((current) =>
-      clearJobFormErrors(current, ["province", "district", "facilityType", "workLocationType"]),
+      clearJobFormErrors(current, [
+        "province",
+        "district",
+        "workLocationType",
+        "neighborhood",
+        "locationUrl",
+        "directionsNote",
+      ]),
     );
   }
 
-  // İlçe değiştiğinde: yer türü seçimi KORUNUR (kullanıcı "Liman" arıyorsa,
-  // ilçe değiştirdiğinde bunu yeniden seçmesi gerekmez); ama tesis seçimi
-  // her zaman temizlenir — eski ilçenin tesisi yeni ilçede asla kalmamalı.
+  // İlçe değiştiğinde: Bölge/Tesis seçimi her zaman temizlenir — eski
+  // ilçenin tesisi yeni ilçede asla kalmamalı.
   function handleDistrictChange(nextDistrict: string) {
     setDistrict(nextDistrict);
-    setWorkLocationType("");
-    setErrors((current) => clearJobFormErrors(current, ["district", "workLocationType"]));
+    setFacilityId("");
+    setOtherFacilityText("");
+    resetCustomFacilityFields();
+    setErrors((current) =>
+      clearJobFormErrors(current, ["district", "workLocationType", "neighborhood", "locationUrl", "directionsNote"]),
+    );
   }
 
-  // Yer türü değiştiğinde: eski tesis seçimi temizlenir, yeni filtre
-  // sonuçları (workLocationOptions) otomatik olarak yeniden hesaplanır.
-  function handleFacilityTypeChange(nextType: FacilityType | "") {
-    setFacilityType(nextType);
-    setWorkLocationType("");
-    setErrors((current) => clearJobFormErrors(current, ["facilityType", "workLocationType"]));
+  function handleFacilityChange(nextValue: string) {
+    setFacilityId(nextValue);
+    setOtherFacilityText("");
+    resetCustomFacilityFields();
+    // Özel tesis moduna girilirken, katalog moduna özgü Firma/Fabrika Adı
+    // alanı da temizlenir — "eski moda ait gereksiz alanlar temizlenmeli"
+    // kuralı burada da geçerli. Tersi yönde (özel -> katalog) BİLEREK
+    // temizlenmez: eski (bu özellikten önce oluşturulmuş) bir ilanı hiç
+    // dokunmadan düzenlerken mevcut companyOrFactoryName'i kaybetmemeli.
+    if (nextValue === FACILITY_FREE_TEXT_VALUE) {
+      setCompanyOrFactoryName("");
+      clearFieldError("companyOrFactoryName");
+    }
+    setErrors((current) =>
+      clearJobFormErrors(current, ["workLocationType", "neighborhood", "locationUrl", "directionsNote"]),
+    );
   }
 
   /** İlk hatalı/eksik zorunlu alana kaydırır ve odak verir (bkz. FIELD_ORDER). */
@@ -170,8 +209,12 @@ export function JobRequestForm() {
       "photoCount",
       "province",
       "district",
-      "facilityType",
       "workLocationType",
+      "companyOrFactoryName",
+      "addressText",
+      "neighborhood",
+      "locationUrl",
+      "directionsNote",
       "operationDetails",
     ];
     const fieldIds: Record<keyof JobFormErrors, string> = {
@@ -182,9 +225,19 @@ export function JobRequestForm() {
       photoCount: photosId,
       province: provinceId,
       district: districtId,
-      facilityType: facilityTypeId,
       workLocationType: workLocationTypeId,
+      companyOrFactoryName: companyOrFactoryNameId,
+      addressText: addressTextId,
+      neighborhood: neighborhoodId,
+      locationUrl: locationUrlId,
+      directionsNote: directionsNoteId,
       operationDetails: operationDetailsId,
+      // locationMode kullanıcının doğrudan doldurduğu bir alan değil (dahili
+      // olarak facilityId'den türetilir, bkz. handleSubmit) — validateJobForm
+      // bu alan için hiçbir zaman hata üretmez, ama JobFormErrors'ın tüm
+      // JobFormFields anahtarlarını kapsaması TypeScript tarafından
+      // zorunlu kılındığı için burada en yakın ilişkili alana yönlendirilir.
+      locationMode: workLocationTypeId,
     };
     const firstErrorField = fieldOrder.find((field) => fieldErrors[field]);
     if (!firstErrorField) return;
@@ -219,14 +272,24 @@ export function JobRequestForm() {
     // ikinci bir çağrıyı da hemen durdurur (bkz. submitLockRef tanımı).
     if (submitLockRef.current || photosProcessing) return;
 
+    const isCustomLocation = facilityId === FACILITY_FREE_TEXT_VALUE;
+    const selectedFacility = candidateFacilities.find((facility) => facility.id === facilityId) ?? null;
+    const workLocationTypeValue = isCustomLocation ? otherFacilityText.trim() : selectedFacility?.name ?? "";
+    const locationMode: "catalog" | "custom" = isCustomLocation ? "custom" : "catalog";
+
     const fieldErrors = validateJobForm({
       category,
       title,
       description,
       province: provinceName,
       district,
-      facilityType,
-      workLocationType,
+      workLocationType: workLocationTypeValue,
+      companyOrFactoryName,
+      addressText,
+      locationMode,
+      neighborhood,
+      locationUrl,
+      directionsNote,
       workDate,
       operationDetails,
       photoCount: photos.length,
@@ -252,7 +315,14 @@ export function JobRequestForm() {
         description,
         province: provinceName,
         district,
-        workLocationType,
+        workLocationType: workLocationTypeValue,
+        facilityId: selectedFacility?.id,
+        companyOrFactoryName,
+        addressText,
+        locationMode,
+        neighborhood,
+        locationUrl,
+        directionsNote,
         workDate,
         operationDetails,
         photos,
@@ -425,7 +495,7 @@ export function JobRequestForm() {
         )}
       </div>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <SearchableSelect
             id={provinceId}
@@ -463,79 +533,50 @@ export function JobRequestForm() {
         </div>
 
         <div>
-          <label htmlFor={facilityTypeId} className="text-sm font-medium text-foreground">
-            İşin Yapılacağı Yer Türü
-          </label>
-          <select
-            id={facilityTypeId}
-            value={facilityType}
-            onChange={(event) => handleFacilityTypeChange(event.target.value as FacilityType | "")}
-            disabled={!district}
-            aria-invalid={errors.facilityType ? true : undefined}
-            aria-describedby={errors.facilityType ? `${facilityTypeId}-error` : undefined}
-            className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 ${
-              errors.facilityType ? "border-danger" : "border-border"
-            }`}
-          >
-            <option value="">{district ? "Yer türü seçiniz" : "Önce ilçe seçin"}</option>
-            {FACILITY_TYPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          {errors.facilityType && (
-            <p id={`${facilityTypeId}-error`} className="mt-2 text-sm text-danger">
-              {errors.facilityType}
-            </p>
-          )}
-        </div>
-
-        <div>
-          {facilityType && workLocationOptions.length === 0 ? (
+          {facilityId === FACILITY_FREE_TEXT_VALUE ? (
             <>
-              <label
-                htmlFor={workLocationTypeId}
-                className="text-sm font-medium text-foreground"
-              >
-                Tesis
+              <label htmlFor={workLocationTypeId} className="text-sm font-medium text-foreground">
+                Tesis / İşletme Adı
               </label>
               <input
                 id={workLocationTypeId}
                 type="text"
-                value={workLocationType}
+                value={otherFacilityText}
                 onChange={(event) => {
-                  setWorkLocationType(event.target.value);
+                  setOtherFacilityText(event.target.value);
                   clearFieldError("workLocationType");
                 }}
-                maxLength={100}
+                maxLength={150}
                 aria-invalid={errors.workLocationType ? true : undefined}
                 aria-describedby={
                   errors.workLocationType ? `${workLocationTypeId}-error` : undefined
                 }
-                placeholder="Örnek: Liman Sahası"
+                placeholder="Örnek: ABC Metal Fabrikası"
                 className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                   errors.workLocationType ? "border-danger" : "border-border"
                 }`}
               />
               <p className="mt-2 text-xs text-muted-foreground">
-                Bu ilçe ve yer türü için hazır bir tesis listesi henüz
-                eklenmedi; yeri elle yazabilirsiniz.
+                Listede olmayan tesisin adını buraya yazabilirsiniz.{" "}
+                <button
+                  type="button"
+                  onClick={() => handleFacilityChange("")}
+                  className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                >
+                  Hazır listeden seçmek için tıklayın.
+                </button>
               </p>
             </>
           ) : (
             <SearchableSelect
               id={workLocationTypeId}
-              label="Tesis"
-              options={workLocationOptions}
-              value={workLocationType}
-              onChange={(value) => {
-                setWorkLocationType(value);
-                clearFieldError("workLocationType");
-              }}
-              placeholder="Tesis seçiniz"
-              disabled={!facilityType}
-              disabledHint={!district ? "Önce ilçe seçin" : "Önce yer türü seçin"}
+              label="Bölge / Tesis"
+              options={facilityOptions}
+              value={facilityId}
+              onChange={handleFacilityChange}
+              placeholder="Bölge / tesis seçiniz"
+              disabled={!district}
+              disabledHint="Önce ilçe seçin"
               errorId={errors.workLocationType ? `${workLocationTypeId}-error` : undefined}
             />
           )}
@@ -548,6 +589,154 @@ export function JobRequestForm() {
             </p>
           )}
         </div>
+      </div>
+
+      {facilityId === FACILITY_FREE_TEXT_VALUE ? (
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div>
+            <label htmlFor={neighborhoodId} className="text-sm font-medium text-foreground">
+              Bölge / Mahalle <span className="font-normal text-muted-foreground">(isteğe bağlı)</span>
+            </label>
+            <input
+              id={neighborhoodId}
+              type="text"
+              value={neighborhood}
+              onChange={(event) => {
+                setNeighborhood(event.target.value);
+                clearFieldError("neighborhood");
+              }}
+              maxLength={100}
+              aria-invalid={errors.neighborhood ? true : undefined}
+              aria-describedby={errors.neighborhood ? `${neighborhoodId}-error` : undefined}
+              placeholder="Örn. Çerkeşli Mahallesi"
+              className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                errors.neighborhood ? "border-danger" : "border-border"
+              }`}
+            />
+            {errors.neighborhood && (
+              <p id={`${neighborhoodId}-error`} className="mt-2 text-sm text-danger">
+                {errors.neighborhood}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor={locationUrlId} className="text-sm font-medium text-foreground">
+              Konum Bağlantısı <span className="font-normal text-muted-foreground">(isteğe bağlı)</span>
+            </label>
+            <input
+              id={locationUrlId}
+              type="url"
+              value={locationUrl}
+              onChange={(event) => {
+                setLocationUrl(event.target.value);
+                clearFieldError("locationUrl");
+              }}
+              maxLength={300}
+              aria-invalid={errors.locationUrl ? true : undefined}
+              aria-describedby={errors.locationUrl ? `${locationUrlId}-error` : undefined}
+              placeholder="Örn. https://maps.google.com/..."
+              className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                errors.locationUrl ? "border-danger" : "border-border"
+              }`}
+            />
+            {errors.locationUrl && (
+              <p id={`${locationUrlId}-error`} className="mt-2 text-sm text-danger">
+                {errors.locationUrl}
+              </p>
+            )}
+          </div>
+
+          <div className="sm:col-span-2">
+            <label htmlFor={directionsNoteId} className="text-sm font-medium text-foreground">
+              Adres Tarifi <span className="font-normal text-muted-foreground">(isteğe bağlı)</span>
+            </label>
+            <textarea
+              id={directionsNoteId}
+              value={directionsNote}
+              onChange={(event) => {
+                setDirectionsNote(event.target.value);
+                clearFieldError("directionsNote");
+              }}
+              maxLength={300}
+              rows={2}
+              aria-invalid={errors.directionsNote ? true : undefined}
+              aria-describedby={errors.directionsNote ? `${directionsNoteId}-error` : undefined}
+              placeholder="Örn. Ana kapıdan değil, B kapısından giriş yapınız."
+              className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                errors.directionsNote ? "border-danger" : "border-border"
+              }`}
+            />
+            {errors.directionsNote && (
+              <p id={`${directionsNoteId}-error`} className="mt-2 text-sm text-danger">
+                {errors.directionsNote}
+              </p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <label htmlFor={companyOrFactoryNameId} className="text-sm font-medium text-foreground">
+            Firma / Fabrika Adı
+          </label>
+          <input
+            id={companyOrFactoryNameId}
+            type="text"
+            value={companyOrFactoryName}
+            onChange={(event) => {
+              setCompanyOrFactoryName(event.target.value);
+              clearFieldError("companyOrFactoryName");
+            }}
+            maxLength={150}
+            aria-invalid={errors.companyOrFactoryName ? true : undefined}
+            aria-describedby={errors.companyOrFactoryName ? `${companyOrFactoryNameId}-error` : undefined}
+            placeholder="Örn. ABC Metal Sanayi A.Ş."
+            className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+              errors.companyOrFactoryName ? "border-danger" : "border-border"
+            }`}
+          />
+          {errors.companyOrFactoryName && (
+            <p id={`${companyOrFactoryNameId}-error`} className="mt-2 text-sm text-danger">
+              {errors.companyOrFactoryName}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-baseline justify-between gap-3">
+          <label htmlFor={addressTextId} className="text-sm font-medium text-foreground">
+            Açık Adres
+          </label>
+          <span className="text-xs text-muted-foreground">
+            {addressText.trim().length} / {ADDRESS_MAX_LENGTH}
+          </span>
+        </div>
+        <textarea
+          id={addressTextId}
+          value={addressText}
+          onChange={(event) => {
+            setAddressText(event.target.value);
+            clearFieldError("addressText");
+          }}
+          maxLength={ADDRESS_MAX_LENGTH}
+          rows={3}
+          aria-invalid={errors.addressText ? true : undefined}
+          aria-describedby={errors.addressText ? `${addressTextId}-error` : undefined}
+          placeholder="Mahalle, cadde/sokak, kapı no ve varsa ilave tarif bilgileri."
+          className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            errors.addressText ? "border-danger" : "border-border"
+          }`}
+        />
+        <p className="mt-2 text-xs text-muted-foreground">
+          Açık adres yalnızca siz ve teklifi kabul edilen hizmet veren
+          tarafından görülebilir.
+        </p>
+        {errors.addressText && (
+          <p id={`${addressTextId}-error`} className="mt-2 text-sm text-danger">
+            {errors.addressText}
+          </p>
+        )}
       </div>
 
       <div>

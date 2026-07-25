@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { formatJobDate, getJobStatusLabel, getJobStatusTone, isJobDateInPast } from "../_lib/jobs";
+import { formatJobLocationLine } from "../_lib/job-location";
 import {
   getCompletedOfferForJob,
   getEngagedOfferForJob,
@@ -193,13 +194,35 @@ function JobRequestCard({
       <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
         <span className="flex items-center gap-2">
           <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {job.district}, {job.province}
+          {formatJobLocationLine(job)}
         </span>
         <span className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
           {formatJobDate(job.workDate)}
         </span>
       </div>
+
+      {/* Bu panel yalnızca job.requesterId === session.id olan ilanları listeler (bkz. JobRequestsList#myEntries)
+          — ilan sahibi olduğu YAPISAL OLARAK garanti; ayrıca bir canViewJobAddress kontrolüne gerek yok.
+          neighborhood/locationUrl/directionsNote addressText ile AYNI gizlilik
+          kapısını paylaşır (bkz. types.ts#Job), bu yüzden burada da koşulsuz gösterilir. */}
+      {job.addressText && (
+        <p className="mt-1.5 break-words text-sm text-muted-foreground">
+          Açık adres: {job.neighborhood && <>{job.neighborhood}, </>}
+          {job.addressText}
+          {job.directionsNote && <span className="block text-xs">{job.directionsNote}</span>}
+          {job.locationUrl && (
+            <a
+              href={job.locationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Haritada Görüntüle
+            </a>
+          )}
+        </p>
+      )}
 
       {filter !== "tamamlandi" && isJobDateInPast(job.workDate) && (
         <p className="mt-2 text-xs text-warning">Tarihi güncellemeniz önerilir.</p>

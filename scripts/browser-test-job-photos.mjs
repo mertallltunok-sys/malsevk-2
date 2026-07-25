@@ -48,14 +48,17 @@ async function fillBaseFormFields(page, titleSuffix) {
   await page.locator('ul[aria-label="İlçe"]').waitFor({ state: "visible" });
   await page.locator('ul[aria-label="İlçe"]').getByRole("option", { name: "Dilovası", exact: true }).click();
 
-  await page.getByLabel("İşin Yapılacağı Yer Türü").selectOption({ label: "Liman" });
-
-  await page.getByRole("button", { name: "Tesis", exact: true }).click();
-  await page.locator('ul[aria-label="Tesis"]').waitFor({ state: "visible" });
+  // 2026-07-25: "İşin Yapılacağı Yer Türü" ayrı adımı kaldırıldı, tek bir
+  // "Bölge / Tesis" seçiciyle birleştirildi (bkz. job-location.ts).
+  await page.getByRole("button", { name: "Bölge / Tesis", exact: true }).click();
+  await page.locator('ul[aria-label="Bölge / Tesis"]').waitFor({ state: "visible" });
   await page
-    .locator('ul[aria-label="Tesis"]')
-    .getByRole("option", { name: "Beldeport" })
+    .locator('ul[aria-label="Bölge / Tesis"]')
+    .getByRole("option", { name: "Beldeport", exact: false })
     .click();
+
+  await page.getByLabel("Firma / Fabrika Adı").fill("Foto Test Firma A.Ş.");
+  await page.getByLabel("Açık Adres").fill("Deneme Mahallesi, Test Sokak No:1, Dilovası/Kocaeli");
 
   await page
     .getByLabel("Operasyon Detayları")

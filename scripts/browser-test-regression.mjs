@@ -79,7 +79,9 @@ async function main() {
   );
   ok("Rol yetkisi: Hizmet Veren hâlâ ilan oluşturamıyor");
 
-  // 5) Lokasyon seçimi: Hizmet Alan olarak giriş yap, İl/İlçe/Yer seçimi çalışıyor
+  // 5) Lokasyon seçimi: Hizmet Alan olarak giriş yap, İl/İlçe/Bölge-Tesis
+  // seçimi çalışıyor (2026-07-25: "İşin Yapılacağı Yer Türü" ayrı adımı
+  // kaldırıldı, tek bir "Bölge / Tesis" seçiciyle birleştirildi).
   await page.goto(`${BASE_URL}/giris-yap?redirect=/hizmet-talebi-olustur`);
   await page.locator('input[type="email"]').fill("zeynep@test.com");
   await page.locator('input[type="password"]').fill("Zeynep1!");
@@ -89,15 +91,14 @@ async function main() {
   await page.locator('ul[aria-label="İl"]').getByRole("option", { name: "Kocaeli", exact: true }).click();
   await page.getByRole("button", { name: "İlçe", exact: true }).click();
   await page.locator('ul[aria-label="İlçe"]').getByRole("option", { name: "Dilovası", exact: true }).click();
-  await page.getByLabel("İşin Yapılacağı Yer Türü").selectOption({ label: "Liman" });
-  await page.getByRole("button", { name: "Tesis", exact: true }).click();
+  await page.getByRole("button", { name: "Bölge / Tesis", exact: true }).click();
   await assert.doesNotReject(
     page
-      .locator('ul[aria-label="Tesis"]')
-      .getByRole("option", { name: "Beldeport" })
+      .locator('ul[aria-label="Bölge / Tesis"]')
+      .getByRole("option", { name: "Beldeport", exact: false })
       .waitFor({ state: "visible", timeout: 5000 }),
   );
-  ok("Lokasyon seçimi (İl -> İlçe -> Yer Türü -> Tesis, Beldeport dahil) hâlâ doğru çalışıyor");
+  ok("Lokasyon seçimi (İl -> İlçe -> Bölge/Tesis, Beldeport dahil) hâlâ doğru çalışıyor");
 
   if (consoleErrors.length > 0) {
     console.log("\n[browser-test-regression] UYARI: Konsolda hata yakalandı:");

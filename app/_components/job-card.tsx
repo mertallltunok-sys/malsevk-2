@@ -6,6 +6,7 @@ import {
   getJobOfferAvailabilityTone,
 } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
+import { formatJobLocationLine } from "../_lib/job-location";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import type { Job, Offer } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
@@ -58,7 +59,7 @@ export function JobCard({
       <div className="mt-auto flex flex-col gap-2 border-t border-border pt-4 text-sm text-muted-foreground">
         <span className="flex items-center gap-2">
           <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {job.district}, {job.province} · {job.workLocationType}
+          {formatJobLocationLine(job)}
         </span>
         <span className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />

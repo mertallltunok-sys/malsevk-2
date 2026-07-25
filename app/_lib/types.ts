@@ -77,7 +77,50 @@ export type Job = {
   category: string;
   province: string;
   district: string;
+  /** Bölge/Tesis GÖRÜNEN adı — `facilityId` doluysa o tesisin adının kopyası, "Listede yok / Diğer" seçilmişse (ya da facilityId'den önce oluşturulmuş eski ilanlarda) serbest metin. */
   workLocationType: string;
+  /** turkey-locations.ts#Facility.id — yalnızca Bölge/Tesis alanında merkezi katalogdan bir tesis seçildiyse vardır. "Listede yok / Diğer" seçilmişse ya da bu alandan ÖNCE oluşturulmuş ilanlarda yoktur; bu durumda workLocationType serbest metindir ve job-location.ts#resolveJobFacility ad/takma-ad eşleştirmesiyle en iyi çaba ile bir Facility'e bağlamayı dener. */
+  facilityId?: string;
+  /** "Firma / Fabrika Adı". Bu alandan ÖNCE oluşturulmuş ilanlarda yoktur. */
+  companyOrFactoryName?: string;
+  /**
+   * "Açık Adres" — serbest metin tam adres. GİZLİ alan: yalnızca ilan sahibi
+   * (requesterId) HER ZAMAN, başka bir kullanıcı ise yalnızca bu ilana verdiği
+   * teklif "meşgul" (bkz. job-requests.ts#canViewJobAddress/ENGAGED_OFFER_STATUSES)
+   * durumundaysa görebilir — contact-access.ts'in telefon/e-posta kapısıyla AYNI
+   * zamanlamayı kullanır ama AYRI bir fonksiyondadır (contact-access.ts yalnızca
+   * telefon/e-posta içindir). Bu alandan önce oluşturulmuş ilanlarda yoktur.
+   */
+  addressText?: string;
+  /**
+   * "catalog" — Bölge/Tesis merkezi kataloktan seçildi (facilityId dolu ya
+   * da eski/legacy bir ilan). "custom" — Hizmet Alan "Listede yok — tesis
+   * bilgilerini kendim gireceğim" seçeneğiyle kendi tesis/adres bilgisini
+   * girdi; bu durumda facilityId hiçbir zaman yoktur ve workLocationType
+   * kullanıcının serbestçe yazdığı tesis/işletme adıdır. Bu alandan önce
+   * oluşturulmuş TÜM ilanlarda yoktur — yokluğu HER ZAMAN "catalog" olarak
+   * yorumlanır (bkz. job-location.ts, job-edit-form.tsx'in facilityId
+   * varlığına dayanan geriye dönük mod tespiti zaten bu iki durumu da aynı
+   * şekilde ele alır).
+   */
+  locationMode?: "catalog" | "custom";
+  /**
+   * Yalnızca locationMode "custom" olan ilanlarda anlamlı, isteğe bağlı
+   * Bölge/Mahalle bilgisi. addressText ile AYNI gizlilik kapısını
+   * (job-requests.ts#canViewJobAddress) kullanır — bkz. job-detail-content.tsx.
+   */
+  neighborhood?: string;
+  /**
+   * Yalnızca locationMode "custom" olan ilanlarda anlamlı, isteğe bağlı
+   * konum/harita bağlantısı (düz metin URL, ayrı bir harita/coğrafi kodlama
+   * entegrasyonu YOKTUR). addressText ile AYNI gizlilik kapısını kullanır.
+   */
+  locationUrl?: string;
+  /**
+   * Yalnızca locationMode "custom" olan ilanlarda anlamlı, isteğe bağlı
+   * ilave adres tarifi notu. addressText ile AYNI gizlilik kapısını kullanır.
+   */
+  directionsNote?: string;
   workDate: string;
   description: string;
   operationDetails: string;

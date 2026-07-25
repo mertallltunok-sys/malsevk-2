@@ -1,8 +1,10 @@
 "use client";
 
-import { CalendarDays, ClipboardList, MapPin } from "lucide-react";
+import { Building2, CalendarDays, ClipboardList, Home, MapPin } from "lucide-react";
 import Link from "next/link";
+import { formatJobLocationLine, getJobLocationSummary } from "../_lib/job-location";
 import {
+  canViewJobAddress,
   getJobOfferAvailability,
   getJobOfferAvailabilityLabel,
   getJobOfferAvailabilityTone,
@@ -38,6 +40,8 @@ export function JobDetailContent({ id }: { id: string }) {
   }
 
   const offerAvailability = getJobOfferAvailability(job, offers);
+  const locationSummary = getJobLocationSummary(job);
+  const showAddress = canViewJobAddress(session, job, offers) && Boolean(job.addressText);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
@@ -63,15 +67,45 @@ export function JobDetailContent({ id }: { id: string }) {
         />
       </div>
 
-      <div className="mt-6 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
-        <span className="flex items-center gap-2">
-          <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {job.district}, {job.province} · {job.workLocationType}
-        </span>
-        <span className="flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {formatJobDate(job.workDate)}
-        </span>
+      <div className="mt-6 flex flex-col gap-2 text-sm text-muted-foreground">
+        {locationSummary.companyOrFactoryName && (
+          <span className="flex items-center gap-2 font-medium text-foreground">
+            <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {locationSummary.companyOrFactoryName}
+          </span>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
+          <span className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {formatJobLocationLine(job)}
+          </span>
+          <span className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {formatJobDate(job.workDate)}
+          </span>
+        </div>
+        {showAddress && (
+          <span className="flex items-start gap-2">
+            <Home className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="break-words">
+              {job.neighborhood && <>{job.neighborhood}, </>}
+              {job.addressText}
+              {job.directionsNote && (
+                <span className="mt-1 block text-xs text-muted-foreground">{job.directionsNote}</span>
+              )}
+              {job.locationUrl && (
+                <a
+                  href={job.locationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  Haritada Görüntüle
+                </a>
+              )}
+            </span>
+          </span>
+        )}
       </div>
 
       {session?.id === job.requesterId && job.status !== "tamamlandi" && isJobDateInPast(job.workDate) && (

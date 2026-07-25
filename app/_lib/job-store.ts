@@ -49,13 +49,32 @@ function isJobCore(value: unknown): value is Record<string, unknown> {
  * `photos` alanı bu özellikten önce oluşturulmuş ilanlarda hiç yoktur.
  * Geriye dönük uyumluluk için eksik/bozuk `photos` her zaman boş diziye
  * normalize edilir — eski ilanlar bu yüzden asla çökmeden, fotoğrafsız
- * olarak görüntülenmeye devam eder.
+ * olarak görüntülenmeye devam eder. `facilityId`/`companyOrFactoryName`/
+ * `addressText` de AYNI mantıkla ele alınır: bu alanlardan önce oluşturulmuş
+ * (ya da bozuk/tip uyuşmayan) kayıtlarda `undefined`e normalize edilir —
+ * hiçbir zaman çökme veya "undefined" metni gösterme riski yaratmaz (bkz.
+ * job-location.ts'in bu opsiyonel alanları nasıl güvenle varsaydığı).
  */
 function normalizeStoredJob(value: unknown): Job | null {
   if (!isJobCore(value)) return null;
-  const rawPhotos = (value as Record<string, unknown>).photos;
+  const record = value as Record<string, unknown>;
+  const rawPhotos = record.photos;
   const photos = Array.isArray(rawPhotos) ? rawPhotos.filter(isJobPhoto) : [];
-  return { ...(value as Omit<Job, "photos">), photos } as Job;
+  return {
+    ...(value as Omit<Job, "photos">),
+    photos,
+    facilityId: typeof record.facilityId === "string" ? record.facilityId : undefined,
+    companyOrFactoryName: typeof record.companyOrFactoryName === "string" ? record.companyOrFactoryName : undefined,
+    addressText: typeof record.addressText === "string" ? record.addressText : undefined,
+    // locationMode bu alandan önce oluşturulmuş TÜM ilanlarda yoktur — yokluğu
+    // (ya da bozuk/tanınmayan bir değer) HER ZAMAN "catalog" olarak yorumlanır,
+    // burada undefined'a normalize edilir (job-location.ts/job-edit-form.tsx
+    // zaten facilityId varlığına bakarak aynı sonuca varır).
+    locationMode: record.locationMode === "catalog" || record.locationMode === "custom" ? record.locationMode : undefined,
+    neighborhood: typeof record.neighborhood === "string" ? record.neighborhood : undefined,
+    locationUrl: typeof record.locationUrl === "string" ? record.locationUrl : undefined,
+    directionsNote: typeof record.directionsNote === "string" ? record.directionsNote : undefined,
+  } as Job;
 }
 
 function readUserCreatedJobsSnapshot(): Job[] {
@@ -164,6 +183,46 @@ export type ProcessedPhotoInput = {
   mimeType: string;
 };
 
+/** createJob/updateJob'ın ortak aldığı, locationMode'a bağlı ham konum alanları. */
+type LocationInput = {
+  workLocationType: string;
+  facilityId?: string;
+  companyOrFactoryName: string;
+  addressText: string;
+  locationMode?: "catalog" | "custom";
+  neighborhood?: string;
+  locationUrl?: string;
+  directionsNote?: string;
+};
+
+/**
+ * locationMode'a göre ham form girdisini Job'a yazılacak son alanlara
+ * indirger — TEK yer, createJob ve updateJob arasında kopyalanmaz.
+ * "custom" modda facilityId HER ZAMAN temizlenir (sahte/yanlış bir
+ * Facility.id asla kalıcı hâle gelmez — bkz. job-location.ts#resolveJobFacility'nin
+ * locationMode "custom" için katalog eşleştirmesini de bilerek atlaması).
+ * "catalog" modda (ya da locationMode hiç verilmemişse, geriye dönük
+ * varsayılan) yalnızca "custom"a özgü alanlar (neighborhood/locationUrl/
+ * directionsNote) temizlenir — companyOrFactoryName BİLEREK dokunulmaz,
+ * çünkü bir ilan daha önce (bu özellikten önce ya da başka bir moddayken)
+ * girilmiş bir firma adını taşıyor olabilir ve bunu sessizce silmek veri
+ * kaybı olurdu (bkz. job-edit-form.tsx'in "custom" modda bu alanı
+ * göstermeden de state'te koruması).
+ */
+function resolveLocationFields(input: LocationInput) {
+  const isCustom = input.locationMode === "custom";
+  return {
+    workLocationType: input.workLocationType.trim(),
+    facilityId: isCustom ? undefined : input.facilityId?.trim() || undefined,
+    companyOrFactoryName: input.companyOrFactoryName.trim(),
+    addressText: input.addressText.trim(),
+    locationMode: input.locationMode,
+    neighborhood: isCustom ? input.neighborhood?.trim() || undefined : undefined,
+    locationUrl: isCustom ? input.locationUrl?.trim() || undefined : undefined,
+    directionsNote: isCustom ? input.directionsNote?.trim() || undefined : undefined,
+  };
+}
+
 export type CreateJobInput = {
   category: string;
   title: string;
@@ -171,6 +230,15 @@ export type CreateJobInput = {
   province: string;
   district: string;
   workLocationType: string;
+  /** turkey-locations.ts#Facility.id — yalnızca katalogdan seçildiyse; "Listede yok / Diğer" seçilmişse yoktur. */
+  facilityId?: string;
+  companyOrFactoryName: string;
+  addressText: string;
+  /** Bkz. types.ts#Job.locationMode. */
+  locationMode?: "catalog" | "custom";
+  neighborhood?: string;
+  locationUrl?: string;
+  directionsNote?: string;
   workDate: string;
   operationDetails: string;
   photos: ProcessedPhotoInput[];
@@ -239,7 +307,7 @@ export async function createJob(
     category: input.category,
     province: input.province.trim(),
     district: input.district.trim(),
-    workLocationType: input.workLocationType.trim(),
+    ...resolveLocationFields(input),
     workDate: input.workDate,
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),
@@ -260,6 +328,15 @@ export type UpdateJobInput = {
   province: string;
   district: string;
   workLocationType: string;
+  /** turkey-locations.ts#Facility.id — yalnızca katalogdan seçildiyse; "Listede yok / Diğer" seçilmişse yoktur. */
+  facilityId?: string;
+  companyOrFactoryName: string;
+  addressText: string;
+  /** Bkz. types.ts#Job.locationMode. */
+  locationMode?: "catalog" | "custom";
+  neighborhood?: string;
+  locationUrl?: string;
+  directionsNote?: string;
   workDate: string;
   description: string;
   operationDetails: string;
@@ -331,7 +408,7 @@ export async function updateJob(
     category: input.category,
     province: input.province.trim(),
     district: input.district.trim(),
-    workLocationType: input.workLocationType.trim(),
+    ...resolveLocationFields(input),
     workDate: input.workDate,
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),

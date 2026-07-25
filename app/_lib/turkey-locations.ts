@@ -132,3 +132,14 @@ export function getFacilitiesByProvinceDistrictAndType(
       facility.type === type,
   );
 }
+
+/**
+ * `getFacilitiesByProvinceDistrictAndType`in TÜM türleri birden döndüren
+ * hâli — Aktif İlanlar ekranındaki Bölge/Tesis filtresi (job-listing-filters.ts)
+ * için: job-request-form.tsx'in aksine bu filtrede ayrı bir "Yer Türü" adımı
+ * yok, tek bir il+ilçe kapsamındaki TÜM tesisler tek listede sunulur. AYNI
+ * merkezi `facilities` dizisi okunur — ayrı/kopya bir veri kaynağı YOKTUR.
+ */
+export function getFacilitiesByProvinceAndDistrict(provinceId: string, districtId: string): Facility[] {
+  return facilities.filter((facility) => facility.provinceId === provinceId && facility.districtId === districtId);
+}

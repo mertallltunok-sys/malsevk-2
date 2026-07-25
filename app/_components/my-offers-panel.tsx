@@ -1,10 +1,11 @@
 "use client";
 
-import { CalendarDays, Clock, FileText } from "lucide-react";
+import { CalendarDays, Clock, FileText, MapPin } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
+import { formatJobLocationLine } from "../_lib/job-location";
 import {
   getProviderOfferFilter,
   getProviderOffersTabHref,
@@ -388,6 +389,12 @@ export function MyOffersPanel() {
                       <h3 className="mt-2 text-lg font-semibold text-foreground">
                         {job ? job.title : "İlan artık mevcut değil"}
                       </h3>
+                      {job && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {formatJobLocationLine(job)}
+                        </p>
+                      )}
                     </div>
                     <StatusBadge
                       label={isClosedSiblingOffer ? CLOSED_SIBLING_OFFER_LABEL : getOfferStatusLabel(offer.status)}
