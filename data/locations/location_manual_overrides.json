@@ -4,7 +4,11 @@
     "provinceId": "kocaeli",
     "matchId": "loc-belde-port-dilovası-15738082",
     "name": "Beldeport",
-    "aliases": ["BELDEPORT", "Belde Port", "Beldeport MED Lojistik"],
+    "aliases": [
+      "BELDEPORT",
+      "Belde Port",
+      "Beldeport MED Lojistik"
+    ],
     "districtId": "dilovasi",
     "district": "Dilovası",
     "officialWebsite": "https://www.beldeport.com.tr/",
@@ -27,7 +31,11 @@
     "officialWebsite": "https://www.tcdd.gov.tr/kurumsal/derince-limani",
     "phone": "+902622397300",
     "fullAddress": "TCDD Liman İşletmesi Kontrol Müdürlüğü, Derince/Kocaeli",
-    "aliases": ["Derince Limanı", "Derince Liman", "TCDD Derince Liman İşletmesi Müdürlüğü"],
+    "aliases": [
+      "Derince Limanı",
+      "Derince Liman",
+      "TCDD Derince Liman İşletmesi Müdürlüğü"
+    ],
     "sourcePriority": "A",
     "manualSource": "Resmi kamu kurumu sitesi (tcdd.gov.tr/kurumsal/derince-limani) — Overpass sorgusu bu tesisi bulamadı, iki 'Derince Liman' adayı gerçekte bir tren/feribot durağı (railway=buffer_stop) ve bir mahalle adıydı (place=quarter); classify.mjs bu tür idari/ulaşım etiketlerini artık dışlıyor"
   },
@@ -42,7 +50,11 @@
     "officialWebsite": "https://www.gosb.com.tr/",
     "phone": "+902626484848",
     "fullAddress": "Şahabettin Bilgisu Caddesi No:605, Balçık Mah., Gebze/Kocaeli",
-    "aliases": ["GOSB", "Gebze OSB", "Gebze Organize Sanayi Bölgesi"],
+    "aliases": [
+      "GOSB",
+      "Gebze OSB",
+      "Gebze Organize Sanayi Bölgesi"
+    ],
     "sourcePriority": "B",
     "manualSource": "OSB'nin resmi sitesi (gosb.com.tr/iletisim) — OSM'de yalnızca bu bölge içindeki alt tesisler (Gebze OSB TM trafo merkezi, Gebze OSB Metro İnşaatı) ayrı adaylar olarak bulunuyor, ana OSB kaydı adayların arasında yoktu"
   },
@@ -56,9 +68,14 @@
     "district": "Gebze",
     "officialWebsite": "https://www.ggosb.com.tr/",
     "fullAddress": "İnönü Mah., Balçık Yolu, Gebze/Kocaeli",
-    "aliases": ["Güzeller OSB", "GGOSB", "Gebze Güzeller OSB"],
+    "aliases": [
+      "Güzeller OSB",
+      "GGOSB",
+      "Gebze Güzeller OSB",
+      "Gebze Güzeller OSB Güneş Enerji Santrali"
+    ],
     "sourcePriority": "B",
-    "manualSource": "OSB'nin resmi sitesi (ggosb.com.tr) — OSM'de yalnızca bölge içindeki bir alt tesis (Gebze Güzeller OSB Güneş Enerji Santrali) aday olarak bulunuyor, ana OSB kaydı adayların arasında yoktu"
+    "manualSource": "OSB'nin resmi sitesi (ggosb.com.tr) — OSM'de yalnızca bölge içindeki bir alt tesis (Gebze Güzeller OSB Güneş Enerji Santrali) aday olarak bulunuyor, ana OSB kaydı adayların arasında yoktu | Aşama 1.2 ek not: Ayrı bir OSM adayı olan 'Gebze Güzeller OSB Güneş Enerji Santrali' (loc-gebze-guzeller-osb-gunes-enerji-santrali-gebze-427777722) bu OSB içindeki bir güneş enerji santrali bileşeni — bağımsız bir OSB değil, alias olarak eklendi."
   },
   {
     "action": "promote",
@@ -86,5 +103,621 @@
     "provinceId": "kocaeli",
     "matchId": "loc-yılport-konteyner-liman-isletmeleri-dilovası-15738087",
     "manualSource": "loc-...-15738083 ile aynı fiziksel tesisin (Yılport Gebze) mükerrer OSM relation kaydı (~750m arayla aynı isim, aynı ilçe) — kanonik kayıt olarak 15738083 seçildi, bu kopya kalıcı olarak pasifleştirildi"
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-safiport-derince-limanı-derince-229076694",
+    "name": "Safiport Derince Limanı",
+    "aliases": [
+      "Safiport",
+      "SafiPort Derince",
+      "Safiport Derince",
+      "SAFİ Derince Uluslararası Liman İşletmeleri A.Ş.",
+      "TCDD Derince Limanı",
+      "Derince Limanı",
+      "Derince Liman",
+      "TCDD Derince Liman İşletmesi Müdürlüğü"
+    ],
+    "districtId": "derince",
+    "district": "Derince",
+    "officialWebsite": "https://www.safiport.com.tr/",
+    "phone": "+902622812700",
+    "fullAddress": "Deniz Mah. Liman Yolu Caddesi No:21, 41900 Derince/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Resmi işletme sitesi (safiport.com.tr/iletisim) — konteyner terminali, Ro-Ro terminali, demiryolu intermodal ve tank terminali işleten büyük bir liman işletmecisi; otomatik pipeline 75 puanla REVIEW'da bırakmıştı (ilçe/tür/anahtar-kelime sinyalleri zaten doğruydu, yalnızca web sitesi/telefon sinyali otomatik taramada eksikti) | Aşama 1.1 ek doğrulama: TCDD Derince Limanı, Özelleştirme Yüksek Kurulu'nun 30.12.2004/2004-128 sayılı kararıyla ihaleye çıkarılmış, Safi Katı Yakıt San. ve Tic. A.Ş. 543M USD bedelle kazanmış, işletme devri 02.03.2015'te fiilen gerçekleşmiştir (39 yıllık işletme hakkı devri) — TCDD Derince Limanı ile Safiport Derince Limanı AYNI FİZİKSEL TESİSTİR, iki ayrı kayıt DEĞİLDİR (kaynak: tcdd.gov.tr/kurumsal/derince-limani, denizhaber.net, vda.org.tr). 'TCDD Derince Limanı' artık yalnızca tarihsel/eski işletme dönemi adı olarak alias'ta tutulur."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-manual-tcdd-derince-limani",
+    "manualSource": "Aşama 1.1: TCDD Derince Limanı, 02.03.2015 özelleştirme devriyle Safiport Derince Limanı'na (loc-safiport-derince-limanı-derince-229076694) dönüşmüştür — AYNI FİZİKSEL TESİS, mükerrer aktif kayıt bırakılmadı. Eski 'TCDD Derince Limanı' adı artık Safiport kaydının aliases alanında tutulur, eski ilanlar bu alias fold-eşleşmesiyle doğru tesise çözülmeye devam eder."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-dp-world-evyapport-körfez-228417578",
+    "name": "DP World Evyap Körfez",
+    "aliases": [
+      "DP World Evyapport",
+      "Evyapport",
+      "Evyaport",
+      "Evyap Port",
+      "Evyap Grubu Limanı",
+      "DP World Evyap"
+    ],
+    "districtId": "korfez",
+    "district": "Körfez",
+    "officialWebsite": "https://www.dpworld.com/en/ports-terminals/turkiye/korfez",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: DP World ve Evyap Grubu 2024'te (Rekabet Kurumu onaylı) birleşerek 'DP World Evyap' markasını oluşturdu; eski Evyapport tesisi artık resmi olarak 'DP World Evyap Körfez' adıyla anılıyor (dpworld.com/en/ports-terminals/turkiye/korfez, utikad.org.tr haberi). Ayrı bir OSM adayı olan 'Evyaport' (loc-evyaport-körfez-12305229688) AYNI fiziksel tesisin eski/mükerrer bir kaydıdır, ayrıca reject edildi."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-evyaport-körfez-12305229688",
+    "manualSource": "Aşama 1.1: 'Evyaport', şimdi 'DP World Evyap Körfez' (loc-dp-world-evyapport-körfez-228417578) olarak anılan AYNI fiziksel tesisin farklı bir OSM adayı/eski adı — mükerrer, ayrı aktif kayıt bırakılmadı, 'Evyaport' adı kanonik kayda alias olarak eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-dp-world-yarımca-körfez-1192691083",
+    "name": "DP World Evyap Yarımca",
+    "aliases": [
+      "DP World Yarımca",
+      "Yarımca Limanı",
+      "Port Yarımca Ro-Ro Terminali",
+      "Yarımca Ro-Ro Terminali"
+    ],
+    "districtId": "korfez",
+    "district": "Körfez",
+    "officialWebsite": "https://www.dpworld.com/en/ports-terminals/turkiye/yarimca",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: 2024 DP World/Evyap birleşmesinin İKİNCİ (Evyap Körfez'den FİZİKSEL OLARAK AYRI) terminali — DP World'ün kendi resmi sayfalarında da 'Korfez Port' ve 'Yarimca Port' ayrı sayfalar/ayrı tesisler olarak listeleniyor (dpworld.com/en/ports-terminals/turkiye/yarimca), bu yüzden TEK kayıtta birleştirilmedi (SUB_TERMINAL değil, ACTIVE_UNIQUE — iki gerçek terminal). 'Port Yarımca Ro-Ro Terminali' (ayrı OSM adayı, loc-port-yarımca-ro-ro-terminali-körfez-1185098403) bu terminalin Ro-Ro'ya özel bir alt bileşeni/binası olduğu için ayrı kayıt tutulmadı, reject edilip bu kayda alias olarak eklendi."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-port-yarımca-ro-ro-terminali-körfez-1185098403",
+    "manualSource": "Aşama 1.1: 'Port Yarımca Ro-Ro Terminali', DP World Evyap Yarımca (loc-dp-world-yarımca-körfez-1192691083) limanının Ro-Ro'ya özel bir alt terminali/binası — filtreleme açısından ayrı seçilmesi gereken bağımsız bir tesis değil (SUB_TERMINAL), ana kayda alias olarak eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-rota-liman-hizmetleri-körfez-228417589",
+    "name": "YILPORT Körfez",
+    "aliases": [
+      "Rota Liman Hizmetleri",
+      "Rota Liman Hizmetleri San. A.Ş.",
+      "Rota Limanı",
+      "Rota Liman İşletmeciliği"
+    ],
+    "districtId": "korfez",
+    "district": "Körfez",
+    "officialWebsite": "https://www.yilport.com/tr/liman-terminaller/default/Rotaport-Turkiye/373/0/0",
+    "fullAddress": "Atalar Mah. Sahil Cad. Liman Mevkii Rota Limanı, 41740 Körfez/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Eski 'Rota Liman Hizmetleri San. A.Ş.' tesisi Yılport Holding tarafından devralınmış, TÜRKLİM'de artık 'Yılport Körfez' adıyla üye (turklim.org/en/turklim-members/yilport-korfez, yilport.com resmi sayfası) — Dilovası'daki 'Yılport Gebze'den FİZİKSEL OLARAK AYRI, farklı bir tesis (farklı ilçe/mevki), o yüzden ayrı kayıt olarak kalmaya devam ediyor, birleştirilmedi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-efesanport-dilovası-1307501996",
+    "name": "Efesanport",
+    "aliases": [
+      "Efesan Port",
+      "Efesanport Limanı",
+      "Efesanport Ro-Ro Terminali"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.efesanport.com",
+    "phone": "+902627548461",
+    "fullAddress": "Dilovası OSB 1. Kısım D-1006 Sok. No:8, Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi işletme sitesi (efesanport.com/en/contact) ve TÜRKLİM üye kaydı (turklim.org/en/turklim-members/efesanport) — Efesan Grubu'na bağlı, yıllık 3.000.000 ton genel/dökme yük ve 300.000 araç kapasiteli bağımsız liman. Ayrı bir OSM adayı olan 'Efesanport Ro-Ro Terminali Kapalı Otopark' (loc-efesanport-ro-ro-terminali-kapalı-otopark-dilovası-896747328) bu limanın bir alt binası/bileşeni olduğu için reject edilip alias olarak eklendi."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-efesanport-ro-ro-terminali-kapalı-otopark-dilovası-896747328",
+    "manualSource": "Aşama 1.1: 'Efesanport Ro-Ro Terminali Kapalı Otopark', Efesanport (loc-efesanport-dilovası-1307501996) limanının bir alt binası/otopark bileşeni — bağımsız bir tesis değil (SUB_TERMINAL), ana kayda alias olarak eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-nuh-cimento-liman-tesisleri-körfez-228283147",
+    "name": "Nuh Çimento Sanayi A.Ş. Liman Tesisleri",
+    "aliases": [
+      "Nuh Çimento Limanı",
+      "Nuhport",
+      "Nuh Çimento Port"
+    ],
+    "districtId": "korfez",
+    "district": "Körfez",
+    "officialWebsite": "https://www.nuhcimento.com.tr/en/port-services/",
+    "fullAddress": "Hereke Mahallesi, 41780 Körfez/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi işletme sitesi (nuhcimento.com.tr/en/port-services) — Nuh Çimento'nun kendi çimento/klinker ihracatı için işlettiği, 595m rıhtım uzunluğu ve 3 iskeleli (80.000 DWT kapasiteli) bağımsız, gerçek liman tesisi; captive olsa da TÜRKLİM ekosisteminde tanınan bağımsız bir liman kaydı (bkz. dargeb.com/nuhport)."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-diler-demir-celik-endustri-liman-tesisleri-körfez-228283140",
+    "name": "Diler Demir Çelik Endüstri ve Ticaret A.Ş. Liman Tesisleri",
+    "aliases": [
+      "Diler Liman",
+      "Diler Port",
+      "Diler Demir Çelik Limanı"
+    ],
+    "districtId": "korfez",
+    "district": "Körfez",
+    "officialWebsite": "https://www.dilerport.com",
+    "fullAddress": "Hereke, Körfez/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi grup sitesi (dilerhld.com) ve TÜRKLİM üye kaydı (turklim.org/en/turklim-members/diler-demir-celik) — Diler Holding'in Hereke'deki, yıllık milyonlarca ton genel/dökme yük kapasiteli bağımsız liman tesisi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-yıldız-entegre-port-başiskele-1197612690",
+    "name": "Yıldız Entegre Port",
+    "aliases": [
+      "YILDIZ ENTEGRE PORT",
+      "Yıldız Entegre Limanı",
+      "Yıldız Port"
+    ],
+    "districtId": "basiskele",
+    "district": "Başiskele",
+    "officialWebsite": "https://www.yildizentegre.com/uretim-tesislerimiz/yildiz-entegre-port",
+    "phone": "+902622807900",
+    "fullAddress": "Sepetlipınar Mahallesi, Yavuz Özer Cad. No:19, Başiskele/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi işletme sitesi (yildizentegre.com) ve TÜRKLİM üye kaydı (turklim.org/en/turklim-members/yildiz-entegre-port) — 2022 sonunda faaliyete başlayan, 4 iskeleli, 1.500.000 ton/yıl kapasiteli liman. NOT: Kaynaklara göre üçüncü taraf (harici müşteri) yük hizmeti 2025'te başlaması planlanıyordu; başlangıçta yalnızca Yıldız Entegre'nin kendi yükleri için kullanılmış olabilir — TÜRKLİM üyeliği ve bağımsız 'Port' markası nedeniyle ACTIVE_UNIQUE kabul edildi, ama üçüncü taraf hizmetinin fiilen başlayıp başlamadığı bağımsız olarak doğrulanamadı."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-autoport-limanı-başiskele-8328724",
+    "name": "Autoport",
+    "aliases": [
+      "Autoport Limanı",
+      "AutoPort Liman Rıhtımı",
+      "Autoport Terminal Operators A.Ş.",
+      "Autoport Liman İşletmeleri A.Ş."
+    ],
+    "districtId": "basiskele",
+    "district": "Başiskele",
+    "officialWebsite": "https://www.autoport.com.tr",
+    "phone": "+902623153800",
+    "fullAddress": "Sepetlipınar Mahallesi, Arpalık Caddesi No:100, 41275 Başiskele/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi site (autoport.com.tr) ve TÜRKLİM kaydı (turklim.org/en/turklim-members/autoport-terminal-operators-s-a) — Türkiye'nin ilk otomotive özel liman terminali, ~1M araç/yıl elleçleme. Ayrı bir OSM adayı olan 'AutoPort Liman Rıhtımı' (loc-autoport-liman-rıhtımı-başiskele-8328725) AYNI fiziksel tesisin bir rıhtım/geometri parçası — mükerrer, reject edilip alias olarak eklendi, iki ayrı kayıt bırakılmadı."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-autoport-liman-rıhtımı-başiskele-8328725",
+    "manualSource": "Aşama 1.1: 'AutoPort Liman Rıhtımı', Autoport (loc-autoport-limanı-başiskele-8328724) ile AYNI fiziksel tesisin bir rıhtım/geometri parçası — mükerrer, ayrı aktif kayıt bırakılmadı, ana kayda alias olarak eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-hayat-kimya-limas-liman-isletmeciligi-başiskele-150404707",
+    "name": "Limaş Limanı",
+    "aliases": [
+      "Hayat Kimya San. ve Limaş Liman İşletmeciliği",
+      "Limaş Liman İşletmeciliği A.Ş.",
+      "Hayat Kimya Limanı",
+      "Limaş"
+    ],
+    "districtId": "basiskele",
+    "district": "Başiskele",
+    "officialWebsite": "https://www.limas.com.tr/kurumsal/",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi site (limas.com.tr/kurumsal) — limanın GERÇEK işletmecisi Hayat Holding'e bağlı 'Limaş Liman İşletmeciliği A.Ş.'dir (1992'den beri faal, iki iskele, sıvı/genel/dökme/proje yükü). 'Hayat Kimya', aynı Başiskele sahil bölgesinde bulunan, aynı holding grubuna ait AYRI bir üretim fabrikasıdır (temizlik/kağıt ürünleri) — limanın işletmecisi DEĞİLDİR, bu yüzden kanonik ad 'Limaş Limanı' olarak düzeltildi, 'Hayat Kimya Limanı' halk arasındaki kullanım biçimi olarak alias'ta tutuldu."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-altıntel-liman-terminal-isletmeleri-dilovası-15738113",
+    "name": "Altıntel Liman ve Terminal İşletmeleri A.Ş.",
+    "aliases": [
+      "Altıntel",
+      "Arkema Altıntel",
+      "Altintel Port and Terminal"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.altintel.com.tr",
+    "phone": "+902627545216",
+    "fullAddress": "Dilovası OSB 1. Kısım, Tuna Cad. No:12, Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi site (altintel.com.tr) ve TÜRKLİM kaydı (turklim.org/en/turklim-members/altinel-port-and-terminal) — 1985'ten beri faal, 120.000 m² alanlı, sıvı kimyasal depolama/tank terminali liman tesisi (Arkema grubu ile ilişkili, arkemaltintel.com)."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-poliport-kuru-yuk-terminal-idari-binası-operasyon-merkezi-dilovası-1307505086",
+    "manualSource": "Aşama 1.1: Adından da anlaşıldığı gibi Poliport'un (loc-poliport-dilovası-15738084) idari binası/operasyon merkezi — bağımsız bir tesis değil, ayrı aktif kayıt bırakılmadı."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-poliport-dilovası-15738084",
+    "name": "Poliport",
+    "aliases": [
+      "Poliport Kimya Sanayi ve Ticaret A.Ş.",
+      "Poliport Kuru Yük Terminal İdari Binası Ve Operasyon Merkezi"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.poliport.com",
+    "phone": "+902626797100",
+    "fullAddress": "Dilovası Organize Sanayi Bölgesi 1. Kısım, Liman Cad. No:7, 41455 Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi site (poliport.com/iletisim.html) ve TÜRKLİM üye kaydı (turklim.org/en/turklim-members/poliport) ile zenginleştirildi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-kroman-celik-sanayii-liman-dilovası-228283143",
+    "name": "Kroman Çelik Sanayii A.Ş. Liman",
+    "aliases": [
+      "Kroman Liman Tesisleri",
+      "Kroman Port",
+      "Kroman Çelik Limanı"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.kromancelik.com.tr",
+    "phone": "+902627530462",
+    "fullAddress": "Tavşancıl Mahallesi, D-100 Karayolu Mevkii No:1, Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Resmi site (kromancelik.com.tr) ve TÜRKLİM kaydı (turklim.org/en/turklim-members/kroman-port) ile zenginleştirildi — resmi ticaret sicilinde 'Kroman Çelik Sanayii Anonim Şirketi Liman Tesisi Şubesi' olarak ayrı, gerçek bir liman tesisi şubesidir (find.com.tr), fabrika içi basit bir yükleme noktası değildir."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-marmara-tersanesi-körfez-228417588",
+    "name": "Marmara Tersanesi A.Ş.",
+    "districtId": "korfez",
+    "district": "Körfez",
+    "active": false,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.1: Deniz Ticaret Odası '05. Grup Gemi İnşa Tamir ve Bakım Tersaneleri' meslek grubunda kayıtlı (kocaeli.denizticaretodasi.org.tr) — faaliyet konusu yolcu gemisi/feribot/tanker/römorkör/tarak gemisi İNŞASI, BAKIM ve TAMİRİDİR; ticari yük elleçleyen bağımsız bir kargo limanı DEĞİLDİR. Bu yüzden LİMAN kategorisinden pasif bırakıldı (tersane, ayrı bir kategori — bu aşamanın kapsamı dışında, yeni kategori eklenmedi). Yıldırım Holding bünyesinde, 1962'den beri faal."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-gebze-guzeller-osb-gunes-enerji-santrali-gebze-427777722",
+    "manualSource": "Aşama 1.2: Gebze Güzeller Organize Sanayi Bölgesi'nin (loc-manual-gebze-guzeller-osb) içindeki bir güneş enerji santrali bileşeni — bağımsız bir OSB değil, ayrı aktif kayıt bırakılmadı, ana kayda alias olarak eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-global-karma-osb-dilovası-541055314",
+    "name": "Global Karma Organize Sanayi Bölgesi",
+    "aliases": [
+      "Global Karma OSB",
+      "Global OSB Yönetim",
+      "Kömürcüler Organize Sanayi Bölgesi",
+      "Global OSB"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.globalosb.org.tr/",
+    "fullAddress": "Global OSB Mah. Refik Oral Cd. No:11, 41455 Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (globalosb.org.tr) — Sanayi ve Teknoloji Bakanlığı'nın resmi OSB sicilinde (İTO OSB Radar, 12.02.2025) 'Global Karma', KARMA türde, 217 sicil no ile kayıtlı, 79,40 hektar, faaliyette. 2003'te 'Kömürcüler Organize Sanayi Bölgesi' adıyla kurulmuş, sonradan 'Global Karma OSB' olarak yeniden markalanmış. Ayrı bir OSM adayı olan 'Global OSB Yönetim' (loc-global-osb-yonetim-dilovası-5579841426, ~80m mesafede, aynı yönetim binası) AYNI fiziksel OSB'nin bir kaydı — mükerrer, reject edilip alias olarak eklendi."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-global-osb-yonetim-dilovası-5579841426",
+    "manualSource": "Aşama 1.2: 'Global OSB Yönetim', Global Karma Organize Sanayi Bölgesi'nin (loc-global-karma-osb-dilovası-541055314) yönetim binası — AYNI fiziksel OSB, mükerrer, ayrı aktif kayıt bırakılmadı, ana kayda alias olarak eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-kocaeli-gebze-v-kimya-ihtisas-organize-bolgesi-dilovası-229721940",
+    "name": "Kocaeli Gebze V Kimya İhtisas Organize Sanayi Bölgesi",
+    "aliases": [
+      "GEBKİM",
+      "Gebze V Kimya İhtisas OSB",
+      "Gebze Kimya İhtisas OSB"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://gebkim.org.tr/",
+    "phone": "+902627540777",
+    "fullAddress": "Çerkeşli Mah. Şafak Türkay Cad. No:2/1, Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (gebkim.org.tr) — Sanayi ve Teknoloji Bakanlığı sicilinde 'Kocaeli İhtisas Gebze V (kimya)', İHTİSAS türde, 29 sicil no ile kayıtlı, 245,76 hektar, faaliyette. Türkiye'nin kimya sektöründe kurulan ilk ihtisas OSB'sidir."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-makine-ihtisas-organize-bolgesi-dilovası-229721941",
+    "name": "Makine İhtisas Organize Sanayi Bölgesi",
+    "aliases": [
+      "İMES",
+      "Kocaeli Gebze Makine İhtisas Organize Sanayi Bölgesi",
+      "Makine İhtisas OSB",
+      "Kocaeli Gebze VI. İMES"
+    ],
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.makineosb.org.tr/",
+    "phone": "+902627229022",
+    "fullAddress": "Organize Sanayi Bölgesi Mah. 30. Sok. No:8/1, 41455 Dilovası/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (makineosb.org.tr) — Sanayi ve Teknoloji Bakanlığı sicilinde 'Kocaeli Makine Gebze İhtisas VI (İMES)', İHTİSAS türde, 66 sicil no ile kayıtlı, 301,87 hektar, faaliyette. NOT: aynı bakanlık listesinde ayrıca 'Makine İhtisas' adıyla 89 sicil no'lu, 509,60 hektarlık AYRI bir satır daha var; bu ikinci kaydın gerçekten farklı/ikinci bir fiziksel OSB mü yoksa aynı OSB'nin genişletilmiş/güncellenmiş bir sicil kaydı mı olduğu bağımsız kaynakla doğrulanamadı — bu yüzden YENİ bir kayıt OLUŞTURULMADI (bkz. rapor §12, UNVERIFIED)."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-arslanbey-organize-bolgesi-kartepe-304956394",
+    "name": "Arslanbey Organize Sanayi Bölgesi",
+    "aliases": [
+      "Arslanbey OSB",
+      "AOSB",
+      "Kocaeli Arslanbey"
+    ],
+    "districtId": "kartepe",
+    "district": "Kartepe",
+    "officialWebsite": "https://www.arslanbeyosb.org",
+    "phone": "+902623512393",
+    "fullAddress": "Arslanbey OSB Mah. 1. Cad. No:2, Kartepe/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (arslanbeyosb.org) — Bakanlık sicilinde 'Kocaeli Arslanbey', KARMA türde, 211 sicil no ile kayıtlı, 141,89 hektar, faaliyette. 'Arslanbey OSB TM' / 'Arslanbey OSB TM EİH' ayrı OSM adayları bu OSB'nin trafo merkezi/enerji iletim hattı altyapı bileşenleridir — bağımsız OSB olmadıkları için (NON_OSB_FACILITY) alias yapılmadı, ayrı aktif kayıt da açılmadı."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-ım-kibar-osb-izmit-1066519231",
+    "name": "Asım Kibar Organize Sanayi Bölgesi",
+    "aliases": [
+      "AKOSB",
+      "Asım Kibar OSB"
+    ],
+    "districtId": "izmit",
+    "district": "İzmit",
+    "officialWebsite": "https://akosb.com.tr/",
+    "phone": "+902623248062",
+    "fullAddress": "Asım Kibar Organize Sanayi Bölgesi 1. Cd. No:3, 41310 İzmit/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (akosb.com.tr) — Bakanlık sicilinde 'Asım Kibar', KARMA türde, 221 sicil no ile kayıtlı, 201,98 hektar, faaliyette. Yönetim ofisi Alikahya OSB Mahallesi'nde olsa da (komşu OSB ile aynı mahalle) AYRI, bağımsız bir tüzel/sicil kaydına sahip OSB'dir — Alikahya OSB ile birleştirilmedi."
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-alikahya-osb",
+    "name": "Kocaeli Alikahya Organize Sanayi Bölgesi",
+    "type": "OSB",
+    "districtId": "izmit",
+    "district": "İzmit",
+    "officialWebsite": "https://www.alikahyaosb.org.tr/",
+    "phone": "+902623651818",
+    "fullAddress": "Alikahya OSB Mahallesi 106. Sokak No:3, 41310 İzmit/Kocaeli",
+    "aliases": [
+      "Alikahya OSB",
+      "Ali Kahya Organize Sanayi Bölgesi",
+      "AKOSB"
+    ],
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (alikahyaosb.org.tr) — Bakanlık sicilinde 'Kocaeli Alikahya', KARMA türde, 224 sicil no ile kayıtlı, 120,00 hektar, faaliyette (5 Kasım 2004 tüzel kişilik). Pipeline/Overpass adayları arasında hiç yoktu (OSM'de uygun etiketlenmiş bir aday bulunamadı), bu yüzden manuel eklendi."
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-dilovasi-osb",
+    "name": "Dilovası Organize Sanayi Bölgesi",
+    "type": "OSB",
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://www.dosb.com.tr/",
+    "phone": "+902627549167",
+    "fullAddress": "Dilovası Organize Sanayi Bölgesi 1. Kısım Tuna Cad. No:4, Dilovası/Kocaeli",
+    "aliases": [
+      "DOSB",
+      "Kocaeli Gebze Dilovası Organize Sanayi Bölgesi",
+      "Dilovası OSB"
+    ],
+    "sourcePriority": "A",
+    "manualSource": "Aşama 1.2: Resmi site (dosb.com.tr) — Bakanlık sicilinde 'Kocaeli Gebze Dilovası', KARMA türde, 204 sicil no ile kayıtlı, 847,96 hektar (Kocaeli'nin en büyük OSB'si), faaliyette. 22.01.1998 Resmî Gazete ile OSB ilan edilmiş, tüzel kişiliği 22.05.2002'de onaylanmış. Adı tarihsel olarak 'Gebze'yi de içerir (Dilovası 2008'de Gebze'den ayrılan bağımsız ilçe oldu). Pipeline/Overpass adayları arasında hiç yoktu, bu yüzden manuel eklendi — Kocaeli'nin en büyük ve önemli OSB'lerinden biri olmasına rağmen orijinal pipeline'da tamamen eksikti, bu Aşama 1.2'nin en önemli bulgusu."
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-gebze-plastikciler-osb",
+    "name": "Gebze Plastikçiler Organize Sanayi Bölgesi",
+    "type": "OSB",
+    "districtId": "gebze",
+    "district": "Gebze",
+    "officialWebsite": "https://geposb.com.tr/",
+    "phone": "+902627511033",
+    "fullAddress": "İnönü Mah. Gebze Plastikçiler OSB, Atatürk Blv. No:1, Gebze/Kocaeli",
+    "aliases": [
+      "GEPOSB",
+      "Gebze Plastikçiler OSB"
+    ],
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (geposb.com.tr) — Bakanlık sicilinde 'Kocaeli Gebze Plastikçiler', KARMA türde, 44 sicil no ile kayıtlı, 133,00 hektar, faaliyette. Pipeline/Overpass adayları arasında hiç yoktu, bu yüzden manuel eklendi."
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-kocaeli-kobi-osb",
+    "name": "Kocaeli Kobi Organize Sanayi Bölgesi",
+    "type": "OSB",
+    "districtId": "dilovasi",
+    "district": "Dilovası",
+    "officialWebsite": "https://kocaelikobiosb.org.tr/",
+    "fullAddress": "Köseler Mahallesi 3. Cad. No:17, Dilovası/Kocaeli",
+    "aliases": [
+      "Kocaeli Kobi OSB",
+      "Kobi OSB",
+      "KOBİ OSB"
+    ],
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (kocaelikobiosb.org.tr) — Bakanlık sicilinde 'Kocaeli Kobi', KARMA türde, 354 sicil no ile kayıtlı, 269,50 hektar, faaliyette. Pipeline/Overpass adayları arasında hiç yoktu, bu yüzden manuel eklendi."
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-tosb",
+    "name": "TOSB Otomotiv Tedarik Sanayi İhtisas Organize Sanayi Bölgesi",
+    "type": "OSB",
+    "districtId": "cayirova",
+    "district": "Çayırova",
+    "officialWebsite": "https://www.tosb.com.tr/",
+    "phone": "+902626791000",
+    "fullAddress": "1. Cad. No:10, 41420 Şekerpınar-Çayırova/Kocaeli",
+    "aliases": [
+      "TOSB",
+      "TOSB Otomotiv Yan Sanayi İhtisas OSB",
+      "Otomotiv Tedarik Sanayi İhtisas OSB"
+    ],
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.2: Resmi site (tosb.com.tr) — Bakanlık sicilinde 'TOSB Sanayi Otomotiv İhtisas Tedarik', İHTİSAS türde, 75 sicil no ile kayıtlı, 279,65 hektar, faaliyette. Pipeline/Overpass adayları arasında hiç yoktu, bu yüzden manuel eklendi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-kandıra-gıda-ihtisas-organize-bolgesi-giosb-kandıra-1209470799",
+    "name": "Kandıra Gıda İhtisas Organize Sanayi Bölgesi",
+    "aliases": [
+      "GİOSB",
+      "Kandıra Gıda İhtisas OSB"
+    ],
+    "districtId": "kandira",
+    "district": "Kandıra",
+    "active": false,
+    "confidenceScore": 100,
+    "sourcePriority": "A",
+    "manualSource": "Aşama 1.2: Bakanlık sicilinde 'Kandıra Gıda İhtisas', İHTİSAS türde, 272 sicil no ile kayıtlı, 203,00 hektar — ANCAK Bakanlık'ın kendi 'Fiili Durumu' alanına göre (İTO OSB Radar, 12.02.2025) durum 'ALTYAPI HAZIRLANIYOR', yani 'İŞLETMEDE (FAALİYETTE)' DEĞİL. Gerçek ve resmi olarak kayıtlı bir OSB olmakla birlikte henüz üretime/işletmeye açık olmadığı için ACTIVE_UNIQUE yapılmadı, LİMAN kayıtlarındaki Marmara Tersanesi ile aynı mantıkla (gerçek ama bu kategori/durum için uygun değil) pasif bırakıldı."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-birlik-osb-çayırova-490207961",
+    "manualSource": "Aşama 1.2: 'Birlik OSB' Bakanlık'ın resmi 14 Kocaeli OSB'si sicil listesinde (İTO OSB Radar, 12.02.2025) YOK. Bulunabilen 'Birlik Organize Sanayi Bölgesi' kaydının iletişim telefonu 0216 alan koduyla (İstanbul Anadolu yakası) kayıtlı — Kocaeli'nin alan kodu (0262) değil. Kocaeli'ye yanlış atanmış/coğrafi olarak hatalı bir OSM adayı olduğu değerlendirildi, REJECTED."
+  },
+  {
+    "action": "reject",
+    "provinceId": "kocaeli",
+    "matchId": "loc-istanbul-deri-organize-bolgesi-bilinmeyen-624359865",
+    "manualSource": "Aşama 1.2: 'İstanbul Deri Organize Sanayi Bölgesi' resmi kaynaklarla (ideriosb.org.tr, istanbul.csb.gov.tr) doğrulandı — fiilen İSTANBUL ilinin Tuzla ilçesinde, 1982'de kurulmuş, Kocaeli ile hiçbir coğrafi ilgisi yok. Orijinal pipeline/OSM verisinde provinceId='kocaeli' olarak hatalı etiketlenmiş (districtId zaten null/doğrulanamamış durumdaydı). REJECTED — yanlış il ataması."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-kocaeli-serbest-bolge-başiskele-1231394703",
+    "name": "Kocaeli Serbest Bölgesi",
+    "aliases": [
+      "KOCAELİ SERBEST BÖLGE",
+      "KOSBAŞ",
+      "Kocaeli Serbest Bölge Müdürlüğü",
+      "KOSBAŞ Kocaeli Serbest Bölgesi Kurucu ve İşleticisi A.Ş."
+    ],
+    "districtId": "basiskele",
+    "district": "Başiskele",
+    "officialWebsite": "https://kosbas.com.tr/",
+    "phone": "+902623413841",
+    "fullAddress": "Sepetlipınar SB Mah. 107. Cad. No:10, 41275 Başiskele/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "A",
+    "manualSource": "Aşama 1.3: Ticaret Bakanlığı Serbest Bölgeler Genel Müdürlüğü'nün resmi serbest bölgeler listesinde (ticaret.gov.tr, 13.03.2026 tarihli PDF) sıra no 14, 'Kocaeli Serbest Bölge Müdürlüğü', 2000 kuruluş, İzmit Gümrük Müdürlüğü hizmet veriyor. Resmi işletici/kurucu site (kosbas.com.tr) ile zenginleştirildi. Türkiye'de bu isimle (yalnızca 'Kocaeli' adını taşıyan) BAŞKA bir serbest bölge yok — mükerrerlik riski taşımıyor."
+  },
+  {
+    "action": "add",
+    "provinceId": "kocaeli",
+    "id": "loc-manual-tubitak-mam-tekseb",
+    "name": "TÜBİTAK Mam Teknoloji Serbest Bölgesi",
+    "type": "SERBEST_BOLGE",
+    "districtId": "gebze",
+    "district": "Gebze",
+    "officialWebsite": "https://marmarateknokent.com.tr/tekseb/",
+    "phone": "+902626766200",
+    "fullAddress": "TÜBİTAK Gebze Yerleşkesi, 41470 Gebze/Kocaeli",
+    "aliases": [
+      "TEKSEB",
+      "TEKSEB Teknoloji Serbest Bölgesi",
+      "TÜBİTAK Mam Teknoloji Serbest Bölge Müdürlüğü",
+      "TÜBİTAK Marmara Teknoloji Serbest Bölgesi",
+      "Marmara Teknokent Teknoloji Serbest Bölgesi"
+    ],
+    "sourcePriority": "A",
+    "manualSource": "Aşama 1.3: Ticaret Bakanlığı Serbest Bölgeler Genel Müdürlüğü'nün resmi serbest bölgeler listesinde (ticaret.gov.tr, 13.03.2026 tarihli PDF) sıra no 19, 'TÜBİTAK Mam Teknoloji Serbest Bölge Müdürlüğü', 1999 kuruluş, Gebze Gümrük Müdürlüğü hizmet veriyor — TÜBİTAK Gebze yerleşkesinde, Marmara Teknokent A.Ş. tarafından işletiliyor (marmarateknokent.com.tr/tekseb). Pipeline/OSM adayları arasında hiç yoktu (SERBEST_BOLGE türünde Kocaeli için tek bir OSM adayı bile üretilmemişti), bu yüzden manuel eklendi. BİLEREK EKLENMEYEN: aynı Marmara Teknokent kampüsündeki 'TEKGEB' (Teknoloji Geliştirme Bölgesi) FARKLI bir hukuki kategoridir (4691 sayılı Teknoloji Geliştirme Bölgeleri Kanunu'na tabi teknopark, 3218 sayılı Serbest Bölgeler Kanunu'na tabi serbest bölge DEĞİL) — bu aşamanın kapsamı dışında, SERBEST_BOLGE olarak eklenmedi."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-kosekoy-lojistik-merkezi-kartepe-221651275",
+    "name": "Köseköy Lojistik Merkezi",
+    "aliases": [
+      "TCDD Köseköy Lojistik Merkezi",
+      "Köseköy Lojistik Müdürlüğü",
+      "TCDD Taşımacılık Köseköy Lojistik Müdürlüğü"
+    ],
+    "districtId": "kartepe",
+    "district": "Kartepe",
+    "officialWebsite": "https://www.tcdd.gov.tr/kurumsal/lojistik-merkezler",
+    "fullAddress": "Fatih Sultan Mehmet Mah. Orhan Gazi Cad., Köseköy, Kartepe/Kocaeli",
+    "active": true,
+    "confidenceScore": 100,
+    "sourcePriority": "A",
+    "manualSource": "Aşama 1.4: TCDD'nin resmi, devlet tarafından inşa edilmiş 'Lojistik Merkez' ağının (23 planlanan, 12+ tamamlanan) Kocaeli'deki TEK üyesi (istasyon kodu 01988) — 2008'de inşasına başlanmış, 2010'da ilk etabı tamamlanmış, otomotiv/demir-çelik/orman ürünleri sektörlerine hizmet veriyor (tcdd.gov.tr/kurumsal/lojistik-merkezler, railturkey.org, UTİKAD haberi). Diğer illerdeki ağ üyeleri (Eskişehir Hasanbey, Balıkesir Gökköy, Denizli Kaklık, Kahramanmaraş Türkoğlu, Erzurum Palandöken, Konya Kayacık, Kars...) katalogda zaten aktifti — Köseköy bu ağın gözden kaçmış tek eksik üyesiydi. NOT: Aynı Köseköy mevkiindeki 'Borusan Araç Lojistik Merkezi' AYRI, ÖZEL bir tesistir (Borusan Lojistik'in kendi otomotiv deposu) — bu resmi TCDD merkeziyle KARIŞTIRILMADI, ayrı NON_LOGISTICS_CENTER olarak bırakıldı."
+  },
+  {
+    "action": "promote",
+    "provinceId": "kocaeli",
+    "matchId": "loc-birsoy-elektrik-lojistik-merkezi-kartepe-1147762804",
+    "name": "Birsoy Elektrik Lojistik Merkezi",
+    "districtId": "kartepe",
+    "district": "Kartepe",
+    "active": false,
+    "confidenceScore": 100,
+    "sourcePriority": "B",
+    "manualSource": "Aşama 1.4: Pipeline bu kaydı 85 puanla otomatik VERIFIED/aktif etmişti, ancak bağımsız araştırma bunun TCDD'nin resmi lojistik merkez ağının bir parçası olmadığını, 'Birsoy' adının Kartepe merkezli özel bir mühendislik/elektrik şirketiyle (Birsoy Mühendislik, 1997 kuruluş, beyaz eşya/elektrik sektörü) eşleştiğini gösterdi — adındaki 'Lojistik Merkezi' ibaresine rağmen muhtemelen bir şirketin kendi deposu/tesisidir, kamuya açık/çok kiracılı resmi bir lojistik merkezi olduğuna dair hiçbir resmi kaynak bulunamadı. Bu yüzden LİMAN aşamasındaki Marmara Tersanesi ile aynı mantıkla pasif bırakıldı (gerçek bir tesis olabilir ama bu kategori için uygun/doğrulanmış değil)."
   }
 ]
