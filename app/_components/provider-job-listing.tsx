@@ -5,13 +5,18 @@ import { useMemo, useState } from "react";
 import {
   buildCategoryOptions,
   buildDistrictOptions,
+  buildFacilityOptions,
   buildProvinceOptions,
   DEFAULT_JOB_LISTING_FILTERS,
   hasActiveFilters,
-  matchesBadgeFilter,
+  matchesCompanySearch,
   matchesDateBucket,
+  matchesDistrictFilter,
+  matchesFacilityFilter,
+  matchesJobCategory,
   matchesJobSearch,
   matchesOfferStatusFilter,
+  matchesProvinceFilter,
   type JobListingFilterState,
 } from "../_lib/job-listing-filters";
 import { buildJobListingRows, type JobListingRow } from "../_lib/job-listing-row";
@@ -19,7 +24,6 @@ import { useMediaQuery } from "../_lib/use-media-query";
 import { recordJobViewed } from "../_lib/recently-viewed-jobs";
 import type { Session } from "../_lib/types";
 import { foldTurkish } from "../_lib/turkish-text";
-import { useFavoriteJobIds } from "../_lib/use-job-favorites";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
 import { useRecentlyViewedJobIds } from "../_lib/use-recently-viewed-jobs";
@@ -41,7 +45,6 @@ const PAGE_SIZE = 24;
 export function ProviderJobListing({ session }: { session: Session }) {
   const jobs = useAllJobs();
   const offers = useAllOffers();
-  const favoriteIds = useFavoriteJobIds(session.id);
   const recentlyViewedIds = useRecentlyViewedJobIds(session.id);
   // Yalnızca TEK bir ağaç (tablo YA DA kart) her zaman mount edilir — ikisini
   // birden DOM'da tutup CSS ile gizlemek aynı ilan başlığını/linkini iki kez
@@ -60,36 +63,37 @@ export function ProviderJobListing({ session }: { session: Session }) {
   const activeJobs = useMemo(() => jobs.filter((job) => job.status === "yayinda"), [jobs]);
 
   const rows = useMemo(
-    () => buildJobListingRows(activeJobs, offers, session.id, favoriteIds),
-    [activeJobs, offers, session.id, favoriteIds],
+    () => buildJobListingRows(activeJobs, offers, session.id),
+    [activeJobs, offers, session.id],
   );
 
-  const categoryOptions = useMemo(() => buildCategoryOptions(activeJobs), [activeJobs]);
+  const categoryOptions = useMemo(() => buildCategoryOptions(), []);
   const provinceOptions = useMemo(() => buildProvinceOptions(activeJobs), [activeJobs]);
   const districtOptions = useMemo(
     () => buildDistrictOptions(activeJobs, filters.province),
     [activeJobs, filters.province],
   );
+  const facilityOptions = useMemo(
+    () => buildFacilityOptions(filters.province, filters.district),
+    [filters.province, filters.district],
+  );
 
   const foldedQuery = useMemo(() => foldTurkish(query.trim()), [query]);
+  const foldedCompanyQuery = useMemo(() => foldTurkish(filters.companyQuery.trim()), [filters.companyQuery]);
 
   const visibleRows = useMemo(() => {
     return rows.filter((row) => {
       if (!matchesJobSearch(row.job, foldedQuery)) return false;
-      if (filters.category !== "" && row.job.category !== filters.category) return false;
-      if (filters.province !== "" && foldTurkish(row.job.province) !== foldTurkish(filters.province)) {
-        return false;
-      }
-      if (filters.district !== "" && foldTurkish(row.job.district) !== foldTurkish(filters.district)) {
-        return false;
-      }
+      if (!matchesJobCategory(row.job, filters.category)) return false;
+      if (!matchesProvinceFilter(row.job, filters.province)) return false;
+      if (!matchesDistrictFilter(row.job, filters.district)) return false;
+      if (!matchesFacilityFilter(row.job, filters.facility)) return false;
+      if (!matchesCompanySearch(row.job, foldedCompanyQuery)) return false;
       if (!matchesDateBucket(row.job.workDate, filters.dateBucket)) return false;
       if (!matchesOfferStatusFilter(row.job.id, session.id, filters.offerStatus)) return false;
-      if (filters.onlyFavorites && !row.isFavorited) return false;
-      if (!matchesBadgeFilter(filters.badgeKinds, row.badgeKinds)) return false;
       return true;
     });
-  }, [rows, foldedQuery, filters, session.id]);
+  }, [rows, foldedQuery, foldedCompanyQuery, filters, session.id]);
 
   const pagedRows = useMemo(() => visibleRows.slice(0, page * PAGE_SIZE), [visibleRows, page]);
   const hasMore = pagedRows.length < visibleRows.length;
@@ -161,6 +165,7 @@ export function ProviderJobListing({ session }: { session: Session }) {
           categoryOptions={categoryOptions}
           provinceOptions={provinceOptions}
           districtOptions={districtOptions}
+          facilityOptions={facilityOptions}
           onReset={handleReset}
           hasActiveFilters={hasActiveFilters(filters)}
         />
@@ -176,11 +181,11 @@ export function ProviderJobListing({ session }: { session: Session }) {
         </p>
       ) : isDesktop ? (
         <div className="mt-4 overflow-x-auto rounded-card border border-border bg-surface">
-          <JobListingTable rows={pagedRows} session={session} onJobClick={handleJobClick} />
+          <JobListingTable rows={pagedRows} onJobClick={handleJobClick} />
         </div>
       ) : (
         <div className="mt-4">
-          <JobListingCards rows={pagedRows} session={session} onJobClick={handleJobClick} />
+          <JobListingCards rows={pagedRows} onJobClick={handleJobClick} />
         </div>
       )}
 

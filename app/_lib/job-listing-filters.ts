@@ -1,7 +1,9 @@
+import { resolveJobFacility } from "./job-location";
 import { isOfferVisibleInNormalLists } from "./job-requests";
 import { getOfferForJob } from "./offers";
-import { getCategoryDisplayLabel } from "./service-catalog";
-import { foldTurkish } from "./turkish-text";
+import { getCategoryDisplayLabel, resolveLegacyJobCategoryToId, SERVICE_CATEGORY_GROUPS } from "./service-catalog";
+import { foldTurkish, slugifyTurkish } from "./turkish-text";
+import { getDistrictId, getFacilitiesByProvinceAndDistrict } from "./turkey-locations";
 import type { Job } from "./types";
 
 export type DateBucket = "tumu" | "bugun" | "bu-hafta" | "bu-ay";
@@ -22,24 +24,28 @@ export const OFFER_STATUS_FILTER_OPTIONS: { value: OfferStatusFilter; label: str
 ];
 
 export type JobListingFilterState = {
+  /** service-catalog.ts#SERVICE_CATEGORY_GROUPS'taki bir kategori id'si, ya da "" (Tümü). */
   category: string;
+  /** `slugifyTurkish(job.province)` ile üretilen il anahtarı, ya da "" (Tümü). */
   province: string;
+  /** `getDistrictId(job.district)` ile üretilen ilçe anahtarı, ya da "" (Tümü). Province seçilmeden anlamsızdır. */
   district: string;
+  /** turkey-locations.ts#Facility.id, ya da "" (Tümü). District seçilmeden anlamsızdır. */
+  facility: string;
+  /** Serbest metin firma/fabrika arama sorgusu, ya da "" (devre dışı). Diğer 4 filtreden FARKLI: bir SearchableSelect değil, düz metin girişi (bkz. job-listing-filter-bar.tsx). */
+  companyQuery: string;
   dateBucket: DateBucket;
   offerStatus: OfferStatusFilter;
-  onlyFavorites: boolean;
-  /** job-listing-badges.ts#GENERAL_BADGE_OPTIONS/PROVIDER_BADGE_OPTIONS'taki `kind` değerleri — OR mantığıyla eşleşir. */
-  badgeKinds: string[];
 };
 
 export const DEFAULT_JOB_LISTING_FILTERS: JobListingFilterState = {
   category: "",
   province: "",
   district: "",
+  facility: "",
+  companyQuery: "",
   dateBucket: "tumu",
   offerStatus: "tumu",
-  onlyFavorites: false,
-  badgeKinds: [],
 };
 
 export function hasActiveFilters(filters: JobListingFilterState): boolean {
@@ -47,17 +53,18 @@ export function hasActiveFilters(filters: JobListingFilterState): boolean {
     filters.category !== "" ||
     filters.province !== "" ||
     filters.district !== "" ||
+    filters.facility !== "" ||
+    filters.companyQuery.trim() !== "" ||
     filters.dateBucket !== "tumu" ||
-    filters.offerStatus !== "tumu" ||
-    filters.onlyFavorites ||
-    filters.badgeKinds.length > 0
+    filters.offerStatus !== "tumu"
   );
 }
 
 /**
- * Canlı arama — başlık/açıklama/hizmet türü etiketi/il/ilçe/tesis (workLocationType)
- * üzerinde, searchable-select.tsx'te de kullanılan aynı Türkçe-duyarlı
- * `foldTurkish` ile. Yeni bir metin-normalize fonksiyonu icat edilmez.
+ * Canlı arama — başlık/açıklama/hizmet türü etiketi/il/ilçe/tesis
+ * (workLocationType)/firma-fabrika adı üzerinde, searchable-select.tsx'te de
+ * kullanılan aynı Türkçe-duyarlı `foldTurkish` ile. Yeni bir metin-normalize
+ * fonksiyonu icat edilmez.
  */
 export function matchesJobSearch(job: Job, foldedQuery: string): boolean {
   if (foldedQuery.length === 0) return true;
@@ -69,9 +76,23 @@ export function matchesJobSearch(job: Job, foldedQuery: string): boolean {
       job.province,
       job.district,
       job.workLocationType,
+      job.companyOrFactoryName ?? "",
     ].join(" "),
   );
   return haystack.includes(foldedQuery);
+}
+
+/**
+ * "Firma / Fabrika araması" filtresi — yalnızca job.companyOrFactoryName
+ * üzerinde çalışır (matchesJobSearch'ün genel canlı aramasından FARKLI,
+ * kendi bağımsız filtre alanı). Bu alan bu özellikten önce oluşturulmuş
+ * ilanlarda hiç yoktur — bu durumda boş sorgu dışında hiçbir zaman eşleşmez
+ * (veri kaybı değil, "aranabilir alan yok" durumu), asla fırlatmaz.
+ */
+export function matchesCompanySearch(job: Job, foldedQuery: string): boolean {
+  if (foldedQuery.length === 0) return true;
+  if (!job.companyOrFactoryName) return false;
+  return foldTurkish(job.companyOrFactoryName).includes(foldedQuery);
 }
 
 function startOfDay(date: Date): number {
@@ -108,51 +129,130 @@ export function matchesOfferStatusFilter(
   return filter === "teklif-verdiklerim" ? hasVisibleOffer : !hasVisibleOffer;
 }
 
-/** Rozetler filtresi: seçilenlerden HERHANGİ BİRİ ilanda varsa geçer (OR) — rozetlerin çoğu zaten birbirini dışladığı için AND neredeyse hiçbir zaman sonuç vermezdi. */
-export function matchesBadgeFilter(selectedKinds: string[], jobBadgeKinds: string[]): boolean {
-  if (selectedKinds.length === 0) return true;
-  return selectedKinds.some((kind) => jobBadgeKinds.includes(kind));
-}
+export type FilterOption = { value: string; label: string; keywords?: string[] };
 
-export type FilterOption = { value: string; label: string };
-
-function distinctByFold(values: string[]): FilterOption[] {
-  const seen = new Map<string, string>();
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    const key = foldTurkish(trimmed);
-    if (!seen.has(key)) seen.set(key, trimmed);
-  }
-  return [...seen.values()]
-    .sort((a, b) => a.localeCompare(b, "tr"))
-    .map((label) => ({ value: label, label }));
+/**
+ * Hizmet Türü filtresi seçenekleri: `SERVICE_CATEGORY_GROUPS` (job-request-form.tsx
+ * ile AYNI merkezi katalog) TAMAMEN kullanılır — hiçbir ilan kullanmasa bile bir
+ * kategori listede görünür, kaldırılmış/eski (jobs.ts#SERVICE_CATEGORIES) düz
+ * metin kategoriler hiç görünmez. Ana kategori grubu `keywords`e (yalnızca
+ * arama eşleştirmesi, bkz. searchable-select.tsx) konur — `hint` DEĞİL: hint
+ * görünür etiketle birlikte erişilebilirlik adına (accessible name) karışır
+ * ve `getByRole("option", { name: "Forklift", exact: true })` gibi tam eşleşen
+ * sorguları kırar (bkz. job-request-form.tsx'in tesis `keywords` kullanımıyla
+ * aynı desen — o da yalnızca arama içindir, görünür metne eklenmez).
+ */
+export function buildCategoryOptions(): FilterOption[] {
+  return SERVICE_CATEGORY_GROUPS.flatMap((group) =>
+    group.categories.map((category) => ({ value: category.id, label: category.label, keywords: [group.label] })),
+  );
 }
 
 /**
- * Hizmet Türü/İl/İlçe filtre seçenekleri, `service-catalog.ts`/`turkey-locations.ts`
- * gibi TAM kataloglardan değil, o an ekrandaki GERÇEK ilan verisinden
- * üretilir — böylece her seçenek en az 1 sonuç verir ve eski/serbest-metin
- * (legacy) değerler de kaybolmaz.
+ * Bir ilanın Hizmet Türü filtresiyle eşleşen kararlı katalog id'sini döner.
+ * `resolveLegacyJobCategoryToId` zaten hem yeni (id) hem eski (düz Türkçe
+ * metin, ör. "Forklift Operatörü") kayıtları güvenle çözer; eşleşmeyen eski
+ * değerler (ör. "Depolama", bilerek eşlenmemiş — bkz. service-catalog.ts)
+ * `null` döner ve filtrede hiçbir seçili kategoriyle eşleşmez (veri kaybı
+ * değildir, yalnızca filtrelenemez).
  */
-export function buildCategoryOptions(jobs: Job[]): FilterOption[] {
+export function matchesJobCategory(job: Job, selectedCategoryId: string): boolean {
+  if (selectedCategoryId === "") return true;
+  return resolveLegacyJobCategoryToId(job.category) === selectedCategoryId;
+}
+
+/**
+ * İl için sağlam eşleştirme anahtarı: turkey-locations.ts'in tesis
+ * kayıtlarında (`Facility.provinceId`) zaten kullandığı AYNI şema
+ * (`slugifyTurkish(ad)`) — ör. "Kocaeli"/"kocaeli"/"KOCAELİ" hepsi
+ * "kocaeli"ye indirgenir. `job.province` gerçek il verisinden (job-request-form.tsx
+ * `getProvinces()`) geldiği için bu her zaman il koduna kadar gitmeden de
+ * kararlı bir kimliktir; yazım/harf farkı olan legacy kayıtlarda dahi güvenli
+ * bir "en iyi çaba" anahtarı üretir (ayrı bir fallback dalına gerek kalmaz).
+ */
+export function resolveJobProvinceKey(provinceName: string): string {
+  return slugifyTurkish(provinceName);
+}
+
+/** turkey-locations.ts#getDistrictId ile BİREBİR aynı — ayrı bir ilçe-kimliği şeması icat edilmez. */
+export function resolveJobDistrictKey(districtName: string): string {
+  return getDistrictId(districtName);
+}
+
+export function matchesProvinceFilter(job: Job, selectedProvinceKey: string): boolean {
+  if (selectedProvinceKey === "") return true;
+  return resolveJobProvinceKey(job.province) === selectedProvinceKey;
+}
+
+export function matchesDistrictFilter(job: Job, selectedDistrictKey: string): boolean {
+  if (selectedDistrictKey === "") return true;
+  return resolveJobDistrictKey(job.district) === selectedDistrictKey;
+}
+
+/**
+ * `İlanlarda gerçekten kullanılan şehirleri gösterebilir` — seçenekler o an
+ * ekrandaki aktif ilanlardan türetilir (hiçbir seçenek garanti sıfır sonuç
+ * vermez), ama eşleştirme kimliği yukarıdaki `resolveJobProvinceKey` ile
+ * (isim değil) üretilir; bu yüzden aynı il farklı yazımla iki kez görünmez.
+ */
+export function buildProvinceOptions(jobs: Job[]): FilterOption[] {
   const seen = new Map<string, string>();
   for (const job of jobs) {
-    if (!seen.has(job.category)) seen.set(job.category, getCategoryDisplayLabel(job.category));
+    const trimmed = job.province.trim();
+    if (!trimmed) continue;
+    const key = resolveJobProvinceKey(trimmed);
+    if (!seen.has(key)) seen.set(key, trimmed);
   }
   return [...seen.entries()]
     .map(([value, label]) => ({ value, label }))
     .sort((a, b) => a.label.localeCompare(b.label, "tr"));
 }
 
-export function buildProvinceOptions(jobs: Job[]): FilterOption[] {
-  return distinctByFold(jobs.map((job) => job.province));
+/**
+ * Seçili bir il YOKSA boş dizi döner — job-listing-filter-bar.tsx bunu
+ * "Önce şehir seçin" disabled durumuna çevirir (job-request-form.tsx'teki
+ * İl->İlçe desenindeki `disabled={!provinceCode}` ile aynı davranış).
+ * Seçili ilin dışındaki hiçbir ilçe asla listeye karışmaz — eşleştirme
+ * `resolveJobProvinceKey` ile yapılır, ilçe adının kendisiyle değil.
+ */
+export function buildDistrictOptions(jobs: Job[], selectedProvinceKey: string): FilterOption[] {
+  if (selectedProvinceKey === "") return [];
+  const seen = new Map<string, string>();
+  for (const job of jobs) {
+    if (resolveJobProvinceKey(job.province) !== selectedProvinceKey) continue;
+    const trimmed = job.district.trim();
+    if (!trimmed) continue;
+    const key = resolveJobDistrictKey(trimmed);
+    if (!seen.has(key)) seen.set(key, trimmed);
+  }
+  return [...seen.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "tr"));
 }
 
-/** Seçili bir il varsa ilçe seçenekleri o ile göre daraltılır — job-request-form.tsx'teki İl->İlçe deseniyle tutarlı. */
-export function buildDistrictOptions(jobs: Job[], selectedProvince: string): FilterOption[] {
-  const scoped = selectedProvince
-    ? jobs.filter((job) => foldTurkish(job.province) === foldTurkish(selectedProvince))
-    : jobs;
-  return distinctByFold(scoped.map((job) => job.district));
+/**
+ * Bölge/Tesis filtresi seçenekleri: diğer üç konum/kategori filtresinden
+ * FARKLI OLARAK o an ekrandaki ilan verisinden değil, doğrudan
+ * turkey-locations.ts'in merkezi tesis kataloğundan (job-request-form.tsx'in
+ * "Yer Türü" adımının okuduğu AYNI kaynak) gelir — çünkü görev tanımı bu
+ * filtrenin "ilan oluşturma ekranında kullanılan merkezi location/facility
+ * verisiyle aynı kaynağa bağlanmasını" açıkça istiyor. Seçili ilçe YOKSA boş
+ * dizi döner (disabled durumu).
+ */
+export function buildFacilityOptions(selectedProvinceKey: string, selectedDistrictKey: string): FilterOption[] {
+  if (selectedProvinceKey === "" || selectedDistrictKey === "") return [];
+  return getFacilitiesByProvinceAndDistrict(selectedProvinceKey, selectedDistrictKey)
+    .map((facility) => ({ value: facility.id, label: facility.name }))
+    .sort((a, b) => a.label.localeCompare(b.label, "tr"));
+}
+
+/**
+ * job.facilityId (yeni ilanlar) VEYA workLocationType ad/takma-ad eşleşmesi
+ * (eski ilanlar) üzerinden resolveJobFacility (bkz. job-location.ts) —
+ * ayrı bir kopyası burada tutulmaz, bu yüzden ilan oluşturma formu ile Aktif
+ * İlanlar filtresi her zaman AYNI tesis eşleştirme mantığını kullanır.
+ */
+export function matchesFacilityFilter(job: Job, selectedFacilityId: string): boolean {
+  if (selectedFacilityId === "") return true;
+  return resolveJobFacility(job)?.id === selectedFacilityId;
 }

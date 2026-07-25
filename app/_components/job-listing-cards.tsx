@@ -3,31 +3,26 @@ import Link from "next/link";
 import { getProviderClosedReasonLabel } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import type { JobListingRow } from "../_lib/job-listing-row";
-import type { Session } from "../_lib/types";
-import { JobFavoriteToggle } from "./job-favorite-toggle";
 import { JobThumbnail } from "./job-thumbnail";
-import { StatusBadge } from "./status-badge";
 
 /**
  * Mobil/tablet (<1024px) görünümü — tablo YOK, responsive kart yığını.
  * 320px'ten itibaren yatay scroll oluşturmayacak şekilde: sabit boyutlu
  * thumbnail + `min-w-0`/`break-words` ile taşan metin sarmalanır, hiçbir
- * eleman genişliği ekran genişliğini aşmaz.
+ * eleman genişliği ekran genişliğini aşmaz. Favori ve Rozetler bilerek
+ * kaldırıldı (bkz. CLAUDE.md "Provider job listing").
  */
 export function JobListingCards({
   rows,
-  session,
   onJobClick,
 }: {
   rows: JobListingRow[];
-  session: Session;
   onJobClick: (jobId: string) => void;
 }) {
   return (
     <ul role="list" className="flex flex-col gap-4">
       {rows.map((row) => {
         const { job } = row;
-        const badges = row.providerBadge ? [...row.generalBadges, row.providerBadge] : row.generalBadges;
         return (
           <li key={job.id} className="rounded-card border border-border bg-surface p-4">
             <div className="flex items-start gap-3">
@@ -39,12 +34,9 @@ export function JobListingCards({
                 size={64}
               />
               <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-                    {row.categoryLabel}
-                  </span>
-                  <JobFavoriteToggle userId={session.id} jobId={job.id} isFavorited={row.isFavorited} />
-                </div>
+                <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
+                  {row.categoryLabel}
+                </span>
                 <Link
                   href={`/ilanlar/${job.id}`}
                   onClick={() => onJobClick(job.id)}
@@ -56,10 +48,19 @@ export function JobListingCards({
             </div>
 
             <div className="mt-3 flex flex-col gap-1.5 text-xs text-muted-foreground">
-              <span className="flex min-w-0 items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="truncate">
-                  {job.district}, {job.province} · {job.workLocationType}
+              <span className="flex min-w-0 items-start gap-1.5">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  {row.location.companyOrFactoryName && (
+                    <span className="block truncate font-medium text-foreground">
+                      {row.location.companyOrFactoryName}
+                    </span>
+                  )}
+                  <span className="block truncate">
+                    {row.location.facilityDisplayName}
+                    {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`} ·{" "}
+                    {row.location.district} / {row.location.province}
+                  </span>
                 </span>
               </span>
               <span className="flex items-center gap-1.5">
@@ -68,14 +69,6 @@ export function JobListingCards({
               </span>
               <span>{row.visibleOfferCount} teklif</span>
             </div>
-
-            {badges.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {badges.map((badge) => (
-                  <StatusBadge key={badge.kind} label={badge.label} tone={badge.tone} />
-                ))}
-              </div>
-            )}
 
             {!row.availability.open && row.availability.closedReason && (
               <p className="mt-2 text-xs text-muted-foreground">
