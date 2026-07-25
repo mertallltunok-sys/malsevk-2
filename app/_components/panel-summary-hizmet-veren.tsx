@@ -1,6 +1,7 @@
 "use client";
 
 import { Briefcase, CheckCircle2, CircleCheck, Clock, Gauge, Send } from "lucide-react";
+import { getProviderOffersTabHref } from "../_lib/job-requests";
 import { getHizmetVerenPanelSummary } from "../_lib/panel-summary";
 import { MAX_ACTIVE_JOBS, getActiveJobCount } from "../_lib/provider-capacity";
 import type { Job, Offer, Session } from "../_lib/types";
@@ -55,7 +56,11 @@ export function PanelSummaryHizmetVeren({
           label="Kabul Edilen Teklifler"
           description="Kabul edilen teklif sayısı"
           value={summary.acceptedOfferCount}
-          href="/panel/tekliflerim?durum=kabul-edildi"
+          // "kabul-edildi" ayrı bir sekme değil (bkz. job-requests.ts#
+          // getProviderOfferFilter) — kabul edilmiş ama iş henüz başlamamış
+          // teklifler "aktif" sekmesinde görünür; merkezi yardımcıyla üretilir
+          // (profile-menu.tsx'teki aynı düzeltmeyle tutarlı).
+          href={getProviderOffersTabHref("aktif")}
         />
         <PanelStatCard
           icon={Clock}

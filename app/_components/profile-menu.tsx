@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getProviderOffersTabHref } from "../_lib/job-requests";
 import { clearSession } from "../_lib/session";
 import type { Session } from "../_lib/types";
 import { useDropdown } from "../_lib/use-dropdown";
@@ -37,12 +38,20 @@ const hizmetAlanMenuItems: MenuItem[] = [
   { label: "Hesap Ayarları", href: "/panel/hesap-ayarlari", icon: Settings },
 ];
 
+// "Kabul Edilen Teklifler" bilerek AYRI bir "kabul-edildi" sekmesine gitmez —
+// job-requests.ts#getProviderOfferFilter'da böyle bir sekme yok (kabul
+// edilmiş ama iş henüz başlamamış teklifler "aktif"e düşer, bkz. o dosyadaki
+// dokümantasyon). Buradaki href, TEK doğruluk kaynağı olan
+// getProviderOffersTabHref("aktif") ile üretilir — statik bir
+// "?durum=kabul-edildi" yazılırsa my-offers-panel.tsx bunu tanımadığı için
+// sessizce "Aktif" sekmesine düşer; aynı sonucu elle yazmak yerine merkezi
+// yardımcı kullanılır.
 const hizmetVerenMenuItems: MenuItem[] = [
   { label: "Profilim", href: "/panel/profil", icon: User },
   { label: "Panel Özeti", href: "/panel", icon: LayoutDashboard },
   { label: "Uygun İlanlar", href: "/ilanlar", icon: Briefcase },
   { label: "Verdiğim Teklifler", href: "/panel/tekliflerim", icon: Send },
-  { label: "Kabul Edilen Teklifler", href: "/panel/tekliflerim?durum=kabul-edildi", icon: CircleCheck },
+  { label: "Kabul Edilen Teklifler", href: getProviderOffersTabHref("aktif"), icon: CircleCheck },
   { label: "Devam Eden İşler", href: "/panel/tekliflerim?durum=devam-eden", icon: Clock },
   { label: "Tamamlanan İşler", href: "/panel/tekliflerim?durum=tamamlandi", icon: CheckCircle2 },
   { label: "Bildirimler", href: "/panel/bildirimler", icon: Bell },
