@@ -2,7 +2,7 @@ import { CalendarDays, MapPin } from "lucide-react";
 import Link from "next/link";
 import { getProviderClosedReasonLabel } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
-import type { JobListingRow } from "../_lib/job-listing-row";
+import type { JobListingDisplayItem } from "../_lib/job-listing-row";
 import { JobThumbnail } from "./job-thumbnail";
 
 /**
@@ -11,20 +11,31 @@ import { JobThumbnail } from "./job-thumbnail";
  * thumbnail + `min-w-0`/`break-words` ile taşan metin sarmalanır, hiçbir
  * eleman genişliği ekran genişliğini aşmaz. Favori ve Rozetler bilerek
  * kaldırıldı (bkz. CLAUDE.md "Provider job listing").
+ *
+ * Çoklu Hizmet Operasyonu — Aşama 5: her `item` ya tek bir ilan (`kind:
+ * "single"`, markup BİREBİR eskisiyle aynı) ya da 2+ ilanı temsil eden bir
+ * operasyon özeti (`kind: "operation"`, bkz. job-listing-row.ts) — kategori
+ * rozetinin yerini "Operasyon · N Hizmet" alır, teklif sayısı satırının
+ * altına ilerleme yüzdesi eklenir, geri kalan kart markup'ı (thumbnail,
+ * başlık, konum, tarih, İlanı İncele butonu) değişmeden paylaşılır.
  */
 export function JobListingCards({
-  rows,
+  items,
   onJobClick,
 }: {
-  rows: JobListingRow[];
+  items: JobListingDisplayItem[];
   onJobClick: (jobId: string) => void;
 }) {
   return (
     <ul role="list" className="flex flex-col gap-4">
-      {rows.map((row) => {
+      {items.map((item) => {
+        const row = item.kind === "operation" ? item.primaryRow : item.row;
         const { job } = row;
         return (
-          <li key={job.id} className="rounded-card border border-border bg-surface p-4">
+          <li
+            key={item.kind === "operation" ? item.operationId : job.id}
+            className="rounded-card border border-border bg-surface p-4 shadow-sm"
+          >
             <div className="flex items-start gap-3">
               <JobThumbnail
                 photo={row.thumbnailPhoto}
@@ -35,7 +46,7 @@ export function JobListingCards({
               />
               <div className="min-w-0 flex-1">
                 <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-                  {row.categoryLabel}
+                  {item.kind === "operation" ? `Operasyon · ${item.totalCount} Hizmet` : row.categoryLabel}
                 </span>
                 <Link
                   href={`/ilanlar/${job.id}`}
@@ -67,10 +78,11 @@ export function JobListingCards({
                 <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {formatJobDate(job.workDate)}
               </span>
-              <span>{row.visibleOfferCount} teklif</span>
+              <span>{item.kind === "operation" ? item.visibleOfferCount : row.visibleOfferCount} teklif</span>
+              {item.kind === "operation" && <span>Operasyon İlerlemesi: %{item.progressPercent}</span>}
             </div>
 
-            {!row.availability.open && row.availability.closedReason && (
+            {item.kind === "single" && !row.availability.open && row.availability.closedReason && (
               <p className="mt-2 text-xs text-muted-foreground">
                 {getProviderClosedReasonLabel(row.availability.closedReason)}
               </p>

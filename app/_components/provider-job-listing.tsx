@@ -1,35 +1,28 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   buildCategoryOptions,
   buildDistrictOptions,
   buildFacilityOptions,
-  buildProvinceOptions,
   DEFAULT_JOB_LISTING_FILTERS,
   hasActiveFilters,
-  matchesCompanySearch,
   matchesDateBucket,
   matchesDistrictFilter,
   matchesFacilityFilter,
   matchesJobCategory,
-  matchesJobSearch,
   matchesOfferStatusFilter,
   matchesProvinceFilter,
   type JobListingFilterState,
 } from "../_lib/job-listing-filters";
-import { buildJobListingRows, type JobListingRow } from "../_lib/job-listing-row";
+import { buildJobListingRows, groupJobListingRowsByOperation } from "../_lib/job-listing-row";
 import { useMediaQuery } from "../_lib/use-media-query";
 import { recordJobViewed } from "../_lib/recently-viewed-jobs";
 import type { Session } from "../_lib/types";
-import { foldTurkish } from "../_lib/turkish-text";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
-import { useRecentlyViewedJobIds } from "../_lib/use-recently-viewed-jobs";
 import { JobListingCards } from "./job-listing-cards";
 import { JobListingFilterBar } from "./job-listing-filter-bar";
-import { JobListingSearchBar } from "./job-listing-search-bar";
 import { JobListingTable } from "./job-listing-table";
 
 const PAGE_SIZE = 24;
@@ -45,7 +38,6 @@ const PAGE_SIZE = 24;
 export function ProviderJobListing({ session }: { session: Session }) {
   const jobs = useAllJobs();
   const offers = useAllOffers();
-  const recentlyViewedIds = useRecentlyViewedJobIds(session.id);
   // Yalnızca TEK bir ağaç (tablo YA DA kart) her zaman mount edilir — ikisini
   // birden DOM'da tutup CSS ile gizlemek aynı ilan başlığını/linkini iki kez
   // yazardı (erişilebilirlik ağaçlarında/aramada tekrar, ayrıca her satırın
@@ -56,7 +48,6 @@ export function ProviderJobListing({ session }: { session: Session }) {
   // yaratmaz.
   const isDesktop = useMediaQuery("(min-width: 1024px)");
 
-  const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<JobListingFilterState>(DEFAULT_JOB_LISTING_FILTERS);
   const [page, setPage] = useState(1);
 
@@ -68,48 +59,48 @@ export function ProviderJobListing({ session }: { session: Session }) {
   );
 
   const categoryOptions = useMemo(() => buildCategoryOptions(), []);
-  const provinceOptions = useMemo(() => buildProvinceOptions(activeJobs), [activeJobs]);
-  const districtOptions = useMemo(
-    () => buildDistrictOptions(activeJobs, filters.province),
-    [activeJobs, filters.province],
-  );
+  const districtOptions = useMemo(() => buildDistrictOptions(filters.province), [filters.province]);
   const facilityOptions = useMemo(
     () => buildFacilityOptions(filters.province, filters.district),
     [filters.province, filters.district],
   );
 
-  const foldedQuery = useMemo(() => foldTurkish(query.trim()), [query]);
-  const foldedCompanyQuery = useMemo(() => foldTurkish(filters.companyQuery.trim()), [filters.companyQuery]);
+  // Bir satırın filtre kriterlerini TEK BAŞINA (kendi kategorisi/ilçesi/
+  // tesisi/tarihi/teklif durumu) geçip geçmediği — filtre mantığı hiç
+  // değişmedi, yalnızca artık bir Set'e (visibleJobIds) toplanıyor. Aşama
+  // 5.1: bu, bir operasyonun listede GÖRÜNÜP GÖRÜNMEYECEĞİNİ belirlemek için
+  // kullanılır (üyelerinden en az biri geçerse operasyon görünür) — kartın
+  // toplam/ilerleme/teklif sayısı içeriğini KÜÇÜLTMEK için değil (bkz.
+  // job-listing-row.ts#groupJobListingRowsByOperation).
+  const visibleJobIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (!matchesJobCategory(row.job, filters.category)) continue;
+      if (!matchesProvinceFilter(row.job, filters.province)) continue;
+      if (!matchesDistrictFilter(row.job, filters.district)) continue;
+      if (!matchesFacilityFilter(row.job, filters.facility)) continue;
+      if (!matchesDateBucket(row.job.workDate, filters.dateBucket)) continue;
+      if (!matchesOfferStatusFilter(row.job.id, session.id, filters.offerStatus)) continue;
+      ids.add(row.job.id);
+    }
+    return ids;
+  }, [rows, filters, session.id]);
 
-  const visibleRows = useMemo(() => {
-    return rows.filter((row) => {
-      if (!matchesJobSearch(row.job, foldedQuery)) return false;
-      if (!matchesJobCategory(row.job, filters.category)) return false;
-      if (!matchesProvinceFilter(row.job, filters.province)) return false;
-      if (!matchesDistrictFilter(row.job, filters.district)) return false;
-      if (!matchesFacilityFilter(row.job, filters.facility)) return false;
-      if (!matchesCompanySearch(row.job, foldedCompanyQuery)) return false;
-      if (!matchesDateBucket(row.job.workDate, filters.dateBucket)) return false;
-      if (!matchesOfferStatusFilter(row.job.id, session.id, filters.offerStatus)) return false;
-      return true;
-    });
-  }, [rows, foldedQuery, foldedCompanyQuery, filters, session.id]);
+  // Çoklu Hizmet Operasyonu — Aşama 5.1: gruplama artık TÜM (`rows`,
+  // filtresiz) ilanlar üzerinden çalışır — bir operasyonun toplam/tamamlanan/
+  // ilerleme/teklif sayısı HER ZAMAN operasyonun GERÇEK tüm üyelerinden
+  // hesaplanır, yalnızca filtreyi geçen alt kümeden DEĞİL. `visibleJobIds`
+  // yalnızca "bu operasyon/tekil ilan listede görünsün mü" kararı için
+  // kullanılır (bkz. job-listing-row.ts#groupJobListingRowsByOperation).
+  // Sayfalama bu birleştirilmiş liste üzerinde çalışır ki bir operasyon da
+  // sayfa boyutuna TEK bir öğe olarak sayılsın.
+  const displayItems = useMemo(
+    () => groupJobListingRowsByOperation(rows, visibleJobIds, offers),
+    [rows, visibleJobIds, offers],
+  );
 
-  const pagedRows = useMemo(() => visibleRows.slice(0, page * PAGE_SIZE), [visibleRows, page]);
-  const hasMore = pagedRows.length < visibleRows.length;
-
-  const recentlyViewedRows = useMemo(() => {
-    const rowById = new Map(rows.map((row) => [row.job.id, row] as const));
-    return recentlyViewedIds
-      .map((id) => rowById.get(id))
-      .filter((row): row is JobListingRow => row !== undefined)
-      .slice(0, 8);
-  }, [rows, recentlyViewedIds]);
-
-  function handleQueryChange(next: string) {
-    setQuery(next);
-    setPage(1);
-  }
+  const pagedItems = useMemo(() => displayItems.slice(0, page * PAGE_SIZE), [displayItems, page]);
+  const hasMore = pagedItems.length < displayItems.length;
 
   function handleFiltersChange(next: JobListingFilterState) {
     setFilters(next);
@@ -127,65 +118,35 @@ export function ProviderJobListing({ session }: { session: Session }) {
 
   return (
     <>
-      <div className="max-w-2xl">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-          Aktif İlanlar
-        </h1>
-        <p className="mt-3 text-base leading-relaxed text-muted-foreground">
-          Uzmanlığınıza uygun lojistik hizmet ilanlarını inceleyin ve uygun ilanlara teklif
-          gönderin.
-        </p>
-      </div>
+      {/* Görsel olarak kaldırıldı (bkz. yukarıdaki not) ama sayfanın hâlâ
+          geçerli bir h1'i olsun diye erişilebilirlik ağacında duruyor —
+          ekran okuyucu kullanıcıları için sayfa yapısı bozulmasın diye. */}
+      <h1 className="sr-only">Aktif İlanlar</h1>
+      <JobListingFilterBar
+        filters={filters}
+        onFiltersChange={handleFiltersChange}
+        categoryOptions={categoryOptions}
+        districtOptions={districtOptions}
+        facilityOptions={facilityOptions}
+        onReset={handleReset}
+        hasActiveFilters={hasActiveFilters(filters)}
+      />
 
-      {recentlyViewedRows.length > 0 && (
-        <div className="mt-6">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Son Görüntülenenler
-          </h2>
-          <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-            {recentlyViewedRows.map((row) => (
-              <Link
-                key={row.job.id}
-                href={`/ilanlar/${row.job.id}`}
-                onClick={() => handleJobClick(row.job.id)}
-                className="max-w-[220px] shrink-0 truncate rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                {row.job.title}
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 flex flex-col gap-4">
-        <JobListingSearchBar value={query} onChange={handleQueryChange} />
-        <JobListingFilterBar
-          filters={filters}
-          onFiltersChange={handleFiltersChange}
-          categoryOptions={categoryOptions}
-          provinceOptions={provinceOptions}
-          districtOptions={districtOptions}
-          facilityOptions={facilityOptions}
-          onReset={handleReset}
-          hasActiveFilters={hasActiveFilters(filters)}
-        />
-      </div>
-
-      <p aria-live="polite" aria-atomic="true" className="mt-6 text-sm font-medium text-foreground">
-        {visibleRows.length} Aktif İlan
+      <p aria-live="polite" aria-atomic="true" className="mt-3 text-sm font-medium text-foreground">
+        {displayItems.length} Aktif İlan
       </p>
 
-      {pagedRows.length === 0 ? (
+      {pagedItems.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">
-          Arama/filtre kriterlerinize uyan ilan bulunamadı.
+          Filtre kriterlerinize uyan ilan bulunamadı.
         </p>
       ) : isDesktop ? (
-        <div className="mt-4 overflow-x-auto rounded-card border border-border bg-surface">
-          <JobListingTable rows={pagedRows} onJobClick={handleJobClick} />
+        <div className="mt-3 overflow-x-auto rounded-card border border-border bg-surface shadow-sm">
+          <JobListingTable items={pagedItems} onJobClick={handleJobClick} />
         </div>
       ) : (
-        <div className="mt-4">
-          <JobListingCards rows={pagedRows} onJobClick={handleJobClick} />
+        <div className="mt-3">
+          <JobListingCards items={pagedItems} onJobClick={handleJobClick} />
         </div>
       )}
 

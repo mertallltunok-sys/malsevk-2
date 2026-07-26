@@ -58,6 +58,7 @@ type LocationRecord = {
 const provinces: Province[] = provincesData;
 const districtsByProvinceCode: Record<string, string[]> = districtsData;
 const provinceCodeByName = new Map(provinces.map((province) => [province.name, province.code]));
+const provinceCodeBySlug = new Map(provinces.map((province) => [slugifyTurkish(province.name), province.code]));
 
 /**
  * TEK VE MERKEZİ VERİ KAYNAĞI: data/locations/locations.json.
@@ -104,6 +105,18 @@ export function getProvinceIdByCode(provinceCode: string): string | null {
 
 export function getDistrictsByProvinceCode(provinceCode: string): string[] {
   return districtsByProvinceCode[provinceCode] ?? [];
+}
+
+/**
+ * İl SLUG'ından (ör. "kocaeli" — job-listing-filters.ts#resolveJobProvinceKey/
+ * slugifyTurkish ile üretilen anahtar), il KODUNU üretir (ör. "41").
+ * `getProvinceCodeByName`in slug tabanlı hâli — ikisi de aynı `provinces`
+ * dizisinden beslenir, ayrı bir veri kopyası tutulmaz. `getDistrictsByProvinceCode`
+ * ile birlikte, bir filtre ekranının "İl seçildi" anahtarından o ilin TÜM
+ * ilçelerini (yalnızca o an ilan verisinde geçenleri değil) türetmesini sağlar.
+ */
+export function getProvinceCodeBySlug(provinceSlug: string): string | null {
+  return provinceCodeBySlug.get(provinceSlug) ?? null;
 }
 
 /** İlçe ADINDAN (ör. "Dilovası"), tesis kayıtlarının kullandığı ilçe ID'sini üretir (ör. "dilovasi"). */

@@ -1,4 +1,4 @@
-import { isJobOpenForOffers } from "./jobs";
+import { getJobStatusLabel, getJobStatusTone, isJobOpenForOffers } from "./jobs";
 import type { Job, Offer, OfferStatus, Session } from "./types";
 
 export type JobRequestFilter = "aktif" | "kabul-edildi" | "devam-eden" | "tamamlandi";
@@ -402,6 +402,85 @@ export function getJobRequestFilterTone(
     case "tamamlandi":
       return "neutral";
   }
+}
+
+/**
+ * Çoklu Hizmet Operasyonu — Aşama 4: "Operasyon Durumu" özet kartının (bkz.
+ * operation-status-card.tsx) TEK ortak durum-türetme yardımcısı. YENİ bir
+ * durum sistemi İCAT ETMEZ — `getJobRequestFilter`in 4 değerine (yukarıda),
+ * o fonksiyonun `null` döndüğü TEK durumu ("iptal" — bkz. getJobRequestFilter
+ * içindeki `if (job.status !== "yayinda") return null` dalı, ki bu yalnızca
+ * job.status "iptal" olduğunda tetiklenir çünkü "tamamlandi" zaten yukarıda
+ * ayrıca ele alınır) için `"iptal"` fallback bucket'ı ekler. Aşama 3'ün
+ * karde ilan kartı (operation-sibling-jobs-card.tsx) da AYNI bu üç
+ * fonksiyonu kullanır — durum türetme mantığı iki bileşende ayrı ayrı
+ * kopyalanmaz (bkz. CLAUDE.md "Bileşen mimarisi" notu, Aşama 4 raporu).
+ */
+export type OperationStatusBucket = JobRequestFilter | "iptal";
+
+/** Özet kartındaki sabit gösterim sırası (Toplam Hizmet HARİÇ — o ayrıca gösterilir). */
+export const OPERATION_STATUS_BUCKET_ORDER: OperationStatusBucket[] = [
+  "aktif",
+  "kabul-edildi",
+  "devam-eden",
+  "tamamlandi",
+  "iptal",
+];
+
+/** Tek bir ilanın Operasyon Durumu bucket'ını döndürür — `getJobRequestFilter`i tekrar yazmaz, üzerine `"iptal"` fallback'i ekler. */
+export function getOperationStatusBucket(job: Job, offers: Offer[]): OperationStatusBucket {
+  return getJobRequestFilter(job, offers) ?? "iptal";
+}
+
+/** `getOperationStatusBucket` sonucunun görünen etiketi — sabit metin YAZILMAZ, mevcut `getJobRequestFilterLabel`/`getJobStatusLabel` yardımcılarına devredilir. */
+export function getOperationStatusBucketLabel(bucket: OperationStatusBucket): string {
+  return bucket === "iptal" ? getJobStatusLabel("iptal") : getJobRequestFilterLabel(bucket);
+}
+
+/** `getOperationStatusBucket` sonucunun rozet tonu — aynı şekilde mevcut `getJobRequestFilterTone`/`getJobStatusTone`'a devredilir. */
+export function getOperationStatusBucketTone(
+  bucket: OperationStatusBucket,
+): "success" | "warning" | "neutral" | "danger" {
+  return bucket === "iptal" ? getJobStatusTone("iptal") : getJobRequestFilterTone(bucket);
+}
+
+export type OperationStatusSummary = {
+  total: number;
+  counts: Record<OperationStatusBucket, number>;
+  completedCount: number;
+  /** Tam sayı, 0-100 arasına sınırlandırılmış (bkz. fonksiyon gövdesi). */
+  progressPercent: number;
+};
+
+/**
+ * Bir operasyona (aynı `operationId`yi paylaşan ilanlar) ait, YALNIZCA
+ * GÖRSEL bir özet üretir — hiçbir Job/Offer kaydını değiştirmez, hiçbir yeni
+ * kalıcı alan okumaz/yazmaz; girdi olarak zaten canlı store'lardan okunan
+ * `jobs`/`offers` dizilerini alır (bkz. operation-status-card.tsx). İlerleme
+ * yüzdesi YALNIZCA tamamlanan ilan sayısına göre hesaplanır (görev
+ * gereksinimi): `completedCount / total * 100`, tam sayıya yuvarlanır, 0-100
+ * arasına sınırlandırılır; `total === 0` ise güvenli şekilde 0 döner (pratikte
+ * bu fonksiyon en az 2 elemanlı bir operasyon için çağrılır, ama sıfır ilanlı
+ * çağrıda da çökmez).
+ */
+export function getOperationStatusSummary(jobs: Job[], offers: Offer[]): OperationStatusSummary {
+  const counts: Record<OperationStatusBucket, number> = {
+    aktif: 0,
+    "kabul-edildi": 0,
+    "devam-eden": 0,
+    tamamlandi: 0,
+    iptal: 0,
+  };
+  for (const job of jobs) {
+    counts[getOperationStatusBucket(job, offers)] += 1;
+  }
+
+  const total = jobs.length;
+  const completedCount = counts.tamamlandi;
+  const progressPercent =
+    total === 0 ? 0 : Math.min(100, Math.max(0, Math.round((completedCount / total) * 100)));
+
+  return { total, counts, completedCount, progressPercent };
 }
 
 export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi" | "kapanan-teklifler";

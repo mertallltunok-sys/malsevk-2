@@ -71,7 +71,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
   const provinceId = useId();
   const districtId = useId();
   const workLocationTypeId = useId();
-  const companyOrFactoryNameId = useId();
   const addressTextId = useId();
   const neighborhoodId = useId();
   const locationUrlId = useId();
@@ -101,7 +100,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
     () => job.facilityId ?? (job.workLocationType ? FACILITY_FREE_TEXT_VALUE : ""),
   );
   const [otherFacilityText, setOtherFacilityText] = useState(() => (job.facilityId ? "" : job.workLocationType));
-  const [companyOrFactoryName, setCompanyOrFactoryName] = useState(job.companyOrFactoryName ?? "");
   const [addressText, setAddressText] = useState(job.addressText ?? "");
   // Yalnızca facilityId === FACILITY_FREE_TEXT_VALUE iken gösterilir/doğrulanır
   // (bkz. job-form-validation.ts#JobFormFields.locationMode) — job.locationMode
@@ -188,15 +186,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
     setFacilityId(nextValue);
     setOtherFacilityText("");
     resetCustomFacilityFields();
-    // Özel tesis moduna girilirken, katalog moduna özgü Firma/Fabrika Adı
-    // alanı da temizlenir — "eski moda ait gereksiz alanlar temizlenmeli"
-    // kuralı burada da geçerli. Tersi yönde (özel -> katalog) BİLEREK
-    // temizlenmez: eski (bu özellikten önce oluşturulmuş) bir ilanı hiç
-    // dokunmadan düzenlerken mevcut companyOrFactoryName'i kaybetmemeli.
-    if (nextValue === FACILITY_FREE_TEXT_VALUE) {
-      setCompanyOrFactoryName("");
-      clearFieldError("companyOrFactoryName");
-    }
     setErrors((current) =>
       clearJobFormErrors(current, ["workLocationType", "neighborhood", "locationUrl", "directionsNote"]),
     );
@@ -219,7 +208,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
       province: provinceName,
       district,
       workLocationType: workLocationTypeValue,
-      companyOrFactoryName,
       addressText,
       locationMode,
       neighborhood,
@@ -245,7 +233,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
         district,
         workLocationType: workLocationTypeValue,
         facilityId: selectedFacility?.id,
-        companyOrFactoryName,
         addressText,
         locationMode,
         neighborhood,
@@ -491,7 +478,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
         </div>
       </div>
 
-      {facilityId === FACILITY_FREE_TEXT_VALUE ? (
+      {facilityId === FACILITY_FREE_TEXT_VALUE && (
         <div className="grid gap-6 sm:grid-cols-2">
           <div>
             <label htmlFor={neighborhoodId} className="text-sm font-medium text-foreground">
@@ -567,31 +554,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
               </p>
             )}
           </div>
-        </div>
-      ) : (
-        <div>
-          <label htmlFor={companyOrFactoryNameId} className="text-sm font-medium text-foreground">
-            Firma / Fabrika Adı
-          </label>
-          <input
-            id={companyOrFactoryNameId}
-            type="text"
-            value={companyOrFactoryName}
-            onChange={(event) => {
-              setCompanyOrFactoryName(event.target.value);
-              clearFieldError("companyOrFactoryName");
-            }}
-            maxLength={150}
-            aria-invalid={errors.companyOrFactoryName ? true : undefined}
-            aria-describedby={errors.companyOrFactoryName ? `${companyOrFactoryNameId}-error` : undefined}
-            placeholder="Örn. ABC Metal Sanayi A.Ş."
-            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          />
-          {errors.companyOrFactoryName && (
-            <p id={`${companyOrFactoryNameId}-error`} className="mt-2 text-sm text-danger">
-              {errors.companyOrFactoryName}
-            </p>
-          )}
         </div>
       )}
 

@@ -65,12 +65,16 @@ async function main() {
   );
   ok("Hizmet Veren, sabit bir ilana teklif verebiliyor (teklif akışı bozulmamış)");
 
-  // 3b) Oturum açıkken /ilanlar hâlâ gerçek listelemeyi gösteriyor (gate değil)
+  // 3b) Oturum açıkken /ilanlar hâlâ gerçek listelemeyi gösteriyor (gate değil).
+  // "Konteyner Sahasında Lashing Operasyonu" (ilan-001) DEĞİL — o İzmir'de,
+  // İl filtresi artık sabit/readonly Kocaeli olduğu için (bkz. CLAUDE.md
+  // "Provider job listing") Aktif İlanlar listesinde bilerek hiç görünmez.
+  // Kocaeli'deki sabit örnek ilanı (ilan-002) kontrol edilir.
   await page.goto(`${BASE_URL}/ilanlar`);
   await assert.doesNotReject(
-    page.getByText("Konteyner Sahasında Lashing Operasyonu").waitFor({ state: "visible", timeout: 10000 }),
+    page.getByText("Fabrika Sahasında Forklift Operatörü İhtiyacı").waitFor({ state: "visible", timeout: 10000 }),
   );
-  ok("Oturum açık Hizmet Veren için /ilanlar gerçek listelemeyi gösteriyor");
+  ok("Oturum açık Hizmet Veren için /ilanlar gerçek listelemeyi gösteriyor (Kocaeli-filtreli)");
 
   // 4) Rol yetkisi: Hizmet Veren ilan oluşturma formunu göremez (fotoğraf öncesi de böyleydi)
   await page.goto(`${BASE_URL}/hizmet-talebi-olustur`);
@@ -82,13 +86,23 @@ async function main() {
   // 5) Lokasyon seçimi: Hizmet Alan olarak giriş yap, İl/İlçe/Bölge-Tesis
   // seçimi çalışıyor (2026-07-25: "İşin Yapılacağı Yer Türü" ayrı adımı
   // kaldırıldı, tek bir "Bölge / Tesis" seçiciyle birleştirildi).
+  // 2026-07-26: MALSEVK yalnızca Kocaeli'de hizmet verdiği için İl artık
+  // seçilemez, sabit/readonly "Kocaeli" gösterimidir (bkz. job-request-form.tsx) —
+  // bu adım artık bir SearchableSelect'e tıklamak yerine sabit metnin
+  // göründüğünü doğrular, İlçe -> Bölge/Tesis akışı değişmeden devam eder.
   await page.goto(`${BASE_URL}/giris-yap?redirect=/hizmet-talebi-olustur`);
   await page.locator('input[type="email"]').fill("zeynep@test.com");
   await page.locator('input[type="password"]').fill("Zeynep1!");
   await page.getByRole("button", { name: "Giriş Yap" }).click();
   await page.waitForURL(`${BASE_URL}/hizmet-talebi-olustur`);
-  await page.getByRole("button", { name: "İl", exact: true }).click();
-  await page.locator('ul[aria-label="İl"]').getByRole("option", { name: "Kocaeli", exact: true }).click();
+  await assert.doesNotReject(
+    page.getByText("Kocaeli", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 }),
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "İl", exact: true }).count(),
+    0,
+    "İl artık seçilebilir bir SearchableSelect olmamalı",
+  );
   await page.getByRole("button", { name: "İlçe", exact: true }).click();
   await page.locator('ul[aria-label="İlçe"]').getByRole("option", { name: "Dilovası", exact: true }).click();
   await page.getByRole("button", { name: "Bölge / Tesis", exact: true }).click();
@@ -98,7 +112,7 @@ async function main() {
       .getByRole("option", { name: "Beldeport", exact: false })
       .waitFor({ state: "visible", timeout: 5000 }),
   );
-  ok("Lokasyon seçimi (İl -> İlçe -> Bölge/Tesis, Beldeport dahil) hâlâ doğru çalışıyor");
+  ok("Lokasyon seçimi (İl artık sabit Kocaeli, İlçe -> Bölge/Tesis, Beldeport dahil) hâlâ doğru çalışıyor");
 
   if (consoleErrors.length > 0) {
     console.log("\n[browser-test-regression] UYARI: Konsolda hata yakalandı:");

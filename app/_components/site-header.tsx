@@ -1,6 +1,5 @@
 "use client";
 
-import { Anchor } from "lucide-react";
 import Link from "next/link";
 import { useSession } from "../_lib/use-session";
 import { HeaderAuthActions } from "./header-auth-actions";
@@ -15,18 +14,10 @@ export function SiteHeader() {
       <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link
           href="/"
-          className="flex items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          className="flex items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
         >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-            <Anchor className="h-5 w-5" strokeWidth={2.25} aria-hidden="true" />
-          </span>
-          <span className="flex flex-col leading-tight">
-            <span className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-              MALSEVK.COM
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Lojistik Hizmet Platformu
-            </span>
+          <span className="whitespace-nowrap text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+            MALSEVK.com
           </span>
         </Link>
 

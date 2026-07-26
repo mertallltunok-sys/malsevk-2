@@ -5,6 +5,7 @@ import {
   HardHat,
   Link2,
   MoveVertical,
+  Package,
   PackageMinus,
   PackagePlus,
   Warehouse,
@@ -68,6 +69,12 @@ const services: {
     title: "Depolama",
     description: "Konteyner, rulo sac, paletli ürün ve saha depolama çözümleri.",
     icon: Warehouse,
+  },
+  {
+    slug: "proje-yuku",
+    title: "Proje Yük",
+    description: "Ağır ve büyük hacimli proje yüklerinin özel ekipmanla taşınması ve sahada yönetilmesi.",
+    icon: Package,
   },
 ];
 

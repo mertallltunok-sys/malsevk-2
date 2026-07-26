@@ -15,7 +15,13 @@
       "WebFetch(domain:www.tcdd.gov.tr)",
       "WebFetch(domain:tr.wikipedia.org)",
       "Bash(npm run *)",
-      "Bash(npm -v)"
+      "Bash(npm -v)",
+      "Bash(nohup npm run dev)",
+      "Bash(echo \"Started with PID $!\")",
+      "Bash(vercel --version)",
+      "Bash(node -e ' *)",
+      "Read(//temp/readonly/**)",
+      "Bash(grep -n \"paths\\\\|@/\\\\*\" tsconfig.json)"
     ]
   }
 }

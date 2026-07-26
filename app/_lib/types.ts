@@ -127,6 +127,24 @@ export type Job = {
   status: JobStatus;
   /** İlanı oluşturan Hizmet Alan kullanıcısının id'si. Sabit örnek ilanlar için null. */
   requesterId: string | null;
+  /**
+   * Aynı ilan oluşturma formunda birden fazla hizmet seçildiğinde doğan
+   * bağımsız `Job` kayıtlarını birbirine bağlayan ortak kimlik (bkz.
+   * job-store.ts#createJobsForOperation) — yalnızca dahili eşleştirme
+   * amaçlıdır, kullanıcıya gösterilen bir kod DEĞİLDİR. Tek hizmetle
+   * oluşturulan (bugün olduğu gibi `createJob` ile) ilanlarda hiç yoktur.
+   */
+  operationId?: string;
+  /**
+   * Çoklu Hizmet Operasyonu — Aşama 2: bu hizmetin bitiş tarihi. `workDate`
+   * ile birlikte bir tarih ARALIĞI tanımlar (aynı gün başlayıp bitmesi
+   * geçerlidir). Bu alandan önce oluşturulmuş TÜM ilanlarda yoktur — yokluğu
+   * bir hata durumu değildir, yalnızca eski (tek günlü ya da bu alan
+   * eklenmeden önce oluşturulmuş) bir ilanı işaret eder; hiçbir ekran bunu
+   * zorunlu okumaz. Yalnızca YENİ oluşturulan ilanlarda form doğrulamasıyla
+   * zorunlu tutulur (bkz. job-request-form.tsx).
+   */
+  workEndDate?: string;
   /** Sıralı operasyon fotoğrafları. Eski/sabit ilanlarda boş dizi olabilir. */
   photos: JobPhoto[];
 };

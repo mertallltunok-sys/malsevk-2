@@ -36,7 +36,12 @@ export function JobListingScreen() {
   if (session.role === "hizmet-veren") {
     return (
       <section className="bg-background">
-        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+        {/* Yalnızca bu ekranda (Aktif İlanlar): "Aktif İlanlar" başlığı/açıklaması
+            ve header ile filtre arasındaki büyük boşluk tamamen kaldırıldı —
+            kompakt filtre araç çubuğu header'ın hemen altında başlar, kullanıcı
+            sayfayı açar açmaz ilan kartlarını görsün diye (bkz. provider-job-listing.tsx).
+            Diğer sayfaların py-16 kuralı değişmedi. */}
+        <div className="mx-auto max-w-7xl px-4 pt-4 pb-16 sm:px-6 lg:px-8">
           <ProviderJobListing session={session} />
         </div>
       </section>

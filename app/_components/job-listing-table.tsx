@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getProviderClosedReasonLabel } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
-import type { JobListingRow } from "../_lib/job-listing-row";
+import type { JobListingDisplayItem } from "../_lib/job-listing-row";
 import { JobThumbnail } from "./job-thumbnail";
 
 /**
@@ -9,12 +9,20 @@ import { JobThumbnail } from "./job-thumbnail";
  * Türü, İlan Başlığı, Şehir/İlçe/Bölge, İş Tarihi, Teklif Sayısı, İşlem.
  * Favori ve Rozetler sütunları bilerek kaldırıldı (bkz. CLAUDE.md "Provider
  * job listing").
+ *
+ * Çoklu Hizmet Operasyonu — Aşama 5: her `item` ya tek bir ilan (`kind:
+ * "single"`, satır markup'ı BİREBİR eskisiyle aynı) ya da 2+ ilanı temsil eden
+ * bir operasyon özeti (`kind: "operation"`, bkz. job-listing-row.ts). İkisi de
+ * AYNI 7 sütuna oturur — yeni bir sütun eklenmedi: operasyon satırı Hizmet
+ * Türü sütununda kategori yerine "Operasyon · N Hizmet" rozetini, İşlem
+ * sütununda "İlanı İncele" butonunun altında (closedReason notuyla AYNI
+ * konumda) ilerleme yüzdesini gösterir.
  */
 export function JobListingTable({
-  rows,
+  items,
   onJobClick,
 }: {
-  rows: JobListingRow[];
+  items: JobListingDisplayItem[];
   onJobClick: (jobId: string) => void;
 }) {
   return (
@@ -46,10 +54,11 @@ export function JobListingTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => {
+        {items.map((item) => {
+          const row = item.kind === "operation" ? item.primaryRow : item.row;
           const { job } = row;
           return (
-            <tr key={job.id} className="border-b border-border last:border-b-0 hover:bg-background/60">
+            <tr key={item.kind === "operation" ? item.operationId : job.id} className="border-b border-border last:border-b-0 hover:bg-background/60">
               <td className="py-3 pr-3">
                 <JobThumbnail
                   photo={row.thumbnailPhoto}
@@ -60,9 +69,15 @@ export function JobListingTable({
                 />
               </td>
               <td className="px-3 py-3 align-top">
-                <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-                  {row.categoryLabel}
-                </span>
+                {item.kind === "operation" ? (
+                  <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
+                    Operasyon · {item.totalCount} Hizmet
+                  </span>
+                ) : (
+                  <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
+                    {row.categoryLabel}
+                  </span>
+                )}
               </td>
               <td className="max-w-xs px-3 py-3 align-top">
                 <Link
@@ -89,7 +104,7 @@ export function JobListingTable({
                 {formatJobDate(job.workDate)}
               </td>
               <td className="px-3 py-3 text-center align-top font-medium text-foreground">
-                {row.visibleOfferCount}
+                {item.kind === "operation" ? item.visibleOfferCount : row.visibleOfferCount}
               </td>
               <td className="px-3 py-3 align-top">
                 <Link
@@ -99,10 +114,17 @@ export function JobListingTable({
                 >
                   İlanı İncele
                 </Link>
-                {!row.availability.open && row.availability.closedReason && (
+                {item.kind === "operation" ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    {getProviderClosedReasonLabel(row.availability.closedReason)}
+                    Operasyon İlerlemesi: %{item.progressPercent}
                   </p>
+                ) : (
+                  !row.availability.open &&
+                  row.availability.closedReason && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      {getProviderClosedReasonLabel(row.availability.closedReason)}
+                    </p>
+                  )
                 )}
               </td>
             </tr>

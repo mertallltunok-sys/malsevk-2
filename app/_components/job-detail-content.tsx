@@ -16,6 +16,9 @@ import { useJobById } from "../_lib/use-jobs";
 import { useSession } from "../_lib/use-session";
 import { JobPhotoGallery } from "./job-photo-gallery";
 import { OfferPanel } from "./offer-panel";
+import { OperationServiceOffersCard } from "./operation-service-offers-card";
+import { OperationSiblingJobsCard } from "./operation-sibling-jobs-card";
+import { OperationStatusCard } from "./operation-status-card";
 import { StatusBadge } from "./status-badge";
 
 export function JobDetailContent({ id }: { id: string }) {
@@ -151,6 +154,14 @@ export function JobDetailContent({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      {job.operationId && (
+        <div className="mt-6 flex flex-col gap-6">
+          <OperationSiblingJobsCard currentJob={job} offers={offers} />
+          <OperationStatusCard currentJob={job} offers={offers} />
+          <OperationServiceOffersCard currentJob={job} offers={offers} />
+        </div>
+      )}
     </div>
   );
 }

@@ -302,6 +302,16 @@ function JobRequestsList({ session }: { session: Session }) {
     rawDurum === "devam-eden" || rawDurum === "tamamlandi" ? rawDurum : "aktif";
   const justUpdated = searchParams.get("guncellendi") === "1";
   const highlightJobId = searchParams.get("ilanId");
+  // Çoklu Hizmet Operasyonu — Aşama 2: birden fazla hizmet ilanı birlikte
+  // oluşturulduğunda job-request-form.tsx buraya bu query param'la
+  // yönlendirir (bkz. o dosyadaki handleSubmit) — "guncellendi=1" ile AYNI
+  // desen (statik, süre tabanlı otomatik kaybolma yok), yalnızca ilan sayısı
+  // da mesaja yazılabilsin diye bir sayı taşır. Tek ilan oluşturmada bu hiç
+  // set edilmez (mevcut `/ilanlar/[id]` yönlendirmesi değişmedi).
+  const operationJobCountParam = searchParams.get("operasyonIlanSayisi");
+  const operationJobCount = operationJobCountParam ? Number.parseInt(operationJobCountParam, 10) : null;
+  const justCreatedOperation =
+    operationJobCount !== null && Number.isInteger(operationJobCount) && operationJobCount >= 2;
 
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -357,6 +367,17 @@ function JobRequestsList({ session }: { session: Session }) {
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
           İlan başarıyla güncellendi.
+        </p>
+      )}
+
+      {justCreatedOperation && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mb-4 flex items-center gap-2 rounded-md bg-success-soft px-4 py-3 text-sm font-medium text-success"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {operationJobCount} hizmet ilanı başarıyla oluşturuldu.
         </p>
       )}
 

@@ -50,6 +50,19 @@ export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
       { id: "paletleme", label: "Paletleme" },
       { id: "etiketleme", label: "Etiketleme" },
       { id: "sayim-hizmeti", label: "Sayım Hizmeti" },
+      { id: "genel-depolama", label: "Genel Depolama" },
+      { id: "acik-saha-depolama", label: "Açık Saha Depolama" },
+      { id: "kapali-depolama", label: "Kapalı Depolama" },
+      { id: "antrepo-gumruklu", label: "Antrepo (Gümrüklü)" },
+      { id: "gecici-depolama", label: "Geçici Depolama" },
+      { id: "konteyner-depolama", label: "Konteyner Depolama" },
+      { id: "paletli-urun-depolama", label: "Paletli Ürün Depolama" },
+      { id: "dokme-yuk-depolama", label: "Dökme Yük Depolama" },
+      { id: "agir-yuk-depolama", label: "Ağır Yük Depolama" },
+      { id: "proje-yuku-depolama", label: "Proje Yükü Depolama" },
+      { id: "soguk-hava-depolama", label: "Soğuk Hava Depolama" },
+      { id: "kimyasal-depolama", label: "Kimyasal Depolama" },
+      { id: "tehlikeli-madde-depolama", label: "Tehlikeli Madde Depolama" },
     ],
   },
   {
@@ -80,6 +93,11 @@ export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
       { id: "vardiyali-calisma", label: "Vardiyalı Çalışma" },
       { id: "acil-operasyon-destegi", label: "Acil Operasyon Desteği" },
     ],
+  },
+  {
+    id: "proje-yuku-hizmetleri",
+    label: "Proje Yükü Hizmetleri",
+    categories: [{ id: "proje-yuku", label: "Proje Yük" }],
   },
 ];
 

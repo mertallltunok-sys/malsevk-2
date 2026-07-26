@@ -27,6 +27,7 @@ export function SearchableSelect({
   disabled = false,
   disabledHint,
   errorId,
+  compact = false,
 }: {
   id: string;
   label: string;
@@ -37,10 +38,18 @@ export function SearchableSelect({
   disabled?: boolean;
   disabledHint?: string;
   errorId?: string;
+  /**
+   * Daha ince/yoğun bir görünüm — yalnızca sıkışık filtre araç çubukları
+   * için (bkz. job-listing-filter-bar.tsx). Varsayılan (false) mevcut
+   * formlardaki (job-request-form.tsx, job-edit-form.tsx, login-form.tsx)
+   * görünümü hiç değiştirmez — bu ekranlar `compact` hiç geçmez.
+   */
+  compact?: boolean;
 }) {
   const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
   const [query, setQuery] = useState("");
   const invalid = Boolean(errorId);
+  const iconSizeClass = compact ? "h-3.5 w-3.5" : "h-4 w-4";
 
   const filteredOptions = useMemo(() => {
     const trimmed = query.trim();
@@ -65,7 +74,7 @@ export function SearchableSelect({
 
   return (
     <div ref={containerRef} className="relative">
-      <label htmlFor={id} className="text-sm font-medium text-foreground">
+      <label htmlFor={id} className={compact ? "text-xs font-medium text-muted-foreground" : "text-sm font-medium text-foreground"}>
         {label}
       </label>
       <button
@@ -76,9 +85,9 @@ export function SearchableSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-describedby={errorId}
-        className={`mt-2 flex w-full items-center justify-between gap-2 rounded-md border bg-surface px-4 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 ${
-          invalid ? "border-danger" : "border-border"
-        }`}
+        className={`mt-2 flex w-full items-center justify-between gap-2 rounded-md border bg-surface text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 ${
+          compact ? "px-3 py-2" : "px-4 py-3"
+        } ${invalid ? "border-danger" : "border-border"}`}
       >
         <span
           className={`truncate ${selectedLabel ? "text-foreground" : "text-muted-foreground"}`}
@@ -86,13 +95,19 @@ export function SearchableSelect({
           {selectedLabel ?? (disabled && disabledHint ? disabledHint : placeholder)}
         </span>
         <ChevronDown
-          className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          className={`${iconSizeClass} shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
           aria-hidden="true"
         />
       </button>
 
       {open && !disabled && (
-        <div className="absolute z-50 mt-2 w-full rounded-card border border-border bg-surface shadow-md">
+        // `min-w-full` (tetikleyiciden dar OLAMAZ) + `w-max`/`max-w-*` (içerik
+        // gerektirirse tetikleyiciden GENİŞ açılabilir) — uzun seçenek
+        // metinlerinin (ör. "Tehlikeli Madde Depolama") sıkışık bir toolbar
+        // hücresinde kesilmesini önler. Önceden sabit `w-full` idi; bu, dar
+        // bir tetikleyicinin (ör. kompakt filtre araç çubuğu) popup'ını da
+        // aynı dar genişliğe zorluyor, uzun etiketleri ortasından kesiyordu.
+        <div className="absolute z-50 mt-2 w-max min-w-full max-w-[min(320px,90vw)] rounded-card border border-border bg-surface shadow-md">
           <div className="border-b border-border p-2">
             <input
               type="text"
@@ -119,7 +134,11 @@ export function SearchableSelect({
                       option.value === value ? "bg-accent-soft text-primary" : "text-foreground"
                     }`}
                   >
-                    <span className="truncate">{option.label}</span>
+                    {/* Bilerek `truncate` YOK: popup artık içeriğe göre
+                        genişleyebildiği için (yukarıdaki not) hizmet/tesis
+                        adlarının ortadan kesilmesine gerek kalmadı; gerekirse
+                        (aşırı uzun bir etiket) doğal olarak ikinci satıra sarar. */}
+                    <span className="text-left">{option.label}</span>
                     {option.hint && (
                       <span className="shrink-0 text-xs text-muted-foreground">{option.hint}</span>
                     )}
