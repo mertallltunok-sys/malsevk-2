@@ -1,14 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import {
-  getOperationStatusBucket,
-  getOperationStatusBucketLabel,
-  getOperationStatusBucketTone,
-} from "../_lib/job-requests";
+import { canProviderSubmitNewOffer, getViewerScopedJobStatus } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useJobsForOperation } from "../_lib/use-jobs";
-import type { Job, Offer } from "../_lib/types";
+import type { Job, Offer, Session } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
 
 /**
@@ -24,13 +20,28 @@ import { StatusBadge } from "./status-badge";
  * `currentJob.operationId` yoksa ya da operasyondaki toplam ilan sayısı 2'den
  * azsa HİÇ render edilmez (Aşama 4'ün kartıyla aynı eşik — grupsuz bir
  * "diğer hizmetler" listesi göstermenin anlamı yok).
+ *
+ * Durum rozeti KRİTİK KULLANICI İZOLASYONU DÜZELTMESİ ile
+ * `offers.ts#getViewerScopedJobStatus`e taşındı — `session` bu yüzden artık
+ * zorunlu bir prop: durum, ilanın GERÇEK (job-geneli) durumu değil, GÖSTEREN
+ * oturuma göre hesaplanır (bkz. o fonksiyonun dokümantasyonu).
+ *
+ * "Teklif Ver" kısayolunun görünürlüğü KRİTİK BUTON GÖRÜNÜRLÜĞÜ
+ * DÜZELTMESİ ile `offers.ts#canProviderSubmitNewOffer`e taşındı — eskiden
+ * yalnızca `!isCurrent` kontrol ediliyordu, bu yüzden buton izleyicinin
+ * rolünden/kendi teklifinin durumundan/ilanın teklife açık olup olmadığından
+ * bağımsız olarak gösteriliyordu. Artık satırdaki buton, gerçek teklif
+ * formunun (offer-panel.tsx) kullandığıyla AYNI fonksiyona bağlı — bkz. o
+ * fonksiyonun dokümantasyonu.
  */
 export function OperationServiceOffersCard({
   currentJob,
   offers,
+  session,
 }: {
   currentJob: Job;
   offers: Offer[];
+  session: Session | null;
 }) {
   const operationJobs = useJobsForOperation(currentJob.operationId);
 
@@ -43,7 +54,8 @@ export function OperationServiceOffersCard({
       <ul role="list" className="mt-4 flex flex-col divide-y divide-border border-t border-border">
         {operationJobs.map((operationJob) => {
           const isCurrent = operationJob.id === currentJob.id;
-          const statusBucket = getOperationStatusBucket(operationJob, offers);
+          const { label: statusLabel, tone: statusTone } = getViewerScopedJobStatus(operationJob, offers, session);
+          const canOffer = !isCurrent && canProviderSubmitNewOffer(session, operationJob, offers);
 
           return (
             <li key={operationJob.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -58,11 +70,8 @@ export function OperationServiceOffersCard({
               </div>
 
               <div className="flex items-center gap-3">
-                <StatusBadge
-                  label={getOperationStatusBucketLabel(statusBucket)}
-                  tone={getOperationStatusBucketTone(statusBucket)}
-                />
-                {!isCurrent && (
+                <StatusBadge label={statusLabel} tone={statusTone} />
+                {canOffer && (
                   <Link
                     href={`/ilanlar/${operationJob.id}`}
                     className="inline-flex items-center justify-center whitespace-nowrap rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"

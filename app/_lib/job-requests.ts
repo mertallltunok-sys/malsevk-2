@@ -453,6 +453,39 @@ export type OperationStatusSummary = {
 };
 
 /**
+ * `getOperationStatusSummary` (aşağıda, gerçek/job-geneli bucket'larla) VE
+ * `offers.ts#getViewerScopedOperationStatusSummary`nin (izleyen oturuma göre
+ * GÜVENLİ bucket'larla — bkz. o dosyadaki kritik izolasyon düzeltmesi notu)
+ * PAYLAŞTIĞI TEK toplama mantığı — ikisi de aynı toplam/tamamlanan/ilerleme
+ * hesabını (bkz. gövde) tekrar yazmasın diye buraya çıkarıldı. `getBucket`
+ * her ilan için hangi bucket'a sayılacağını belirler; çağıran bunu ya
+ * (job, offers) üzerinden GERÇEK duruma ya da izleyene göre KISITLANMIŞ bir
+ * duruma göre sağlar.
+ */
+export function accumulateOperationStatusCounts(
+  jobs: Job[],
+  getBucket: (job: Job) => OperationStatusBucket,
+): OperationStatusSummary {
+  const counts: Record<OperationStatusBucket, number> = {
+    aktif: 0,
+    "kabul-edildi": 0,
+    "devam-eden": 0,
+    tamamlandi: 0,
+    iptal: 0,
+  };
+  for (const job of jobs) {
+    counts[getBucket(job)] += 1;
+  }
+
+  const total = jobs.length;
+  const completedCount = counts.tamamlandi;
+  const progressPercent =
+    total === 0 ? 0 : Math.min(100, Math.max(0, Math.round((completedCount / total) * 100)));
+
+  return { total, counts, completedCount, progressPercent };
+}
+
+/**
  * Bir operasyona (aynı `operationId`yi paylaşan ilanlar) ait, YALNIZCA
  * GÖRSEL bir özet üretir — hiçbir Job/Offer kaydını değiştirmez, hiçbir yeni
  * kalıcı alan okumaz/yazmaz; girdi olarak zaten canlı store'lardan okunan
@@ -462,25 +495,15 @@ export type OperationStatusSummary = {
  * arasına sınırlandırılır; `total === 0` ise güvenli şekilde 0 döner (pratikte
  * bu fonksiyon en az 2 elemanlı bir operasyon için çağrılır, ama sıfır ilanlı
  * çağrıda da çökmez).
+ *
+ * UYARI: bu, ilanın GERÇEK (job-geneli) durumunu döndürür — yalnızca ilan
+ * sahibinin görmesi güvenlidir. Bir Hizmet Veren'e (ya da ilanın sahibi
+ * olmayan başka bir kullanıcıya) gösterilecek bir rozet/özet için bunun
+ * yerine `offers.ts#getViewerScopedOperationStatusSummary` kullanılmalıdır
+ * (bkz. o fonksiyonun dokümantasyonu — kritik kullanıcı izolasyonu düzeltmesi).
  */
 export function getOperationStatusSummary(jobs: Job[], offers: Offer[]): OperationStatusSummary {
-  const counts: Record<OperationStatusBucket, number> = {
-    aktif: 0,
-    "kabul-edildi": 0,
-    "devam-eden": 0,
-    tamamlandi: 0,
-    iptal: 0,
-  };
-  for (const job of jobs) {
-    counts[getOperationStatusBucket(job, offers)] += 1;
-  }
-
-  const total = jobs.length;
-  const completedCount = counts.tamamlandi;
-  const progressPercent =
-    total === 0 ? 0 : Math.min(100, Math.max(0, Math.round((completedCount / total) * 100)));
-
-  return { total, counts, completedCount, progressPercent };
+  return accumulateOperationStatusCounts(jobs, (job) => getOperationStatusBucket(job, offers));
 }
 
 export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi" | "kapanan-teklifler";

@@ -3,14 +3,10 @@
 import { CalendarDays, MapPin } from "lucide-react";
 import Link from "next/link";
 import { formatJobDate } from "../_lib/jobs";
-import {
-  getOperationStatusBucket,
-  getOperationStatusBucketLabel,
-  getOperationStatusBucketTone,
-} from "../_lib/job-requests";
+import { getViewerScopedJobStatus } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useJobsForOperation } from "../_lib/use-jobs";
-import type { Job, Offer } from "../_lib/types";
+import type { Job, Offer, Session } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
 
 /**
@@ -23,13 +19,20 @@ import { StatusBadge } from "./status-badge";
  * `currentJob.operationId` yoksa çağıran taraf (job-detail-content.tsx) bu
  * bileşeni HİÇ render etmemelidir — burada da aynı kontrol tekrarlanır (savunma
  * amaçlı, tek bir görünürlük kuralı).
+ *
+ * Durum rozeti KRİTİK KULLANICI İZOLASYONU DÜZELTMESİ ile
+ * `offers.ts#getViewerScopedJobStatus`e taşındı — `session` bu yüzden artık
+ * zorunlu bir prop: durum, ilanın GERÇEK (job-geneli) durumu değil, GÖSTEREN
+ * oturuma göre hesaplanır (bkz. o fonksiyonun dokümantasyonu).
  */
 export function OperationSiblingJobsCard({
   currentJob,
   offers,
+  session,
 }: {
   currentJob: Job;
   offers: Offer[];
+  session: Session | null;
 }) {
   const operationJobs = useJobsForOperation(currentJob.operationId);
 
@@ -45,9 +48,7 @@ export function OperationSiblingJobsCard({
       <ul role="list" className="mt-4 flex flex-col gap-3">
         {operationJobs.map((operationJob) => {
           const isCurrent = operationJob.id === currentJob.id;
-          const statusBucket = getOperationStatusBucket(operationJob, offers);
-          const statusLabel = getOperationStatusBucketLabel(statusBucket);
-          const statusTone = getOperationStatusBucketTone(statusBucket);
+          const { label: statusLabel, tone: statusTone } = getViewerScopedJobStatus(operationJob, offers, session);
 
           const rowContent = (
             <>

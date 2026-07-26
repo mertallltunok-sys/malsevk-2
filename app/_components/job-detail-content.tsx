@@ -157,9 +157,9 @@ export function JobDetailContent({ id }: { id: string }) {
 
       {job.operationId && (
         <div className="mt-6 flex flex-col gap-6">
-          <OperationSiblingJobsCard currentJob={job} offers={offers} />
-          <OperationStatusCard currentJob={job} offers={offers} />
-          <OperationServiceOffersCard currentJob={job} offers={offers} />
+          <OperationSiblingJobsCard currentJob={job} offers={offers} session={session} />
+          <OperationStatusCard currentJob={job} offers={offers} session={session} />
+          <OperationServiceOffersCard currentJob={job} offers={offers} session={session} />
         </div>
       )}
     </div>

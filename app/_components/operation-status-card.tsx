@@ -1,15 +1,10 @@
 "use client";
 
-import {
-  getOperationStatusBucket,
-  getOperationStatusBucketLabel,
-  getOperationStatusBucketTone,
-  getOperationStatusSummary,
-  OPERATION_STATUS_BUCKET_ORDER,
-} from "../_lib/job-requests";
+import { getOperationStatusBucketLabel, OPERATION_STATUS_BUCKET_ORDER } from "../_lib/job-requests";
+import { getViewerScopedJobStatus, getViewerScopedOperationStatusSummary } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useJobsForOperation } from "../_lib/use-jobs";
-import type { Job, Offer } from "../_lib/types";
+import type { Job, Offer, Session } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
 
 function SummaryStat({ label, value }: { label: string; value: number }) {
@@ -33,19 +28,28 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
  * azsa (yalnızca kendisi) HİÇ render edilmez — çağıran taraf
  * (job-detail-content.tsx) zaten `operationId` varlığını kontrol eder, burada
  * "en az 2 ilan" kuralı AYRICA (savunma amaçlı) uygulanır.
+ *
+ * Hem özet sayıları (Toplam Hizmet/Aktif/Teklif Kabul Edildi/.../İlerleme %)
+ * hem hizmet listesindeki rozetler KRİTİK KULLANICI İZOLASYONU DÜZELTMESİ ile
+ * `offers.ts#getViewerScopedOperationStatusSummary`/`getViewerScopedJobStatus`
+ * kullanır — `session` bu yüzden artık zorunlu bir prop: gösterilen her şey
+ * GÖSTEREN oturuma göre hesaplanır, ilanların GERÇEK (job-geneli) durumu
+ * değil (bkz. o fonksiyonların dokümantasyonu).
  */
 export function OperationStatusCard({
   currentJob,
   offers,
+  session,
 }: {
   currentJob: Job;
   offers: Offer[];
+  session: Session | null;
 }) {
   const operationJobs = useJobsForOperation(currentJob.operationId);
 
   if (!currentJob.operationId || operationJobs.length < 2) return null;
 
-  const summary = getOperationStatusSummary(operationJobs, offers);
+  const summary = getViewerScopedOperationStatusSummary(operationJobs, offers, session);
 
   return (
     <div className="rounded-card border border-border bg-surface p-6">
@@ -89,17 +93,14 @@ export function OperationStatusCard({
       <ul role="list" className="mt-5 flex flex-col divide-y divide-border border-t border-border">
         {operationJobs.map((operationJob) => {
           const isCurrent = operationJob.id === currentJob.id;
-          const statusBucket = getOperationStatusBucket(operationJob, offers);
+          const { label: statusLabel, tone: statusTone } = getViewerScopedJobStatus(operationJob, offers, session);
           return (
             <li key={operationJob.id} className="flex items-center justify-between gap-3 py-2.5">
               <span className="min-w-0 truncate text-sm text-foreground">
                 {getCategoryDisplayLabel(operationJob.category)}
                 {isCurrent && <span className="font-normal text-muted-foreground"> (Bu ilan)</span>}
               </span>
-              <StatusBadge
-                label={getOperationStatusBucketLabel(statusBucket)}
-                tone={getOperationStatusBucketTone(statusBucket)}
-              />
+              <StatusBadge label={statusLabel} tone={statusTone} />
             </li>
           );
         })}
