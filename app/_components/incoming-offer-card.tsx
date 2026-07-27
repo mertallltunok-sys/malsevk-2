@@ -1,10 +1,14 @@
 "use client";
 
-import { Building2, Check, CheckCircle2, MapPin, Star, X } from "lucide-react";
+import { Building2, Check, CheckCircle2, MapPin, ShieldCheck, Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
 import { formatJobLocationLine } from "../_lib/job-location";
-import { OFFER_PENDING_BLOCKED_MESSAGE, isOfferPendingActionBlocked } from "../_lib/job-requests";
+import {
+  OFFER_PENDING_BLOCKED_MESSAGE,
+  isOfferPendingActionBlocked,
+  isOfferProviderIdentityRevealed,
+} from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_lib/offers";
@@ -15,7 +19,6 @@ import { useJobPhotoUrl } from "../_lib/use-job-photo-url";
 import { useAllRatings } from "../_lib/use-ratings";
 import { findUserById } from "../_lib/users";
 import { ContactInfoBlock } from "./contact-info-block";
-import { JobRatingModal } from "./job-rating-modal";
 import { OfferOutcomePanel } from "./offer-outcome-panel";
 import { StatusBadge } from "./status-badge";
 
@@ -23,21 +26,47 @@ function getRoleLabel(role: UserRole): string {
   return role === "hizmet-veren" ? "Hizmet Veren" : "Hizmet Alan";
 }
 
+/**
+ * Kimlik henüz açılmadığında (bkz. isOfferProviderIdentityRevealed) firma
+ * adının yerini alan takma ad — `providerId`den türetilen, TARAYICILAR ARASI
+ * kararlı (aynı sağlayıcı her zaman aynı numarayı alır, böylece bir Hizmet
+ * Alan farklı ilanlardaki tekliflerin aynı sağlayıcıdan geldiğini fark
+ * edebilir) ama gerçek kimliği HİÇBİR ŞEKİLDE ortaya çıkarmayan basit bir
+ * hash. Güvenlik amaçlı değildir (çakışma olabilir) — yalnızca görüntüleme
+ * amaçlı bir etikettir.
+ */
+function getAnonymousProviderLabel(providerId: string): string {
+  let hash = 0;
+  for (let i = 0; i < providerId.length; i += 1) {
+    hash = (hash * 31 + providerId.charCodeAt(i)) >>> 0;
+  }
+  return `Hizmet Veren #${1000 + (hash % 9000)}`;
+}
+
 export function IncomingOfferCard({
   offer,
   job,
   session,
   highlighted,
+  onCompleted,
 }: {
   offer: Offer;
   job: Job | undefined;
   session: Session;
   highlighted: boolean;
+  /**
+   * Teklif "completed" olduğunda çağrılır — değerlendirme modalını açan
+   * state BİLEREK bu bileşende TUTULMAZ (bkz. incoming-offers-panel.tsx):
+   * bir hizmet kalemi "tamamlandi" olur olmaz Gelen Teklifler'den (Operasyon
+   * Hizmet Kalemi Yaşam Döngüsü Senkronizasyonu) düşebildiği için, bu kart
+   * AYNI render'da unmount olabilir — modal state'i burada yerel kalsaydı
+   * hiç açılmadan kaybolurdu (job-requests-panel.tsx'in AYNI sorunu AYNI
+   * şekilde çözdüğü kanıtlanmış desen).
+   */
+  onCompleted: (offer: Offer) => void;
 }) {
   const [pendingAction, setPendingAction] = useState<"accepted" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ratingModalOffer, setRatingModalOffer] = useState<Offer | null>(null);
-  const [justRated, setJustRated] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const provider = findUserById(offer.providerId);
   const revealedContact = getRevealedContactForOffer(session, offer.id);
@@ -47,6 +76,8 @@ export function IncomingOfferCard({
   const providerSummary = getProviderProfileSummary(offer.providerId, allOffers, allRatings);
   const logoUrl = useJobPhotoUrl(providerProfile?.logoStorageKey ?? null);
   const companyName = providerProfile?.companyName?.trim() || (provider ? provider.name : "Hizmet Veren");
+  const identityRevealed = isOfferProviderIdentityRevealed(offer);
+  const anonymousLabel = getAnonymousProviderLabel(offer.providerId);
 
   useEffect(() => {
     if (!highlighted || !cardRef.current) return;
@@ -78,11 +109,13 @@ export function IncomingOfferCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background">
-            {logoUrl ? (
+            {identityRevealed && logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- IndexedDB blob object URL, next/image optimize edemez
               <img src={logoUrl} alt={`${companyName} logosu`} className="h-full w-full object-cover" />
-            ) : (
+            ) : identityRevealed ? (
               <Building2 className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+            ) : (
+              <ShieldCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
             )}
           </span>
           <div className="min-w-0 flex-1">
@@ -95,47 +128,58 @@ export function IncomingOfferCard({
                 {formatJobLocationLine(job)}
               </p>
             )}
-            <p className="mt-1 truncate text-sm font-semibold text-foreground">
-              {companyName}
-              <span className="ml-2 font-normal text-muted-foreground">
-                ({getRoleLabel("hizmet-veren")})
-              </span>
-            </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <span className="flex shrink-0 items-center gap-1">
-                <span className="flex" aria-hidden="true">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <Star
-                      key={star}
-                      className="h-3 w-3 text-rating"
-                      fill={
-                        providerSummary.averageStars !== null && star <= Math.round(providerSummary.averageStars)
-                          ? "currentColor"
-                          : "transparent"
-                      }
-                      strokeWidth={1.75}
-                    />
-                  ))}
+            {identityRevealed ? (
+              <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                {companyName}
+                <span className="ml-2 font-normal text-muted-foreground">
+                  ({getRoleLabel("hizmet-veren")})
                 </span>
-                {providerSummary.averageStars !== null ? (
-                  <span>
-                    {providerSummary.averageStars.toFixed(1)} ({providerSummary.ratingCount})
+              </p>
+            ) : (
+              <p className="mt-1 truncate text-sm font-semibold text-foreground">{anonymousLabel}</p>
+            )}
+            {identityRevealed && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="flex" aria-hidden="true">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star
+                        key={star}
+                        className="h-3 w-3 text-rating"
+                        fill={
+                          providerSummary.averageStars !== null && star <= Math.round(providerSummary.averageStars)
+                            ? "currentColor"
+                            : "transparent"
+                        }
+                        strokeWidth={1.75}
+                      />
+                    ))}
                   </span>
-                ) : (
-                  <span>Henüz değerlendirme yok</span>
-                )}
-              </span>
-              <span className="flex shrink-0 items-center gap-1">
-                <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
-                {providerSummary.completedJobCount} tamamlanan iş
-              </span>
-              {providerProfile && providerProfile.regions.length > 0 && (
-                <span className="flex min-w-0 items-center gap-1">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{providerProfile.regions.join(", ")}</span>
+                  {providerSummary.averageStars !== null ? (
+                    <span>
+                      {providerSummary.averageStars.toFixed(1)} ({providerSummary.ratingCount})
+                    </span>
+                  ) : (
+                    <span>Henüz değerlendirme yok</span>
+                  )}
                 </span>
-              )}
-            </div>
+                <span className="flex shrink-0 items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+                  {providerSummary.completedJobCount} tamamlanan iş
+                </span>
+                {providerProfile && providerProfile.regions.length > 0 && (
+                  <span className="flex min-w-0 items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{providerProfile.regions.join(", ")}</span>
+                  </span>
+                )}
+              </div>
+            )}
+            {!identityRevealed && offer.status === "pending" && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Firma kimliği, teklifi kabul ettiğinizde görünür olacak.
+              </p>
+            )}
           </div>
         </div>
         <div className="shrink-0">
@@ -143,7 +187,7 @@ export function IncomingOfferCard({
         </div>
       </div>
 
-      {providerProfile && providerProfile.expertise.length > 0 && (
+      {identityRevealed && providerProfile && providerProfile.expertise.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {providerProfile.expertise.map((item) => (
             <span
@@ -156,7 +200,7 @@ export function IncomingOfferCard({
         </div>
       )}
 
-      {providerProfile?.bio?.trim() && (
+      {identityRevealed && providerProfile?.bio?.trim() && (
         <p className="mt-3 line-clamp-2 break-words text-xs leading-relaxed text-muted-foreground">
           {providerProfile.bio}
         </p>
@@ -212,28 +256,7 @@ export function IncomingOfferCard({
       {(offer.status === "accepted" ||
         offer.status === "completion_requested" ||
         offer.status === "completion_disputed") && (
-        <OfferOutcomePanel
-          offer={offer}
-          session={session}
-          onCompleted={(completedOffer) => setRatingModalOffer(completedOffer)}
-        />
-      )}
-
-      {justRated && (
-        <p role="status" aria-live="polite" className="mt-4 text-sm font-medium text-success">
-          Değerlendirmeniz için teşekkür ederiz.
-        </p>
-      )}
-
-      {ratingModalOffer && (
-        <JobRatingModal
-          offer={ratingModalOffer}
-          session={session}
-          onClose={(submitted) => {
-            setRatingModalOffer(null);
-            if (submitted) setJustRated(true);
-          }}
-        />
+        <OfferOutcomePanel offer={offer} session={session} onCompleted={onCompleted} />
       )}
     </div>
   );

@@ -1,5 +1,21 @@
 // node scripts/tmp-operation-status-isolation-fix-test.mjs
 //
+// AŞAMA 5.2 İLE SÜPERSEDE EDİLDİ — bkz. scripts/tmp-operation-status-global-badge-fix-test.mjs.
+// Bu script'in belgelediği "getViewerScopedJobStatus" yaklaşımı (ilana bakan
+// HERKESTE ANA rozeti izleyenin kendi teklifine göre değiştirme) kök nedeni
+// yanlış teşhis etmişti: GLOBAL iş durumunu (herkeste aynı olması gereken)
+// İZLEYENE ÖZEL kişisel durumla karıştırıp ANA rozet olarak gösteriyordu —
+// bu da aynı ilanın farklı hesaplarda farklı ANA rozetler göstermesine yol
+// açan asıl hataydı (bkz. offers.ts#getViewerOfferStatusNote dokümantasyonu).
+// Aşama 5.2 bunu düzeltti: ANA rozet artık HER ZAMAN global/tutarlı, kişisel
+// bilgi yalnızca küçük bir İKİNCİL not. Bu script BİLEREK değiştirilmedi —
+// Aşama 5.1'in o anki (o zaman doğru sanılan) davranışının tarihsel kaydı
+// olarak kalır (bkz. CLAUDE.md "tmp-*.mjs" script konvansiyonu) — bu yüzden
+// artık aşağıdaki "Kritik izolasyon" ve rozet-metni beklentileri KASITLI
+// OLARAK geçmeyecektir; canlı regresyon kapısı olarak
+// tmp-operation-status-global-badge-fix-test.mjs kullanılmalıdır.
+//
+// --- Aşağıdaki orijinal açıklama (artık kısmen geçersiz) ---
 // Kritik kullanıcı izolasyonu düzeltmesi: OperationSiblingJobsCard,
 // OperationStatusCard (özet sayıları DAHİL) ve OperationServiceOffersCard'ın
 // durum rozetlerinin artık GÖSTEREN oturuma göre hesaplandığını, ilanın

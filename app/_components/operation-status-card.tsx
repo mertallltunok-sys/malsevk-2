@@ -1,7 +1,12 @@
 "use client";
 
-import { getOperationStatusBucketLabel, OPERATION_STATUS_BUCKET_ORDER } from "../_lib/job-requests";
-import { getViewerScopedJobStatus, getViewerScopedOperationStatusSummary } from "../_lib/offers";
+import Link from "next/link";
+import {
+  getPublicOperationStatusSummary,
+  getOperationStatusBucketLabel,
+  PUBLIC_OPERATION_STATUS_BUCKET_ORDER,
+} from "../_lib/job-requests";
+import { getOperationServiceCardStatus } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useJobsForOperation } from "../_lib/use-jobs";
 import type { Job, Offer, Session } from "../_lib/types";
@@ -17,24 +22,43 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
 }
 
 /**
- * Çoklu Hizmet Operasyonu — Aşama 4: aynı operasyondaki tüm kardeş ilanların
- * (bkz. Aşama 3'ün OperationSiblingJobsCard'ı, hemen üstünde render edilir)
- * durumunu TEK BAKIŞTA özetleyen, YALNIZCA GÖRSEL bir kart. Hiçbir ilanın/
- * teklifin durumunu değiştirmez, hiçbir toplu işlem içermez — bkz.
- * job-requests.ts#getOperationStatusSummary (tek türetme kaynağı, bu
- * bileşen ve Aşama 3 kartı aynı yardımcıları paylaşır).
+ * Çoklu Hizmet Operasyonu — bir önceki "hizmet kartlarının sadeleştirilmesi"
+ * görevi YANLIŞ uygulanmıştı: aynı veriyi (kardeş ilan listesi + durum/aksiyon)
+ * hâlâ ÜÇ AYRI kart olarak ("Bu Operasyondaki Diğer Hizmetler",
+ * "Operasyondaki Hizmetler", "Operasyon Durumu") render ediyordu — yalnızca
+ * her kartın İÇİNDEKİ satır metnini birleştirmişti, kartların KENDİLERİNİ
+ * birleştirmemişti. Bu görev kök nedeni düzeltir: artık sayfada operasyon
+ * hizmetlerinin gösterildiği TEK yer burasıdır — eski
+ * `operation-sibling-jobs-card.tsx` (OperationSiblingJobsCard) ve
+ * `operation-service-offers-card.tsx` (OperationServiceOffersCard) dosyaları
+ * SİLİNDİ; ikisinin sahip olduğu veri/durum/aksiyon/yönlendirme davranışı
+ * (aşağıdaki satır listesi) buraya taşındı.
  *
  * `currentJob.operationId` yoksa YA DA operasyondaki toplam ilan sayısı 2'den
  * azsa (yalnızca kendisi) HİÇ render edilmez — çağıran taraf
  * (job-detail-content.tsx) zaten `operationId` varlığını kontrol eder, burada
  * "en az 2 ilan" kuralı AYRICA (savunma amaçlı) uygulanır.
  *
- * Hem özet sayıları (Toplam Hizmet/Aktif/Teklif Kabul Edildi/.../İlerleme %)
- * hem hizmet listesindeki rozetler KRİTİK KULLANICI İZOLASYONU DÜZELTMESİ ile
- * `offers.ts#getViewerScopedOperationStatusSummary`/`getViewerScopedJobStatus`
- * kullanır — `session` bu yüzden artık zorunlu bir prop: gösterilen her şey
- * GÖSTEREN oturuma göre hesaplanır, ilanların GERÇEK (job-geneli) durumu
- * değil (bkz. o fonksiyonların dokümantasyonu).
+ * Özet sayıları (Toplam Hizmet/Teklife Açık/Devam Ediyor/.../İlerleme %) hâlâ
+ * `getPublicOperationStatusSummary`den (GLOBAL/job-geneli, viewer-scoping yok)
+ * gelir — bu görev bu aggregate hesaplamayı DEĞİŞTİRMEDİ.
+ *
+ * Hizmet listesindeki HER SATIR (hizmet türü + ilan başlığı + TEK durum/
+ * aksiyon alanı) tek ortak doğruluk kaynağından, `offers.ts#
+ * getOperationServiceCardStatus`den gelir — üç ayrı kartın üçünün de aynı
+ * fonksiyonu çağırdığı ÖNCEKİ (yanlış) yapı yerine artık TEK kart TEK kez
+ * hesaplıyor, paralel/tekrarlı bir mantık yok. `allowOfferAction: !isCurrent`
+ * — şu an görüntülenen ilanın kendi satırı hiçbir zaman "Teklif Ver"
+ * göstermez (o ilanın gerçek teklif formu zaten aynı sayfada, yukarıda,
+ * OfferPanel olarak görünür durumdadır) ve "Bu ilan" ibaresiyle işaretlenir.
+ *
+ * Kardeş (current olmayan) satırlar, eski OperationSiblingJobsCard'ın
+ * "keşif" amaçlı yönlendirme davranışını KORUYARAK tamamen bir `<Link
+ * href="/ilanlar/[id]">`dır — "Teklif Ver" bu linkin İÇİNDE statik bir
+ * görsel ifade (`<span>`) olarak gösterilir, ayrı/iç içe bir `<a>` OLARAK
+ * DEĞİL: satırın herhangi bir yerine tıklamak zaten aynı hedefe (o ilanın
+ * kendi sayfasındaki gerçek OfferPanel'e) götürür, bu yüzden geçersiz iç içe
+ * bağlantı oluşturulmadan mevcut teklif verme davranışı birebir korunur.
  */
 export function OperationStatusCard({
   currentJob,
@@ -49,7 +73,7 @@ export function OperationStatusCard({
 
   if (!currentJob.operationId || operationJobs.length < 2) return null;
 
-  const summary = getViewerScopedOperationStatusSummary(operationJobs, offers, session);
+  const summary = getPublicOperationStatusSummary(operationJobs, offers);
 
   return (
     <div className="rounded-card border border-border bg-surface p-6">
@@ -81,7 +105,7 @@ export function OperationStatusCard({
 
       <dl className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <SummaryStat label="Toplam Hizmet" value={summary.total} />
-        {OPERATION_STATUS_BUCKET_ORDER.map((bucket) => (
+        {PUBLIC_OPERATION_STATUS_BUCKET_ORDER.map((bucket) => (
           <SummaryStat
             key={bucket}
             label={getOperationStatusBucketLabel(bucket)}
@@ -93,14 +117,49 @@ export function OperationStatusCard({
       <ul role="list" className="mt-5 flex flex-col divide-y divide-border border-t border-border">
         {operationJobs.map((operationJob) => {
           const isCurrent = operationJob.id === currentJob.id;
-          const { label: statusLabel, tone: statusTone } = getViewerScopedJobStatus(operationJob, offers, session);
+          const status = getOperationServiceCardStatus(operationJob, offers, session, {
+            allowOfferAction: !isCurrent,
+          });
+
+          const rowContent = (
+            <>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  {getCategoryDisplayLabel(operationJob.category)}
+                </p>
+                <p className="truncate text-sm text-muted-foreground">
+                  {operationJob.title}
+                  {isCurrent && <span> (Bu ilan)</span>}
+                </p>
+              </div>
+              <div className="shrink-0">
+                {status.kind === "teklif-ver" ? (
+                  <span className="inline-flex items-center justify-center whitespace-nowrap rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground">
+                    Teklif Ver
+                  </span>
+                ) : (
+                  <StatusBadge label={status.label} tone={status.tone} />
+                )}
+              </div>
+            </>
+          );
+
+          if (isCurrent) {
+            return (
+              <li key={operationJob.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                {rowContent}
+              </li>
+            );
+          }
+
           return (
-            <li key={operationJob.id} className="flex items-center justify-between gap-3 py-2.5">
-              <span className="min-w-0 truncate text-sm text-foreground">
-                {getCategoryDisplayLabel(operationJob.category)}
-                {isCurrent && <span className="font-normal text-muted-foreground"> (Bu ilan)</span>}
-              </span>
-              <StatusBadge label={statusLabel} tone={statusTone} />
+            <li key={operationJob.id}>
+              <Link
+                href={`/ilanlar/${operationJob.id}`}
+                className="-mx-2 flex flex-wrap items-center justify-between gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                {rowContent}
+              </Link>
             </li>
           );
         })}

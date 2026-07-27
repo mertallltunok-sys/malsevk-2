@@ -22,7 +22,8 @@ export type NotificationType =
   | "tamamlanma_itiraz_edildi"
   | "itiraz_kaydedildi"
   | "is_iptal_edildi"
-  | "teklif_geri_cekildi";
+  | "teklif_geri_cekildi"
+  | "hizmet_kalemi_kaldirildi";
 
 export type AppNotification = {
   id: string;
@@ -215,6 +216,15 @@ export function getNotificationsForSession(
 
   if (session.role === "hizmet-veren") {
     const myOffers = offers.filter((offer) => offer.providerId === session.id);
+    // Bir teklifin ilanı hâlâ var mı — "rejected" durumunun İKİ farklı
+    // kök nedenini (Hizmet Alan'ın bilinçli reddi VS ilanın tamamen
+    // kaldırılması, bkz. offers.ts#deleteJobWithOffers) birbirinden
+    // ayırmak için tek kontrol noktası. Yeni bir Offer.status İCAT
+    // EDİLMEDİ — ikisi de "rejected"tir, yalnızca BİLDİRİM METNİ bu ek
+    // koşulla ayrışır (tıpkı aşağıdaki siblingClosedNotifications'ın
+    // "pending" durumunu getProviderOfferFilter ile ayrıştırması gibi,
+    // AYNI desen).
+    const jobExistsById = new Set(jobs.map((job) => job.id));
 
     const acceptedNotifications: AppNotification[] = myOffers
       .filter((offer) => offer.status === "accepted")
@@ -229,11 +239,32 @@ export function getNotificationsForSession(
       }));
 
     const rejectedNotifications: AppNotification[] = myOffers
-      .filter((offer) => offer.status === "rejected")
+      .filter((offer) => offer.status === "rejected" && jobExistsById.has(offer.jobId))
       .map((offer) => ({
         id: `offer-rejected-${offer.id}`,
         notificationType: "teklif_reddedildi",
         message: "Hizmet Alan teklifinizi kabul etmedi.",
+        ilanId: offer.jobId,
+        offerId: offer.id,
+        href: getProviderOfferNotificationHref(offer, offers),
+        createdAt: offer.updatedAt,
+      }));
+
+    // Operasyon hizmet kalemi (Job) Hizmet Alan tarafından manuel silindiğinde
+    // (bkz. offers.ts#deleteJobWithOffers) bu ilana hâlâ "pending" olan
+    // teklifler "rejected"e çevrilir ama KAYIT SİLİNMEZ — bu sayede, ilan
+    // artık `jobs` içinde bulunamadığı hâlde, buradan GERÇEK (yayından
+    // kaldırma) nedeni bildiren AYRI bir bildirim türetilebilir. Yukarıdaki
+    // genel `rejectedNotifications` bu teklifleri BİLEREK hariç tutar
+    // (`jobExistsById.has(...)` koşuluyla) — aynı teklif için iki farklı,
+    // çelişkili bildirim ASLA birlikte üretilmez.
+    const jobRemovedNotifications: AppNotification[] = myOffers
+      .filter((offer) => offer.status === "rejected" && !jobExistsById.has(offer.jobId))
+      .map((offer) => ({
+        id: `job-removed-${offer.id}`,
+        notificationType: "hizmet_kalemi_kaldirildi" as const,
+        title: "Hizmet Talebi Kaldırıldı",
+        message: "İlan sahibi ilgili hizmet talebini yayından kaldırdı.",
         ilanId: offer.jobId,
         offerId: offer.id,
         href: getProviderOfferNotificationHref(offer, offers),
@@ -349,6 +380,7 @@ export function getNotificationsForSession(
     return [
       ...acceptedNotifications,
       ...rejectedNotifications,
+      ...jobRemovedNotifications,
       ...startedNotifications,
       ...agreementFailedNotifications,
       ...siblingClosedNotifications,

@@ -15,6 +15,7 @@ function CountsTable({ title, counts }: { title: string; counts: DemoDataCounts 
     { label: "Teklifler", total: counts.totalOffers, demo: counts.demoOffers },
     { label: "Değerlendirmeler", total: counts.totalRatings, demo: counts.demoRatings },
     { label: "İlan fotoğrafları (yalnızca demo ilanlarına bağlı)", total: counts.demoPhotoCount, demo: counts.demoPhotoCount },
+    { label: "Bildirimler (türetilen, demo hesaplar için)", total: counts.demoNotificationCount, demo: counts.demoNotificationCount },
   ];
 
   return (
@@ -80,9 +81,9 @@ export function DemoDataResetPanel() {
     <div className="flex flex-col gap-6">
       <div className="rounded-card border border-warning bg-warning-soft p-4 text-sm leading-relaxed text-foreground">
         Bu sayfa yalnızca geliştirme ortamında (NODE_ENV=development) çalışır. Yalnızca aşağıdaki
-        demo hesaplarla ilişkili ilan, teklif, değerlendirme, bildirim okunma durumu ve ilan
-        fotoğrafı verilerini siler. Demo hesapların kendisi (giriş bilgileri, rol, profil) ve
-        gerçek kullanıcı verileri hiç değiştirilmez.
+        demo hesaplarla ilişkili ilan, teklif, değerlendirme, bildirim okunma/gizleme durumu, son
+        görüntülenen ilan kaydı ve ilan fotoğrafı verilerini siler. Demo hesapların kendisi (giriş
+        bilgileri, rol, profil) ve gerçek kullanıcı verileri hiç değiştirilmez.
       </div>
 
       {plan && <CountsTable title="Şu anki durum" counts={plan.before} />}
@@ -109,7 +110,9 @@ export function DemoDataResetPanel() {
             <li>{plan.offerIdsToRemove.length} teklif</li>
             <li>{plan.ratingIdsToRemove.length} değerlendirme</li>
             <li>{plan.photoStorageKeysToRemove.length} ilan fotoğrafı</li>
-            <li>{plan.demoUserIds.length} kullanıcının bildirim okunma kaydı</li>
+            <li>{plan.demoUserIds.length} kullanıcının bildirim okunma/gizleme kaydı</li>
+            <li>{plan.demoUserIds.length} kullanıcının son görüntülenen ilan kaydı</li>
+            <li>{plan.before.demoNotificationCount} türetilen bildirim (ilgili teklifler silinince kendiliğinden kalkar)</li>
           </ul>
 
           {plan.duplicateOfferPairs.length > 0 && (

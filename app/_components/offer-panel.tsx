@@ -3,7 +3,7 @@
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { isReofferCooldownStatus } from "../_lib/job-requests";
+import { isJobClosedToNewOffers, isReofferCooldownStatus } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
@@ -135,12 +135,31 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
     );
   }
 
-  // Bu ilana kabul edilmiş/devam eden bir teklif olması artık yeni teklif
-  // vermeyi engellemez — diğer Hizmet Verenler de teklif verebilir (bkz.
-  // job-requests.ts#getJobOfferAvailability). Aynı anda yalnızca TEK
-  // teklifin anlaşma sürecinin ilerleyebilmesi kuralı, Hizmet Alan'ın
-  // Kabul Et/Reddet aksiyonları üzerinde uygulanır (bkz.
-  // incoming-offer-card.tsx#isOfferPendingActionBlocked), bu ekranda değil.
+  // Bu ilana kabul edilmiş (ama işe HENÜZ başlanmamış — ön anlaşma/görüşme
+  // aşaması) bir teklif olması yeni teklif vermeyi engellemez — diğer
+  // Hizmet Verenler de teklif verebilir (bkz. job-requests.ts#isJobClosedToNewOffers,
+  // KRİTİK MİMARİ AYRIM). Aynı anda yalnızca TEK teklifin anlaşma sürecinin
+  // ilerleyebilmesi kuralı, Hizmet Alan'ın Kabul Et/Reddet aksiyonları
+  // üzerinde uygulanır (bkz. incoming-offer-card.tsx#isOfferPendingActionBlocked),
+  // bu ekranda değil.
+
+  // "TEKLİF KABULÜ VE İŞE BAŞLAMA KİLİT KURALI" DÜZELTMESİ: iş fiilen
+  // BAŞLADIĞINDA (in_progress) ya da ötesine geçtiğinde (tamamlama
+  // süreçleri/completed), bu ilan üçüncü taraflara KESİN olarak kapanır —
+  // bu kontrol önceden burada hiç yoktu, bu yüzden iş başlamış bir ilana
+  // bile sınırsızca yeni teklif verilebiliyordu.
+  if (isJobClosedToNewOffers(job.id, offers)) {
+    return (
+      <div className="rounded-card border border-border bg-background p-6">
+        <p className="text-sm font-medium text-foreground">
+          Bu ilan için bir hizmet verenle iş başlamış.
+        </p>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          Bu ilan artık yeni teklife kapalı.
+        </p>
+      </div>
+    );
+  }
 
   // Aktif iş kapasitesi dolu olduğunda ilanları/teklifleri görüntülemeye
   // devam edebilir, yalnızca YENİ teklif gönderemez — bu görsel engel,

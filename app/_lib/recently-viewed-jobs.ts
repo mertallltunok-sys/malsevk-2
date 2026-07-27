@@ -75,6 +75,22 @@ export function recordJobViewed(userId: string, jobId: string): void {
   writeIds(userId, next);
 }
 
+/**
+ * Bir kullanıcının "son görüntülenen ilanlar" kaydını tamamen temizler —
+ * yalnızca dev-only demo veri sıfırlama aracı (bkz. reset-demo-data.ts)
+ * için vardır, notification-reads.ts#clearReadNotifications ile aynı desen.
+ */
+export function clearRecentlyViewedJobs(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(storageKey(userId));
+  } catch {
+    // yok say
+  }
+  cachedKey = null;
+  for (const listener of listeners) listener();
+}
+
 export function subscribeToRecentlyViewedJobs(onStoreChange: () => void): () => void {
   listeners.add(onStoreChange);
   window.addEventListener("storage", onStoreChange);

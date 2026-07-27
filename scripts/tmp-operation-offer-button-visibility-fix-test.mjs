@@ -9,7 +9,22 @@
 // teklife açık olup olmadığından veya kapasiteden bağımsız olarak
 // gösteriliyordu. Düzeltme: buton artık `offers.ts#canProviderSubmitNewOffer`
 // (offer-panel.tsx'in gerçek teklif formu kapı bekçisiyle AYNI kaynak) ile
-// hesaplanıyor.
+// hesaplanıyor — bu KÖK NEDEN ve bu button-visibility davranışının kendisi
+// "Operasyon içindeki hizmet kartlarının sadeleştirilmesi" görevinden SONRA
+// da DEĞİŞMEDEN geçerlidir (bkz. offers.ts#getOperationServiceCardStatus,
+// `canProviderSubmitNewOffer`'ı birebir aynı şekilde çağırır).
+//
+// KISMEN SÜPERSEDE EDİLDİ — bkz. scripts/tmp-operation-status-single-card-merge-test.mjs.
+// O görev, buton GÖRÜNMEDİĞİNDE satırın sağ tarafında gösterilen metni
+// (eskiden: her zaman global "Teklife Açık" rozeti + ayrı "Teklifiniz
+// beklemede"/"Teklifiniz kabul edildi" gibi bir ikincil not; şimdi: TEK bir
+// birleşik etiket, ör. yalnızca "Teklif Bekliyor"/"Teklif Kabul Edildi")
+// kasıtlı olarak değiştirdi. Bu yüzden TEST 1 ve TEST 2'nin "Teklife Açık"
+// metnini de ayrıca bekleyen kısımları artık KASITLI OLARAK geçmeyecektir;
+// TEST 3-9 (buton görünürlüğünün kendisi, mobil taşma, OfferPanel koruması)
+// hâlâ GEÇERLİDİR ve GEÇER. Bu script BİLEREK değiştirilmedi (bkz. CLAUDE.md
+// "tmp-*.mjs" script konvansiyonu) — canlı regresyon kapısı olarak
+// tmp-operation-status-single-card-merge-test.mjs kullanılmalıdır.
 //
 // Ön koşul: `npm run dev` çalışıyor olmalı (http://localhost:3000).
 
@@ -173,17 +188,24 @@ async function main() {
     await page.goto(`${BASE_URL}/ilanlar/${jobs.main.id}`);
     await offersCard(page).waitFor({ state: "visible", timeout: 10000 });
 
+    // Aşama 5.2 (ana rozet/ikincil not ayrımı) sonrası: ana rozet artık
+    // GLOBAL durumu gösterir (bu ilanda henüz kabul edilmiş teklif yok ->
+    // "Teklife Açık"), kişisel "Teklifiniz beklemede" bilgisi KÜÇÜK bir
+    // ikincil not olarak görünür — bkz. offers.ts#getViewerOfferStatusNote.
     await assert.doesNotReject(
-      rowFor(page, jobs.pending.title).getByText("Beklemede", { exact: true }).waitFor({ state: "visible", timeout: 5000 }),
+      rowFor(page, jobs.pending.title).getByText("Teklife Açık", { exact: true }).waitFor({ state: "visible", timeout: 5000 }),
+    );
+    await assert.doesNotReject(
+      rowFor(page, jobs.pending.title).getByText("Teklifiniz beklemede", { exact: true }).waitFor({ state: "visible", timeout: 5000 }),
     );
     await assertOfferButtonHidden(page, jobs.pending.title);
-    ok("TEST 1: Kendi pending teklifi olan kullanıcı (mert) → 'Beklemede' görünür, 'Teklif Ver' görünmez");
+    ok("TEST 1: Kendi pending teklifi olan kullanıcı (mert) → ana rozet 'Teklife Açık' (global), ikincil not 'Teklifiniz beklemede', 'Teklif Ver' görünmez");
     await page.close();
   }
 
   // =====================================================================
-  // TEST 2 — Kendi accepted teklifi olan kullanıcı: "Teklifiniz Kabul
-  // Edildi" görünür, "Teklif Ver" görünmez.
+  // TEST 2 — Kendi accepted teklifi olan kullanıcı: "Teklifiniz kabul
+  // edildi" görünür, "Teklif Ver" görünmez (kendi teklifi zaten var).
   // =====================================================================
   {
     const page = await sharedContext.newPage();
@@ -191,11 +213,18 @@ async function main() {
     await page.goto(`${BASE_URL}/ilanlar/${jobs.main.id}`);
     await offersCard(page).waitFor({ state: "visible", timeout: 10000 });
 
+    // "Teklif Kabulü ve İşe Başlama Kilit Kuralı" düzeltmesi: "accepted"
+    // (işe henüz başlanmamış) TEK BAŞINA ilanı kapatmaz — ana rozet GLOBAL
+    // olarak hâlâ "Teklife Açık" (herkes için aynı), kişisel "Teklifiniz
+    // kabul edildi" bilgisi yalnızca ikincil not olarak görünür.
     await assert.doesNotReject(
-      rowFor(page, jobs.accepted.title).getByText("Teklifiniz Kabul Edildi", { exact: true }).waitFor({ state: "visible", timeout: 5000 }),
+      rowFor(page, jobs.accepted.title).getByText("Teklife Açık", { exact: true }).waitFor({ state: "visible", timeout: 5000 }),
+    );
+    await assert.doesNotReject(
+      rowFor(page, jobs.accepted.title).getByText("Teklifiniz kabul edildi", { exact: true }).waitFor({ state: "visible", timeout: 5000 }),
     );
     await assertOfferButtonHidden(page, jobs.accepted.title);
-    ok("TEST 2: Kendi accepted teklifi olan kullanıcı (mert) → 'Teklifiniz Kabul Edildi' görünür, 'Teklif Ver' görünmez");
+    ok("TEST 2: Kendi accepted teklifi olan kullanıcı (mert) → ana rozet 'Teklife Açık' (global, accepted ilanı kapatmaz), ikincil not 'Teklifiniz kabul edildi', 'Teklif Ver' görünmez (kendi teklifi zaten var)");
     await page.close();
   }
 

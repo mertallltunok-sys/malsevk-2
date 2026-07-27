@@ -1,9 +1,16 @@
 /**
  * Yalnızca demo/seed hesaplara (bkz. users.ts#DEV_ACCOUNT_EMAILS) ait
- * işlem verilerini (ilan, teklif, değerlendirme/rating, bildirim okunma
- * durumu, ilan fotoğrafları) temizleyen, dev-only bir yardımcı modül. Demo
- * hesap kayıtlarının kendisine (kullanıcı/giriş bilgileri, ProviderProfile)
- * HİÇ dokunmaz.
+ * işlem verilerini (ilan, teklif, değerlendirme/rating, bildirim okunma/
+ * gizleme durumu, son görüntülenen ilan kaydı, ilan fotoğrafları) temizleyen,
+ * dev-only bir yardımcı modül. Demo hesap kayıtlarının kendisine (kullanıcı/
+ * giriş bilgileri, ProviderProfile) HİÇ dokunmaz. Operasyon kaydı diye ayrı
+ * bir tablo yoktur (bkz. types.ts#Job.operationId — yalnızca bir Job alanı);
+ * bir operasyonun TÜM servisleri aynı demo hesabın `requesterId`siyle
+ * oluşturulduğu için ilan temizliği bunları da kendiliğinden kapsar.
+ * Bildirimler de ayrı bir tabloda tutulmaz (bkz. notifications.ts — Job/
+ * Offer'dan CANLI türetilir); ilgili iş/teklif kayıtları silindiğinde
+ * otomatik olarak ortadan kalkarlar — `DemoDataCounts#demoNotificationCount`
+ * yalnızca RAPORLAMA için gerçek türetme fonksiyonunu çalıştırır.
  *
  * İki kullanım şekli vardır:
  *  1. Manuel, tekrar tekrar çalıştırılabilir: `planDemoDataReset()` +
@@ -18,10 +25,13 @@
  * (yani gerçek seed kaynağı users.ts'ten) yapılır.
  */
 import { getAllUserCreatedJobs, removeUserCreatedJobsByIds } from "./job-store";
+import { getJobs as getSeedJobs } from "./jobs";
 import { getAllOffers, removeOffersByIds } from "./offers";
 import { getAllRatings, removeRatingsByIds } from "./ratings";
 import { clearDismissedNotifications } from "./notification-dismissals";
+import { getNotificationsForSession } from "./notifications";
 import { clearReadNotifications } from "./notification-reads";
+import { clearRecentlyViewedJobs } from "./recently-viewed-jobs";
 import { DEV_ACCOUNT_EMAILS, findUserByEmail, getAllUsers } from "./users";
 import type { Offer } from "./types";
 
@@ -35,6 +45,16 @@ export type DemoDataCounts = {
   totalRatings: number;
   demoRatings: number;
   demoPhotoCount: number;
+  /**
+   * Bildirimler ayrı bir tabloda tutulmaz (bkz. notifications.ts — Job/Offer'dan
+   * CANLI türetilir) — bu, "silinecek bir bildirim kaydı" değil, demo
+   * hesapların ŞU AN görebileceği türetilmiş bildirim sayısıdır
+   * (`notifications.ts#getNotificationsForSession`, her demo hesap için
+   * gerçek fonksiyon çalıştırılıp toplanır). İlgili iş/teklif kayıtları
+   * silindiğinde bu sayı otomatik olarak 0'a düşer — ayrı bir "bildirim
+   * silme" adımına gerek yoktur.
+   */
+  demoNotificationCount: number;
 };
 
 export type DuplicateOfferPair = {
@@ -87,6 +107,21 @@ function computeCounts(demoUserIdSet: Set<string>): DemoDataCounts {
     .filter((job) => demoJobIdSet.has(job.id))
     .reduce((sum, job) => sum + job.photos.length, 0);
 
+  // Yalnızca RAPORLAMA amaçlı — hiçbir veriyi değiştirmez. Statik örnek
+  // ilanlar da (jobs.ts#getJobs, requesterId: null) dahil edilir, çünkü
+  // getNotificationsForSession bir Hizmet Veren'in TÜM ilgili ilan
+  // başlıklarını çözebilmek için tam ilan listesine ihtiyaç duyar.
+  const allJobsIncludingSeed = jobs.concat(getSeedJobs());
+  const demoNotificationCount = users
+    .filter((user) => demoUserIdSet.has(user.id))
+    .reduce(
+      (sum, user) =>
+        sum +
+        getNotificationsForSession({ id: user.id, name: user.name, role: user.role }, allJobsIncludingSeed, offers)
+          .length,
+      0,
+    );
+
   return {
     totalUsers: users.length,
     demoUsers: users.filter((user) => demoUserIdSet.has(user.id)).length,
@@ -97,6 +132,7 @@ function computeCounts(demoUserIdSet: Set<string>): DemoDataCounts {
     totalRatings: ratings.length,
     demoRatings,
     demoPhotoCount,
+    demoNotificationCount,
   };
 }
 
@@ -190,6 +226,7 @@ export async function executeDemoDataReset(plan: DemoDataPlan): Promise<DemoData
   for (const userId of plan.demoUserIds) {
     clearReadNotifications(userId);
     clearDismissedNotifications(userId);
+    clearRecentlyViewedJobs(userId);
   }
 
   const demoUserIdSet = new Set(plan.demoUserIds);
@@ -215,12 +252,19 @@ const DEMO_DATA_RESET_MIGRATION_KEY = "malsevk.demo_data_reset_version";
  * teklifler sekmesi, bildirim yönlendirmeleri vb.) sırasında demo
  * hesaplara ait yeni ilan/teklif/rating verisi birikmiş olabilir; version
  * bump bunları da bir kerelik yakalar.
+ *
+ * v4 -> v5: `executeDemoDataReset` artık `clearRecentlyViewedJobs`i de
+ * çağırıyor ("son görüntülenen ilanlar" — recently-viewed-jobs.ts —
+ * önceden hiç temizlenmiyordu, silinen demo ilanlarına işaret eden yetim
+ * id'ler kalabiliyordu). v4'ü zaten tamamlamış bir tarayıcıda bu eski
+ * kayıtlar hâlâ durabilir; version bump bunları bir kerelik temizler.
  */
-const DEMO_DATA_RESET_VERSION = "demo-data-reset-v4";
+const DEMO_DATA_RESET_VERSION = "demo-data-reset-v5";
 
 /**
- * Demo hesaplara ait eski ilan/teklif/değerlendirme/bildirim-okunma/fotoğraf
- * verilerini OTOMATİK ama yalnızca BİR KEZ (bu tarayıcıda, bu versiyon için) temizler.
+ * Demo hesaplara ait eski ilan/teklif/değerlendirme/bildirim-okunma-gizleme/
+ * son-görüntülenen/fotoğraf verilerini OTOMATİK ama yalnızca BİR KEZ (bu
+ * tarayıcıda, bu versiyon için) temizler.
  * `DEMO_DATA_RESET_MIGRATION_KEY` altında saklanan bayrak
  * `DEMO_DATA_RESET_VERSION`'a eşitse hiçbir şey yapmadan hemen döner —
  * "uygulama her açıldığında temizlenir" DEĞİLDİR, tek seferlik bir geçiştir.

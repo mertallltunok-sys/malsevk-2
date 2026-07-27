@@ -1,4 +1,4 @@
-import { getJobStatusLabel, getJobStatusTone, isJobOpenForOffers } from "./jobs";
+import { isJobOpenForOffers } from "./jobs";
 import type { Job, Offer, OfferStatus, Session } from "./types";
 
 export type JobRequestFilter = "aktif" | "kabul-edildi" | "devam-eden" | "tamamlandi";
@@ -123,6 +123,135 @@ export function isOfferVisibleInNormalLists(offer: Offer): boolean {
   return offer.status !== "withdrawn";
 }
 
+/**
+ * "Gelen Teklifler" panelinde AYNI ilana (şablona) ait tekliflerin gösterim
+ * ÖNCELİK sırası — TEK ortak doğruluk kaynağı, `sortIncomingOffersForDisplay`
+ * dışında hiçbir yerde tekrar yazılmaz. Düşük sayı = daha yüksek öncelik
+ * (daha üstte). Sıra kasıtlı olarak şu iş anlamını izler: teklif hâlâ bir
+ * karar/aksiyon bekliyorsa (pending/accepted/in_progress/tamamlanma süreci)
+ * en üstte; sonuçlanmış ama BAŞARIYLA bittiyse (completed) ondan sonra;
+ * sonuçsuz/olumsuz kapananlar (agreement_failed/cancelled) daha da altta;
+ * "rejected" HER ZAMAN en alt sırada — Hizmet Alan onu zaten daha en
+ * başında reddettiği için tekrar dikkat çekmesine gerek yoktur. "withdrawn"
+ * bu fonksiyona pratikte hiç ulaşmaz (bkz. `sortIncomingOffersForDisplay`
+ * çağıranı, `isOfferVisibleInNormalLists` ile önceden elenir) — yalnızca
+ * `OfferStatus` union'ının tamamını kapsayan bir switch yazabilmek için en
+ * düşük önceliğe atanır.
+ *
+ * "completion_requested" ve "completion_disputed" BİLEREK AYNI ("Tamamlanma
+ * Süreci") ağırlığı paylaşır — ikisi de iş fiilen bitmiş ama iki tarafça da
+ * henüz kapatılmamış aynı ara aşamayı temsil eder (bkz.
+ * IN_PROGRESS_OFFER_STATUSES); aralarında ayrıca bir öncelik farkı YOKTUR,
+ * kendi aralarındaki sıra (eşit ağırlıkta) her zamanki gibi recency'den gelir.
+ */
+function incomingOfferSortWeight(status: OfferStatus): number {
+  switch (status) {
+    case "pending":
+      return 0;
+    case "accepted":
+      return 1;
+    case "in_progress":
+      return 2;
+    case "completion_requested":
+    case "completion_disputed":
+      return 3;
+    case "completed":
+      return 4;
+    case "agreement_failed":
+    case "cancelled":
+      return 5;
+    case "rejected":
+      return 6;
+    case "withdrawn":
+      return 7;
+  }
+}
+
+/**
+ * "Gelen Teklifler" panelinin (incoming-offers-panel.tsx) gösterim sırası —
+ * TEK ortak doğruluk kaynağı. AYNI ilana (şablona) ait teklifler arasında
+ * `incomingOfferSortWeight` (yukarıda) tanımlı yedi kademeli iş-öncelik
+ * sırasını uygular (Beklemede -> Kabul Edildi -> İşe Başlandı/Devam Eden ->
+ * Tamamlanma Süreci -> Tamamlandı -> Anlaşma Sağlanamadı/İptal -> Reddedildi);
+ * AYNI ağırlık kademesindeki teklifler arasında (ör. iki "pending") sıra
+ * recency'dir (en yeni ilk, `offer.createdAt`). Bu, salt bir GÖRÜNTÜLEME
+ * sıralamasıdır — hiçbir Offer.status'u, bildirim/aksiyon kuralını ya da
+ * `getProviderOfferFilter`/`isOfferPendingActionBlocked` gibi iş mantığını
+ * DEĞİŞTİRMEZ; yalnızca aynı şablon (jobId) içindeki kartların DİZİLİŞİNİ
+ * belirler. Farklı bir ilana (jobId) ait teklifleri BAŞKA bir ilanın
+ * tekliflerinin arasına TAŞIMAZ — bkz. aşağıdaki slot-yeniden-yerleştirme
+ * algoritması.
+ *
+ * DETERMİNİSTİK SLOT-YENİDEN-YERLEŞTİRME algoritması kullanılır — bir
+ * karşılaştırıcının farklı-ilan çiftleri için `0` döndürüp sıralama
+ * motorunun kararlılığına (stability) güvenmesi BİLEREK TERCİH EDİLMEDİ:
+ * `jobId` farklıyken `0` dönen bir karşılaştırıcı geçişsiz (non-transitive)
+ * bir "eşitlik" tanımlar: A ile B farklı ilandan olduğu için eşit, B ile C
+ * de farklı ilandan olduğu için eşit sayılsa bile, A ile C AYNI ilandan
+ * olup farklı ağırlıkta olabilir — iki farklı ilanın teklifleri temel
+ * dizide iç içe geçtiğinde bu çelişki motor/algoritma-bağımlı,
+ * spesifikasyonun GARANTİ ETMEDİĞİ bir sonuca yol açabilir. Bunun yerine:
+ *   1. Temel sıra (`byRecency`) yalnızca `createdAt`e göre kurulur.
+ *   2. Her `jobId` için, o ilana ait tekliflerin `byRecency` İÇİNDEKİ
+ *      SABİT konumları (index'leri) çıkarılır.
+ *   3. Yalnızca o konumlardaki teklifler kendi aralarında (yalnızca
+ *      `status` ağırlığına göre, tek tip/homojen bir alt grup — burada
+ *      farklı-ilan karşılaştırması hiç YOK) yeniden sıralanır.
+ *   4. Sonuç, tam olarak aynı konumlara geri yerleştirilir.
+ * Böylece farklı bir ilana ait bir teklifin nihai konumu bu fonksiyon
+ * tarafından ASLA değiştirilmez (kendi orijinal slotunda kalır) — "farklı
+ * ilanların tekliflerini karıştırmama" kuralı motor davranışından bağımsız,
+ * yapısal olarak garanti edilir. AYNI ağırlıktaki teklifler (ör. iki
+ * "pending" ya da bir "completion_requested" + bir "completion_disputed")
+ * arasında karşılaştırıcı `0` döner — bu durumda sıralarını `Array.
+ * prototype.sort`ın (ES2019+ itibarıyla garantili) STABİLİTESİ korur; bu
+ * subgroup zaten recency sırasında kurulduğu için (bkz. adım 1-2) sonuç
+ * yine doğru recency sırasıdır. FARKLI ağırlıktaki bir çift için ise
+ * karşılaştırıcı hiçbir zaman `0` dönmez, doğrudan ağırlık farkına göre
+ * iyi-tanımlı bir sıra üretir.
+ *
+ * Teklif durumu geçiş kurallarına (`isOfferPendingActionBlocked`/
+ * `isJobClosedToNewOffers`) ya da orijinal `offers` dizisine dokunmaz —
+ * çağıranın verdiği diziyi kopyalar, salt görünüm katmanı için YENİ bir
+ * dizi döndürür.
+ */
+export function sortIncomingOffersForDisplay(offers: Offer[]): Offer[] {
+  const byRecency = [...offers].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  const positionsByJobId = new Map<string, number[]>();
+  byRecency.forEach((offer, index) => {
+    const positions = positionsByJobId.get(offer.jobId);
+    if (positions) positions.push(index);
+    else positionsByJobId.set(offer.jobId, [index]);
+  });
+
+  const result = [...byRecency];
+  for (const positions of positionsByJobId.values()) {
+    // Tek teklifli bir ilan zaten "kendi içinde en altta" (tek başına) —
+    // yeniden sıralamaya gerek yok, konumu da başka bir ilanla asla
+    // paylaşılmıyor.
+    if (positions.length < 2) continue;
+
+    // `positions` artan sırada olduğu için (forEach index sırasıyla
+    // dolduruldu) bu alt dizi zaten kendi içinde recency sırasındadır —
+    // aşağıdaki sıralama SADECE status ağırlığına bakar, eşitlik
+    // durumunda (aynı ağırlık) `Array.prototype.sort`'un stabilitesi bu
+    // mevcut recency sırasını korur. Burada FARKLI bir ilana ait hiçbir
+    // teklif yok — karşılaştırıcı iki farklı statüsün aynı ağırlığa denk
+    // geldiği durumlar dışında hiçbir zaman `0` dönmez, dolayısıyla
+    // motor/algoritma davranışına bağlı bir belirsizlik oluşmaz.
+    const subgroup = positions.map((index) => byRecency[index]);
+    const reordered = [...subgroup].sort(
+      (a, b) => incomingOfferSortWeight(a.status) - incomingOfferSortWeight(b.status),
+    );
+    positions.forEach((index, i) => {
+      result[index] = reordered[i];
+    });
+  }
+
+  return result;
+}
+
 /** "completion_requested" durumundaki bir teklifin, Hizmet Alan hiç işlem yapmazsa kaç gün sonra otomatik "completed" olacağı. */
 export const COMPLETION_AUTO_APPROVE_DAYS = 7;
 
@@ -180,6 +309,31 @@ export function canViewJobAddress(session: Session | null, job: Job, offers: Off
 }
 
 /**
+ * Firma kimliği görünürlüğü — bir Hizmet Veren'in kurumsal kimliğinin (logo/
+ * firma adı/ortalama puan/değerlendirme sayısı/tamamlanan iş sayısı/
+ * uzmanlık alanları/tanıtım yazısı/bölge — bkz. incoming-offer-card.tsx)
+ * "Gelen Teklifler" ekranında ilan sahibine gösterilip gösterilmeyeceği.
+ * AMAÇ: platform dışına çıkışı engellemek ve teklif değerlendirmesinin
+ * "beklemede" aşamasında tamamen fiyat/süre/açıklama üzerinden yapılmasını
+ * sağlamak — kimlik, taraflar fiilen eşleşmeden (teklif kabul edilip iş
+ * süreci başlamadan) önce hiçbir biçimde açılmaz.
+ *
+ * contact-access.ts#getRevealedContactForOffer ile BİREBİR AYNI zamanlamayı
+ * (ENGAGED_OFFER_STATUSES) kullanır — kimlik ve iletişim bilgisi her zaman
+ * birlikte açılır/kapanır, tek bir "eşleşme" kavramının iki farklı alan
+ * kümesi üzerindeki yansımasıdır. Yine de o dosyaya taşınmaz (o dosya
+ * yalnızca ham telefon/e-posta içindir, bkz. CLAUDE.md) — canViewJobAddress
+ * ile aynı "paralel kapı" deseni. "pending"/"rejected"/"agreement_failed"/
+ * "cancelled" (ve Gelen Teklifler'de zaten hiç görünmeyen "withdrawn"/
+ * "completed") için bilerek false döner: bir teklif reddedilse/anlaşma
+ * sağlanamasa/iptalle sonuçlansa bile kimlik bir daha asla (geriye dönük
+ * olarak da) açılmaz.
+ */
+export function isOfferProviderIdentityRevealed(offer: Offer): boolean {
+  return ENGAGED_OFFER_STATUSES.includes(offer.status);
+}
+
+/**
  * Bir ilanın tamamlanmış (bkz. COMPLETED_OFFER_STATUSES) tekli teklifini
  * döndürür — `getEngagedOfferForJob`'ın "completed" karşılığı. Puanlama
  * ekranının (Hizmet Taleplerim > Tamamlanan) ilgili teklifi bulması için
@@ -202,6 +356,28 @@ export function getCompletedOfferForJob(jobId: string, offers: Offer[]): Offer |
  */
 export function getSettledOfferForJob(jobId: string, offers: Offer[]): Offer | null {
   return getEngagedOfferForJob(jobId, offers) ?? getCompletedOfferForJob(jobId, offers);
+}
+
+/**
+ * KRİTİK MİMARİ AYRIM (bkz. offers.ts#canProviderSubmitNewOffer/createOffer
+ * dokümantasyonu — "Teklif Kabulü ve İşe Başlama Kilit Kuralı" düzeltmesi):
+ * bir ilanın YENİ (başka bir Hizmet Veren'den) teklif alıp alamayacağının TEK
+ * ortak doğruluk kaynağı. `getSettledOfferForJob`'ı (üstteki) tekrar yazmaz,
+ * üzerine TEK bir ek koşulla inşa eder: settled teklif yalnızca "accepted"
+ * ise (kabul edildi ama işe HENÜZ başlanmadı — ön anlaşma/görüşme aşaması)
+ * BİLEREK false döner — "accepted" durumu, tek başına, ilanı yeni tekliflere
+ * KAPATMAZ; ilan yalnızca settled teklif "accepted"ın ÖTESİNE geçtiğinde
+ * (in_progress/completion_requested/completion_disputed/completed) kesin
+ * olarak kapanır. Bu, `isOfferClosedByJobProgress`'in (aşağıda, "pending"
+ * kardeş tekliflerin ne zaman "Başka hizmet verenle anlaşıldı" olarak
+ * kapandığını belirleyen fonksiyon) kullandığı AYNI eşiktir — iki fonksiyon
+ * kasıtlı olarak aynı "iş fiilen başladı mı" sınırını paylaşır, sadece biri
+ * (bu fonksiyon) YENİ teklif verilebilirliğine, diğeri MEVCUT bekleyen bir
+ * teklifin artık anlamlı olup olmadığına bakar.
+ */
+export function isJobClosedToNewOffers(jobId: string, offers: Offer[]): boolean {
+  const settled = getSettledOfferForJob(jobId, offers);
+  return settled !== null && settled.status !== "accepted";
 }
 
 /** incoming-offer-card.tsx (buton yerine gösterilir) ve offers.ts#updateOfferStatus (veri katmanı hata mesajı) AYNI metni paylaşır. */
@@ -256,24 +432,26 @@ export type JobOfferAvailability = "acik" | "kapali" | "tamamlandi" | "iptal";
  * değiştirilmedi; bu, yalnızca "yeni teklif verilebilir mi" sorusuna
  * odaklanan ayrı (ama tutarlı) bir etiketleme katmanıdır.
  *
- * Bir ilana kabul edilmiş/devam eden bir teklif olması (bkz.
- * jobHasAcceptedOffer/ENGAGED_OFFER_STATUSES) BİLEREK burada "kapali"
- * üretmez — bu ilan, "yayinda" kaldığı sürece daima "acik" döner. Aynı anda
- * yalnızca TEK bir teklifin anlaşma sürecinin ilerleyebilmesi kuralı
- * (Hizmet Alan'ın Kabul Et/Reddet aksiyonları) artık ilanın kendisini
- * kapatarak değil, yalnızca o aksiyonların üzerinde uygulanır — bkz.
- * isOfferPendingActionBlocked (incoming-offer-card.tsx,
- * offers.ts#updateOfferStatus). `offers` parametresi imza uyumluluğu için
- * korunur (çağıranlar değişmedi) ama bu fonksiyonun gövdesinde artık
- * kullanılmaz. "kapali" değeri hâlâ `JobOfferAvailability` tipinde ve
- * getJobAvailabilityForProvider'da (aşağıda) bir dal olarak durur — o dal
- * bugünkü akışta bu fonksiyon tarafından hiç tetiklenmez, ama tip/etiket
- * altyapısını bozmamak için kaldırılmadı.
+ * "Teklif Kabulü ve İşe Başlama Kilit Kuralı" DÜZELTMESİ: bu fonksiyon
+ * eskiden `offers` parametresini hiç kullanmadan her zaman "acik" (ya da
+ * job.status'a göre tamamlandi/iptal) döndürüyordu — kabul edilmiş
+ * (accepted) BİR teklif kasıtlı olarak "kapali" üretmiyordu, ki bu hâlâ
+ * DOĞRU (bkz. KRİTİK MİMARİ AYRIM: accepted = ön anlaşma/görüşme aşaması,
+ * ilan hâlâ teklife açık, bkz. isJobClosedToNewOffers). AMA aynı kural
+ * yanlışlıkla in_progress/tamamlama süreçleri/completed durumları için de
+ * uygulanıyordu — "iş fiilen başladıktan sonra da ilan asla kapanmıyor"
+ * anlamına geliyordu, ki bu YANLIŞTIR (bkz. offers.ts#canProviderSubmitNewOffer/
+ * createOffer'daki AYNI düzeltme). Artık `isJobClosedToNewOffers`'a (üstte)
+ * devrediyor: iş fiilen başladığında (in_progress) ya da ötesinde
+ * (tamamlama süreçleri/completed) "kapali" döner. "kapali" değeri
+ * `getJobAvailabilityForProvider`'ın (aşağıda) zaten var olan
+ * "is-devam-ediyor" dalını da bu değişiklikle CANLANDIRIR — o kod hiç
+ * değiştirilmedi, yalnızca artık gerçekten tetiklenebiliyor.
  */
 export function getJobOfferAvailability(job: Job, offers: Offer[]): JobOfferAvailability {
   if (job.status === "tamamlandi") return "tamamlandi";
   if (job.status === "iptal") return "iptal";
-  return "acik";
+  return isJobClosedToNewOffers(job.id, offers) ? "kapali" : "acik";
 }
 
 export function getJobOfferAvailabilityLabel(availability: JobOfferAvailability): string {
@@ -305,11 +483,11 @@ export function getJobOfferAvailabilityTone(
 }
 
 /**
- * Bir ilanın şu anda yeni bir teklifi kabul edip edemeyeceğinin tek,
- * birleşik kontrolü. Kabul edilmiş/devam eden bir teklifin varlığı BİLEREK
- * artık bunu false yapmaz (bkz. getJobOfferAvailability) — yalnızca ilanın
- * kendi durumu (job.status) belirleyicidir. `offers` parametresi imza
- * uyumluluğu için korunur, gövdede kullanılmaz.
+ * KULLANILMIYOR (hiçbir çağıranı yok) — yalnızca `job.status`a bakar,
+ * offer-seviyesi kapanmayı (bkz. `isJobClosedToNewOffers`, gerçek teklif
+ * verilebilirlik kontrolünün artık TEK doğruluk kaynağı —
+ * offers.ts#canProviderSubmitNewOffer/createOffer) YANSITMAZ. `offers`
+ * parametresi imza uyumluluğu için korunur, gövdede kullanılmaz.
  */
 export function isJobAcceptingNewOffers(job: Job, offers: Offer[]): boolean {
   return isJobOpenForOffers(job.status);
@@ -411,10 +589,7 @@ export function getJobRequestFilterTone(
  * o fonksiyonun `null` döndüğü TEK durumu ("iptal" — bkz. getJobRequestFilter
  * içindeki `if (job.status !== "yayinda") return null` dalı, ki bu yalnızca
  * job.status "iptal" olduğunda tetiklenir çünkü "tamamlandi" zaten yukarıda
- * ayrıca ele alınır) için `"iptal"` fallback bucket'ı ekler. Aşama 3'ün
- * karde ilan kartı (operation-sibling-jobs-card.tsx) da AYNI bu üç
- * fonksiyonu kullanır — durum türetme mantığı iki bileşende ayrı ayrı
- * kopyalanmaz (bkz. CLAUDE.md "Bileşen mimarisi" notu, Aşama 4 raporu).
+ * ayrıca ele alınır) için `"iptal"` fallback bucket'ı ekler.
  */
 export type OperationStatusBucket = JobRequestFilter | "iptal";
 
@@ -432,16 +607,36 @@ export function getOperationStatusBucket(job: Job, offers: Offer[]): OperationSt
   return getJobRequestFilter(job, offers) ?? "iptal";
 }
 
-/** `getOperationStatusBucket` sonucunun görünen etiketi — sabit metin YAZILMAZ, mevcut `getJobRequestFilterLabel`/`getJobStatusLabel` yardımcılarına devredilir. */
+/**
+ * `getOperationStatusBucket` sonucunun görünen etiketi. Aşama 5.2 KRİTİK ANA
+ * ROZET DÜZELTMESİ: eskiden `getJobRequestFilterLabel`e devrediliyordu — ama
+ * o fonksiyon Hizmet Alan'ın "Hizmet Taleplerim" sekmelerine ait metin
+ * döndürür ("Aktif", "Teklif Kabul Edildi"). Bu fonksiyon artık kendi, kimin
+ * teklifi olduğunu ima etmeyen sözlüğünü kullanır: "Teklife Açık" (aktif),
+ * "Hizmet Veren Seçildi" (kabul-edildi — kimin seçildiğini SÖYLEMEZ, yalnızca
+ * birinin seçildiğini), "Devam Ediyor", "Tamamlandı", "İptal Edildi".
+ *
+ * BUGÜNKÜ TEK KULLANIM YERİ: operation-status-card.tsx'in aggregate özet
+ * kutucukları (Toplam Hizmet/Teklife Açık/Devam Ediyor/.../İlerleme %) —
+ * hizmet listesindeki HER SATIRIN kendi durumu ("Operasyon içindeki hizmet
+ * kartlarının sadeleştirilmesi" görevi) artık bunun yerine
+ * `offers.ts#getOperationServiceCardStatus`i kullanır (izleyiciye özel "Teklif
+ * Ver"/"Teklif Bekliyor"/"Teklif Kabul Edildi" vb. TEK durum alanı için) —
+ * bkz. o fonksiyonun dokümantasyonu.
+ */
 export function getOperationStatusBucketLabel(bucket: OperationStatusBucket): string {
-  return bucket === "iptal" ? getJobStatusLabel("iptal") : getJobRequestFilterLabel(bucket);
-}
-
-/** `getOperationStatusBucket` sonucunun rozet tonu — aynı şekilde mevcut `getJobRequestFilterTone`/`getJobStatusTone`'a devredilir. */
-export function getOperationStatusBucketTone(
-  bucket: OperationStatusBucket,
-): "success" | "warning" | "neutral" | "danger" {
-  return bucket === "iptal" ? getJobStatusTone("iptal") : getJobRequestFilterTone(bucket);
+  switch (bucket) {
+    case "aktif":
+      return "Teklife Açık";
+    case "kabul-edildi":
+      return "Hizmet Veren Seçildi";
+    case "devam-eden":
+      return "Devam Ediyor";
+    case "tamamlandi":
+      return "Tamamlandı";
+    case "iptal":
+      return "İptal Edildi";
+  }
 }
 
 export type OperationStatusSummary = {
@@ -453,14 +648,12 @@ export type OperationStatusSummary = {
 };
 
 /**
- * `getOperationStatusSummary` (aşağıda, gerçek/job-geneli bucket'larla) VE
- * `offers.ts#getViewerScopedOperationStatusSummary`nin (izleyen oturuma göre
- * GÜVENLİ bucket'larla — bkz. o dosyadaki kritik izolasyon düzeltmesi notu)
+ * `getOperationStatusSummary` (gerçek/job-geneli bucket'larla) VE
+ * `getPublicOperationStatusSummary`nin (aşağıda — operasyon kartlarının ANA
+ * rozeti için birleştirilmiş bucket'larla, bkz. getPublicOperationStatusBucket)
  * PAYLAŞTIĞI TEK toplama mantığı — ikisi de aynı toplam/tamamlanan/ilerleme
  * hesabını (bkz. gövde) tekrar yazmasın diye buraya çıkarıldı. `getBucket`
- * her ilan için hangi bucket'a sayılacağını belirler; çağıran bunu ya
- * (job, offers) üzerinden GERÇEK duruma ya da izleyene göre KISITLANMIŞ bir
- * duruma göre sağlar.
+ * her ilan için hangi bucket'a sayılacağını belirler.
  */
 export function accumulateOperationStatusCounts(
   jobs: Job[],
@@ -489,21 +682,64 @@ export function accumulateOperationStatusCounts(
  * Bir operasyona (aynı `operationId`yi paylaşan ilanlar) ait, YALNIZCA
  * GÖRSEL bir özet üretir — hiçbir Job/Offer kaydını değiştirmez, hiçbir yeni
  * kalıcı alan okumaz/yazmaz; girdi olarak zaten canlı store'lardan okunan
- * `jobs`/`offers` dizilerini alır (bkz. operation-status-card.tsx). İlerleme
- * yüzdesi YALNIZCA tamamlanan ilan sayısına göre hesaplanır (görev
- * gereksinimi): `completedCount / total * 100`, tam sayıya yuvarlanır, 0-100
- * arasına sınırlandırılır; `total === 0` ise güvenli şekilde 0 döner (pratikte
- * bu fonksiyon en az 2 elemanlı bir operasyon için çağrılır, ama sıfır ilanlı
- * çağrıda da çökmez).
+ * `jobs`/`offers` dizilerini alır. İlerleme yüzdesi YALNIZCA tamamlanan ilan
+ * sayısına göre hesaplanır (görev gereksinimi): `completedCount / total *
+ * 100`, tam sayıya yuvarlanır, 0-100 arasına sınırlandırılır; `total === 0`
+ * ise güvenli şekilde 0 döner (pratikte bu fonksiyon en az 2 elemanlı bir
+ * operasyon için çağrılır, ama sıfır ilanlı çağrıda da çökmez).
  *
- * UYARI: bu, ilanın GERÇEK (job-geneli) durumunu döndürür — yalnızca ilan
- * sahibinin görmesi güvenlidir. Bir Hizmet Veren'e (ya da ilanın sahibi
- * olmayan başka bir kullanıcıya) gösterilecek bir rozet/özet için bunun
- * yerine `offers.ts#getViewerScopedOperationStatusSummary` kullanılmalıdır
- * (bkz. o fonksiyonun dokümantasyonu — kritik kullanıcı izolasyonu düzeltmesi).
+ * Bu, ilanın GERÇEK (job-geneli, "kabul-edildi"yi ayrı sayan) bucket'larını
+ * kullanır — `offers.ts#getOperationServiceCardStatus`'un ilan sahibi koluna
+ * (kabul edilmiş ama işe başlanmamış bir hizmeti fark etmesi için) ve
+ * `job-listing-row.ts#buildOperationListingItem`e (yalnızca total/completedCount
+ * okur, kabul-edildi sayısını hiç kullanmaz) hizmet eder. Operasyon
+ * kartlarının (operation-status-card.tsx) ANA rozeti/özet kutucukları için
+ * bunun yerine `getPublicOperationStatusSummary` (aşağıda) kullanılmalıdır —
+ * bkz. o fonksiyonun dokümantasyonu.
  */
 export function getOperationStatusSummary(jobs: Job[], offers: Offer[]): OperationStatusSummary {
   return accumulateOperationStatusCounts(jobs, (job) => getOperationStatusBucket(job, offers));
+}
+
+/**
+ * `getOperationStatusBucket`'ın, operasyon kartlarının aggregate özet
+ * kutucukları (operation-status-card.tsx, `getPublicOperationStatusSummary`
+ * üzerinden) için BİRLEŞTİRİLMİŞ hâli — "Teklif Kabulü ve İşe Başlama Kilit
+ * Kuralı" düzeltmesi. `getOperationStatusBucket`'ın KENDİSİ değiştirilmez
+ * (`offers.ts#getOperationServiceCardStatus`'un ilan sahibi koluna hâlâ
+ * ORİJİNAL, birleştirilmemiş bucket'ı sağlar — sahibin "İşe Başlama Onayı
+ * Bekleniyor" ikincil bilgisini görebilmesi için, bkz. o fonksiyonun
+ * dokümantasyonu).
+ *
+ * KÖK NEDEN: "accepted" (kabul edildi ama işe HENÜZ başlanmadı — ön anlaşma/
+ * görüşme aşaması) TEK BAŞINA ilanı yeni tekliflere kapatmaz (bkz.
+ * isJobClosedToNewOffers, yukarıda) — ilan hâlâ GERÇEKTEN teklife açıktır.
+ * Ama Aşama 5.2, `getOperationStatusBucket`'ın "kabul-edildi" bucket'ını
+ * DOĞRUDAN ANA rozet için kullanıyordu; bu da GERÇEKTE hâlâ açık olan bir
+ * ilanın ana rozetinde "Hizmet Veren Seçildi" (kapanmış izlenimi veren)
+ * göstermesine yol açıyordu — kimin teklifi kabul edildiğini gizlemek
+ * yerine, ilanın hâlâ açık olduğu gerçeğini gizleyen YENİ bir hataydı. Bu
+ * fonksiyon "kabul-edildi"yi "aktif"e katlayarak düzeltir; kalan dört
+ * bucket (aktif/devam-eden/tamamlandi/iptal) `isJobClosedToNewOffers`'ın
+ * kapanma eşiğiyle BİREBİR örtüşür — kartta "Devam Ediyor"/"Teklife Kapalı"
+ * görünüyorsa, o ilana artık gerçekten yeni teklif verilemez.
+ */
+export function getPublicOperationStatusBucket(job: Job, offers: Offer[]): OperationStatusBucket {
+  const bucket = getOperationStatusBucket(job, offers);
+  return bucket === "kabul-edildi" ? "aktif" : bucket;
+}
+
+/** `getPublicOperationStatusBucket`'ın ürettiği sabit gösterim sırası — "kabul-edildi" ASLA dönmediği için `OPERATION_STATUS_BUCKET_ORDER`den farklı olarak burada yer almaz (kalıcı olarak 0 kalacak, yanıltıcı bir kutucuk olurdu). */
+export const PUBLIC_OPERATION_STATUS_BUCKET_ORDER: OperationStatusBucket[] = [
+  "aktif",
+  "devam-eden",
+  "tamamlandi",
+  "iptal",
+];
+
+/** `getOperationStatusSummary`'nin operasyon kartlarının ANA rozeti/özet kutucukları için birleştirilmiş (`getPublicOperationStatusBucket`) hâli. */
+export function getPublicOperationStatusSummary(jobs: Job[], offers: Offer[]): OperationStatusSummary {
+  return accumulateOperationStatusCounts(jobs, (job) => getPublicOperationStatusBucket(job, offers));
 }
 
 export type ProviderOfferFilter = "aktif" | "devam-eden" | "tamamlandi" | "kapanan-teklifler";

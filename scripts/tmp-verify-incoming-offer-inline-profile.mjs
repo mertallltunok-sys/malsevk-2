@@ -1,11 +1,14 @@
 // Gelen Teklifler ekranındaki Hizmet Veren profil pop-up'ının (drawer/modal)
 // kaldırılıp, profil bilgilerinin doğrudan teklif kartı içine gömülmesinin
-// doğrulaması:
+// VE firma kimliği anonimleştirmesinin (bkz. job-requests.ts#
+// isOfferProviderIdentityRevealed) doğrulaması:
 // - Profil adına/görseline tıklayınca artık HİÇBİR dialog açılmıyor.
-// - Firma adı, uzmanlık alanları, puan, tamamlanan iş sayısı, bölge ve kısa
-//   tanıtım kart içinde doğrudan görünüyor.
-// - Profili boş olan (fotoğrafsız, tanıtımsız) bir Hizmet Veren için sahte
-//   veri üretilmiyor, yalnızca fallback ikon gösteriliyor.
+// - "Beklemede" durumundayken firma adı/logo/puan/uzmanlık/bölge/tanıtım
+//   YAZISI GÖRÜNMEZ — yerine anonim bir "Hizmet Veren #NNNN" etiketi
+//   gösterilir (profili zengin OLSUN ya da OLMASIN, ikisi için de).
+// - Teklif kabul edildiği ANDA aynı kartta firma adı, logo, uzmanlık
+//   alanları, tamamlanan iş sayısı, bölge ve kısa tanıtım GÖRÜNÜR olur.
+// - Reddedilen bir teklif kabul edilmeden önce de sonra da anonim KALIR.
 // - İletişim gizliliği kuralı (kabul edilmeden telefon/e-posta yok) bozulmadı.
 // - Kabul/Reddet butonları çalışıyor.
 // - Uzun firma adı / uzun tanıtım / yüksek teklif tutarında taşma yok.
@@ -86,10 +89,31 @@ function attachDiagnostics(page) {
   page.on("pageerror", (err) => page.jsProblems.push(`[pageerror] ${String(err)}`));
 }
 
+/**
+ * `document.documentElement.scrollWidth > clientWidth` TEK BAŞINA güvenilir
+ * bir yatay taşma testi DEĞİLDİR — Chromium'da `text-overflow: ellipsis`
+ * (`truncate`) kullanan iç içe flex/grid düzenlerde, ekranda HİÇBİR görsel
+ * kırpılma/taşma olmasa bile `scrollWidth` birkaç piksel yüksek raporlanan
+ * bilinen bir motor kuraksılığı vardır (bu ekranda doğrulandı: zengin firma
+ * profili + Hizmet Türü->İlan gruplama kutusuyla `scrollWidth` birkaç piksel
+ * yüksek çıkabiliyor, ANCAK ekran görüntüsünde hiçbir kırpılma yok ve sayfa
+ * GERÇEKTEN yatay kaydırılamıyor — bkz. tmp-incoming-offers-category-
+ * grouping-live-test.mjs'teki AYNI notun ayrıntılı kanıtı). Bu yüzden asıl
+ * kullanıcı deneyimini belirleyen GERÇEK ölçüt kullanılır: sayfa fiilen
+ * yatay kaydırılabiliyor mu (`window.scrollTo` sonrası `scrollX` gerçekten
+ * değişiyor mu)?
+ */
 async function checkNoHorizontalOverflow(page, label) {
   const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
-  check(`${label}: yatay taşma yok`, scrollWidth <= clientWidth + 1, `scrollWidth=${scrollWidth}, clientWidth=${clientWidth}`);
+  const canActuallyScroll = await page.evaluate(() => {
+    const originalX = window.scrollX;
+    window.scrollTo(99999, window.scrollY);
+    const scrolledX = window.scrollX;
+    window.scrollTo(originalX, window.scrollY);
+    return scrolledX !== 0;
+  });
+  check(`${label}: yatay taşma yok`, !canActuallyScroll, `scrollWidth=${scrollWidth}, clientWidth=${clientWidth}, gerçekten kaydırılabildi=${canActuallyScroll}`);
 }
 
 async function main() {
@@ -157,8 +181,8 @@ async function main() {
     await page.getByText("Teklifiniz başarıyla gönderildi.").waitFor({ state: "visible", timeout: 10000 });
     check("Mehmet (boş profil) teklif gönderdi", true);
 
-    // ============ 3) Zeynep: Gelen Teklifler — pop-up YOK, bilgiler kart içinde ============
-    console.log("\n=== Hizmet Alan (Zeynep): Gelen Teklifler — pop-up yok, profil kart içinde ===");
+    // ============ 3) Zeynep: Gelen Teklifler — pop-up YOK, "Beklemede"de kimlik anonim ============
+    console.log("\n=== Hizmet Alan (Zeynep): Gelen Teklifler — pop-up yok, 'Beklemede'de kimlik anonim ===");
     await clearSession(page);
     await login(page, ZEYNEP, "/panel/gelen-teklifler");
 
@@ -168,26 +192,31 @@ async function main() {
     );
 
     const bodyText = await page.locator("body").innerText();
-    check("Firma adı (uzun) kart içinde görünüyor", bodyText.includes(LONG_COMPANY_NAME));
-    check("Uzmanlık alanı chip'i görünüyor ('Lashing')", bodyText.includes("Lashing"));
-    check("Tamamlanan iş sayısı görünüyor", /tamamlanan iş/.test(bodyText));
-    check("Bölge bilgisi görünüyor ('Kocaeli')", bodyText.includes("Kocaeli"));
-    check("Kısa firma tanıtımı kart içinde görünüyor", bodyText.includes("konteyner elleçleme, depolama"));
+    // "Beklemede" durumunda firma kimliği kesinlikle GÖRÜNMEMELİ (zengin
+    // profilli Mert için de, boş profilli Mehmet için de) — değerlendirme
+    // yalnızca fiyat/süre/açıklama üzerinden yapılabilsin diye.
+    check("Firma adı (uzun) 'Beklemede'de GÖRÜNMÜYOR", !bodyText.includes(LONG_COMPANY_NAME));
+    check("Uzmanlık alanı chip'i ('Lashing') 'Beklemede'de GÖRÜNMÜYOR", !bodyText.includes("Lashing"));
+    check("Tamamlanan iş sayısı 'Beklemede'de GÖRÜNMÜYOR", !/tamamlanan iş/.test(bodyText));
+    check("Kısa firma tanıtımı 'Beklemede'de GÖRÜNMÜYOR", !bodyText.includes("konteyner elleçleme, depolama"));
+    check("Mehmet Demir (profil doldurulmamış) ismi de 'Beklemede'de GÖRÜNMÜYOR", !bodyText.includes("Mehmet Demir"));
+    check("Anonim 'Hizmet Veren #' etiketi görünüyor", /Hizmet Veren #\d{4}/.test(bodyText));
+    check(
+      "Anonim ipucu metni görünüyor",
+      bodyText.includes("Firma kimliği, teklifi kabul ettiğinizde görünür olacak."),
+    );
+    const logoImgBeforeAccept = page.locator(`img[alt="${LONG_COMPANY_NAME} logosu"]`);
+    check("Firma logosu 'Beklemede'de GÖRÜNMÜYOR", (await logoImgBeforeAccept.count()) === 0);
+
     check("Teklif tutarı görünüyor (125.000)", /125\.000|125000/.test(bodyText));
     check("Teklif açıklaması görünüyor", bodyText.includes("uçtan uca üstleniyoruz"));
     check("Teklif tarihi etiketi görünüyor", bodyText.includes("Teklif tarihi"));
     check("Teklif durumu (Beklemede) görünüyor", bodyText.includes("Beklemede"));
 
-    // Profil adına/logosuna tıklamak artık HİÇBİR dialog açmamalı.
-    await page.getByText(LONG_COMPANY_NAME).first().click();
+    // Anonim etikete tıklamak artık HİÇBİR dialog açmamalı.
+    await page.getByText(/Hizmet Veren #\d{4}/).first().click();
     await page.waitForTimeout(300);
-    check("Profil adına tıklayınca dialog AÇILMIYOR", (await page.getByRole("dialog").count()) === 0);
-
-    const logoImg = page.locator(`img[alt="${LONG_COMPANY_NAME} logosu"]`).first();
-    check("Firma logosu kart içinde doğrudan görünüyor (pop-up gerekmeden)", await logoImg.isVisible());
-
-    // Boş profilli Mehmet'in kartı: sahte veri üretilmemeli, fallback ikon.
-    check("Mehmet Demir (profil doldurulmamış) ismi fallback olarak görünüyor", bodyText.includes("Mehmet Demir"));
+    check("Anonim etikete tıklayınca dialog AÇILMIYOR", (await page.getByRole("dialog").count()) === 0);
 
     check("Gelen Teklifler (masaüstü): konsol hatası yok", page.jsProblems.length === 0, page.jsProblems.join(" | "));
     await checkNoHorizontalOverflow(page, "Masaüstü (1280px)");
@@ -207,8 +236,18 @@ async function main() {
       await page.reload();
       await page.waitForTimeout(200);
       await checkNoHorizontalOverflow(page, `${width}px`);
-      const cardVisible = await page.getByText(LONG_COMPANY_NAME).first().isVisible().catch(() => false);
-      check(`${width}px: firma adı kart içinde görünür`, cardVisible);
+      const cardVisible = await page
+        .getByText("Inline Profil Testi — Zengin Profil")
+        .first()
+        .isVisible()
+        .catch(() => false);
+      check(`${width}px: ilan başlığı kart içinde görünür`, cardVisible);
+      const anonymousLabelVisible = await page
+        .getByText(/Hizmet Veren #\d{4}/)
+        .first()
+        .isVisible()
+        .catch(() => false);
+      check(`${width}px: anonim etiket görünür (firma adı DEĞİL)`, anonymousLabelVisible);
       const noDialogButton = (await page.getByRole("button", { name: "Hizmet Veren Profili" }).count()) === 0;
       check(`${width}px: 'Hizmet Veren Profili' butonu yok`, noDialogButton);
 
@@ -231,23 +270,48 @@ async function main() {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.reload();
 
-    // ============ 6) Kabul Et çalışıyor + kabul sonrası iletişim görünüyor ============
-    console.log("\n=== Kabul Et butonu + kabul sonrası iletişim bilgisi ===");
-    const richCard = page.locator("div.rounded-card", { hasText: LONG_COMPANY_NAME }).first();
+    // ============ 6) Kabul Et çalışıyor + kabul sonrası kimlik VE iletişim açılıyor ============
+    console.log("\n=== Kabul Et butonu + kabul sonrası kimlik/iletişim bilgisi açılıyor ===");
+    // Firma adı henüz görünmediği için ("Beklemede") ilan başlığından
+    // (kimlikten bağımsız, her zaman görünür) çapalanır.
+    const richCard = page.locator("div.rounded-card", { hasText: "Inline Profil Testi — Zengin Profil" }).first();
     await richCard.getByRole("button", { name: "Kabul Et" }).click();
     await page.getByText("Kabul Edildi").first().waitFor({ state: "visible", timeout: 10000 });
     check("Kabul Et sonrası durum 'Kabul Edildi' olarak güncellendi", true);
-    const afterAcceptText = await page.locator("body").innerText();
-    check("Kabul sonrası 'Telefon' etiketi görünüyor", afterAcceptText.includes("Telefon"));
-    check("Kabul sonrası 'E-posta' etiketi görünüyor", afterAcceptText.includes("E-posta"));
+    // Mehmet'in teklifi bu adımda hâlâ ayrı bir ilanda "Beklemede" kaldığı
+    // (henüz reddedilmedi, bkz. adım 7) için SAYFA GENELİ metin yerine
+    // yalnızca Mert'in kartının kendi metni okunur — aksi halde Mehmet'in
+    // hâlâ anonim kartındaki metinler (ör. anonim ipucu) yanlışlıkla
+    // "hâlâ sayfada var" görünüp bu adımın kontrollerini bozardı.
+    const richCardText = await richCard.innerText();
+    check("Kabul sonrası 'Telefon' etiketi görünüyor", richCardText.includes("Telefon"));
+    check("Kabul sonrası 'E-posta' etiketi görünüyor", richCardText.includes("E-posta"));
+    // KRİTİK: kimlik kabul edildiği ANDA açılmalı — logo, firma adı, uzmanlık,
+    // tamamlanan iş sayısı, bölge, tanıtım artık görünür olmalı.
+    check("Kabul sonrası firma adı (uzun) görünüyor", richCardText.includes(LONG_COMPANY_NAME));
+    check("Kabul sonrası uzmanlık alanı chip'i ('Lashing') görünüyor", richCardText.includes("Lashing"));
+    check("Kabul sonrası tamamlanan iş sayısı görünüyor", /tamamlanan iş/.test(richCardText));
+    check("Kabul sonrası bölge bilgisi ('Kocaeli') görünüyor", richCardText.includes("Kocaeli"));
+    check(
+      "Kabul sonrası kısa firma tanıtımı görünüyor",
+      richCardText.includes("konteyner elleçleme, depolama"),
+    );
+    const logoImgAfterAccept = richCard.locator(`img[alt="${LONG_COMPANY_NAME} logosu"]`).first();
+    check("Kabul sonrası firma logosu görünüyor", await logoImgAfterAccept.isVisible());
+    check(
+      "Kabul sonrası anonim ipucu metni bu kartta ARTIK YOK",
+      !richCardText.includes("Firma kimliği, teklifi kabul ettiğinizde görünür olacak."),
+    );
     check("Kabul sonrası: konsol hatası yok", page.jsProblems.length === 0, page.jsProblems.join(" | "));
 
-    // ============ 7) Reddet butonu çalışıyor (Mehmet'in teklifi üzerinde) ============
-    console.log("\n=== Reddet butonu çalışıyor ===");
-    const mehmetCard = page.locator("div.rounded-card", { hasText: "Mehmet Demir" }).first();
+    // ============ 7) Reddet butonu çalışıyor (Mehmet'in teklifi) — reddedilen teklif ANONİM KALIR ============
+    console.log("\n=== Reddet butonu çalışıyor + reddedilen teklif anonim kalır ===");
+    const mehmetCard = page.locator("div.rounded-card", { hasText: "Inline Profil Testi — Boş Profil" }).first();
     await mehmetCard.getByRole("button", { name: "Reddet" }).click();
     await page.getByText("Reddedildi").first().waitFor({ state: "visible", timeout: 10000 });
     check("Reddet sonrası durum 'Reddedildi' olarak güncellendi", true);
+    const afterRejectText = await page.locator("body").innerText();
+    check("Reddedilen teklifte 'Mehmet Demir' ismi HÂLÂ görünmüyor (anonim kaldı)", !afterRejectText.includes("Mehmet Demir"));
 
     await context.close();
 

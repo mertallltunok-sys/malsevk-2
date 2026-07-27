@@ -1,24 +1,22 @@
 import {
-  accumulateOperationStatusCounts,
   COMPLETION_AUTO_APPROVE_DAYS,
+  getCompletedOfferForJob,
+  getEngagedOfferForJob,
   getOperationStatusBucket,
-  getOperationStatusBucketLabel,
-  getOperationStatusBucketTone,
-  IN_PROGRESS_OFFER_STATUSES,
+  getProviderOfferFilter,
+  isJobClosedToNewOffers,
   OFFER_PENDING_BLOCKED_MESSAGE,
   REOFFER_COOLDOWN_DAYS,
   isOfferPendingActionBlocked,
   isReofferCooldownStatus,
   jobHasAcceptedOffer,
-  type OperationStatusBucket,
-  type OperationStatusSummary,
 } from "./job-requests";
 import { deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
 import { findJobById } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
 import { MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
 import { hasReachedActiveJobLimit } from "./provider-capacity";
-import type { Currency, DisagreementReason, Job, Offer, Session } from "./types";
+import type { Currency, DisagreementReason, Job, Offer, OfferStatus, Session } from "./types";
 
 const OFFERS_STORAGE_KEY = "malsevk.offers.v1";
 const REOFFER_COOLDOWN_MS = REOFFER_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
@@ -223,124 +221,6 @@ export function getOfferStatusTone(
   }
 }
 
-export type ViewerScopedJobStatus = {
-  /** Toplu sayım (özet kutucukları) için — bkz. getViewerScopedOperationStatusSummary. */
-  bucket: OperationStatusBucket;
-  label: string;
-  tone: "success" | "warning" | "neutral" | "danger";
-};
-
-/**
- * KRİTİK KULLANICI İZOLASYONU DÜZELTMESİ: bir ilanın operasyon durumu
- * rozetini, GÖSTEREN oturuma göre güvenli şekilde hesaplar.
- *
- * KÖK NEDEN: `job-requests.ts#getOperationStatusBucket` (ve temelindeki
- * `getJobRequestFilter`), bir ilanın TÜM tekliflerine bakarak TEK bir
- * "gerçek" durum üretir (ör. herhangi bir teklif "accepted" ise "kabul-edildi").
- * Bu, yalnızca ilan sahibi (Hizmet Alan) için doğru bir görünümdür — durum
- * hesaplaması hiçbir zaman "kim bakıyor" bilgisini almadığı için,
- * operation-sibling-jobs-card.tsx/operation-status-card.tsx/
- * operation-service-offers-card.tsx bu bucket'ı DOĞRUDAN render ettiğinde,
- * ilana bakan HERHANGİ bir Hizmet Veren (kendi teklifi olsun ya da olmasın)
- * AYNI "Teklif Kabul Edildi" rozetini görüyordu — bu da başka bir sağlayıcının
- * kabul edilmiş teklifini o sağlayıcıyla hiçbir ilgisi olmayan hesaplara
- * sızdırıyordu.
- *
- * DÜZELTME — bu fonksiyon, `getOperationStatusBucket`in yerine yalnızca bu
- * üç bileşende (ve toplu sayımlarında, bkz. aşağıdaki
- * getViewerScopedOperationStatusSummary) kullanılır:
- *  - İlan sahibi (`session.id === job.requesterId`): gerçek bucket/etiket
- *    DEĞİŞMEDEN döner (Hizmet Alan gerçek durumu görmeye devam eder).
- *  - Bu ilana kendi teklifi olan bir Hizmet Veren: YALNIZCA KENDİ
- *    teklifinin durumu döner — "accepted" özel olarak "Teklifiniz Kabul
- *    Edildi" ile (başka bir sağlayıcının kabulüyle karıştırılmasın diye),
- *    diğer durumlar mevcut `getOfferStatusLabel`/`getOfferStatusTone`
- *    (yukarıda, yeni bir etiket sistemi İCAT EDİLMEDİ) ile. Bucket (toplu
- *    sayım için) kendi teklifinin ilerleme durumuna göre (accepted ->
- *    kabul-edildi, IN_PROGRESS_OFFER_STATUSES -> devam-eden, completed ->
- *    tamamlandi, diğerleri -> aktif) 5-bucket sözlüğüne eşlenir — başka bir
- *    sağlayıcının teklifi bu eşlemeye HİÇ girmez.
- *  - Kendi teklifi olmayan bir Hizmet Veren, misafir ya da ilanın sahibi
- *    olmayan başka bir kullanıcı: nötr "aktif" — başka hiçbir sağlayıcının
- *    kabul/ilerleme/tamamlama bilgisi hiçbir biçimde sızmaz.
- * `job.status === "iptal"` (ilanın kendi, teklife bağlı olmayan genel
- * durumu — gizlilik açısından hassas değil) bu ayrımlardan ÖNCE, herkese
- * aynı şekilde döner.
- */
-export function getViewerScopedJobStatus(
-  job: Job,
-  offers: Offer[],
-  session: Session | null,
-): ViewerScopedJobStatus {
-  if (job.status === "iptal") {
-    return {
-      bucket: "iptal",
-      label: getOperationStatusBucketLabel("iptal"),
-      tone: getOperationStatusBucketTone("iptal"),
-    };
-  }
-
-  if (session && session.id === job.requesterId) {
-    const bucket = getOperationStatusBucket(job, offers);
-    return { bucket, label: getOperationStatusBucketLabel(bucket), tone: getOperationStatusBucketTone(bucket) };
-  }
-
-  const ownOffer =
-    session && session.role === "hizmet-veren"
-      ? offers.findLast((offer) => offer.jobId === job.id && offer.providerId === session.id)
-      : undefined;
-
-  if (ownOffer) {
-    if (ownOffer.status === "accepted") {
-      return { bucket: "kabul-edildi", label: "Teklifiniz Kabul Edildi", tone: "success" };
-    }
-    if (IN_PROGRESS_OFFER_STATUSES.includes(ownOffer.status)) {
-      return {
-        bucket: "devam-eden",
-        label: getOfferStatusLabel(ownOffer.status),
-        tone: getOfferStatusTone(ownOffer.status),
-      };
-    }
-    if (ownOffer.status === "completed") {
-      return {
-        bucket: "tamamlandi",
-        label: getOfferStatusLabel(ownOffer.status),
-        tone: getOfferStatusTone(ownOffer.status),
-      };
-    }
-    // pending/rejected/agreement_failed/withdrawn/cancelled: kendi teklifi
-    // sonuçlanmamış ya da başarısız — bucket (toplu sayım) nötr "aktif"
-    // kalır (başka bir sağlayıcının GERÇEK durumu bu izleyene asla
-    // sızdırılmaz), ama etiket kendi teklifinin GERÇEK durumunu gösterir.
-    return { bucket: "aktif", label: getOfferStatusLabel(ownOffer.status), tone: getOfferStatusTone(ownOffer.status) };
-  }
-
-  return {
-    bucket: "aktif",
-    label: getOperationStatusBucketLabel("aktif"),
-    tone: getOperationStatusBucketTone("aktif"),
-  };
-}
-
-/**
- * `job-requests.ts#getOperationStatusSummary`'nin izleyene-duyarlı hali —
- * "Operasyon Durumu" kartının (operation-status-card.tsx) özet
- * kutucuklarının (Toplam Hizmet/Aktif/Teklif Kabul Edildi/.../İlerleme %)
- * de aynı izolasyon hatasından etkilenmemesi için: her ilan
- * `getViewerScopedJobStatus`'un bucket'ına göre sayılır, böylece toplam
- * sayımlar HER ZAMAN o anki izleyenin görebildiği rozetlerle tutarlı kalır
- * (ör. bir Hizmet Veren'e "Teklif Kabul Edildi: 1" sayısı yalnızca KENDİ
- * teklifi kabul edilmişse görünür, başka bir sağlayıcınınki asla sayıma
- * girmez).
- */
-export function getViewerScopedOperationStatusSummary(
-  jobs: Job[],
-  offers: Offer[],
-  session: Session | null,
-): OperationStatusSummary {
-  return accumulateOperationStatusCounts(jobs, (job) => getViewerScopedJobStatus(job, offers, session).bucket);
-}
-
 /**
  * Bir Hizmet Veren'in şu an bu ilana YENİ bir teklif verip veremeyeceğinin
  * TEK ortak doğruluk kaynağı — offer-panel.tsx (gerçek teklif formunun kapı
@@ -354,15 +234,26 @@ export function getViewerScopedOperationStatusSummary(
  * cancelled ya da süresi dolmamış withdrawn/rejected/agreement_failed)
  * engelleyicidir — ve son olarak aktif iş kapasitesi (hasReachedActiveJobLimit).
  *
- * `operation-service-offers-card.tsx` ("Operasyondaki Hizmetler" kartındaki
- * "Teklif Ver" kısayolu) bu fonksiyonu çağırır ki kartta gösterilen buton
- * her zaman gerçek teklif formuyla (`/ilanlar/[id]` üzerindeki OfferPanel)
- * birebir aynı sonuca varsın — KRİTİK BUTON GÖRÜNÜRLÜĞÜ DÜZELTMESİ: bu
- * fonksiyon eklenmeden önce kart, hedef ilanın durumuna/izleyicinin kendi
- * teklifine/kapasitesine hiç bakmadan `!isCurrent` olan HER satırda "Teklif
- * Ver" gösteriyordu (bkz. o dosyanın eski sürümü) — kendi kabul edilmiş/
- * bekleyen/tamamlanmış teklifi olan ya da ilan artık teklife kapalı olan bir
- * kullanıcıya bile.
+ * `getOperationServiceCardStatus` (aşağıda — operasyon hizmet kartlarının
+ * "Teklif Ver" aksiyonunun TEK kaynağı) bu fonksiyonu çağırır ki kartta
+ * gösterilen buton her zaman gerçek teklif formuyla (`/ilanlar/[id]`
+ * üzerindeki OfferPanel) birebir aynı sonuca varsın — KRİTİK BUTON
+ * GÖRÜNÜRLÜĞÜ DÜZELTMESİ: bu fonksiyon eklenmeden önce operasyon kartı,
+ * hedef ilanın durumuna/izleyicinin kendi teklifine/kapasitesine hiç
+ * bakmadan `!isCurrent` olan HER satırda "Teklif Ver" gösteriyordu (bkz. o
+ * dosyanın eski sürümü) — kendi kabul edilmiş/bekleyen/tamamlanmış teklifi
+ * olan ya da ilan artık teklife kapalı olan bir kullanıcıya bile.
+ *
+ * "TEKLİF KABULÜ VE İŞE BAŞLAMA KİLİT KURALI" DÜZELTMESİ:
+ * `isJobClosedToNewOffers` (job-requests.ts) çağrısı eklendi — KÖK NEDEN, bu
+ * kontrolün önceden HİÇ var olmamasıydı: bir teklif "accepted" olduğunda
+ * (doğru — bkz. KRİTİK MİMARİ AYRIM, o durum ilanı kapatmamalı, ön anlaşma/
+ * görüşme aşamasıdır) DEĞİL, ama bir teklif fiilen İŞE BAŞLADIĞINDA
+ * (in_progress) da BAŞKA hiçbir Hizmet Veren'in yeni teklif verememesi
+ * gerekirken, bu fonksiyon (ve createOffer, aşağıda) yalnızca `job.status`a
+ * bakıyordu — ki `Job.status` bir teklif geçişinde ASLA değişmez (bkz.
+ * types.ts) — bu yüzden iş fiilen başlamış bir ilana bile üçüncü taraflar
+ * sınırsızca teklif verebiliyordu.
  *
  * KAPSAM: yalnızca "şu an bir teklif eylemine (form/link) izin var mı"
  * sorusuna cevap verir — form alanı doğrulaması (fiyat/açıklama/süre) ya da
@@ -377,6 +268,7 @@ export function canProviderSubmitNewOffer(
 ): boolean {
   if (!session || session.role !== "hizmet-veren") return false;
   if (!isJobOpenForOffers(job.status)) return false;
+  if (isJobClosedToNewOffers(job.id, offers)) return false;
 
   const currentOffer = getOfferForJob(job.id, session.id);
   if (currentOffer) {
@@ -386,6 +278,158 @@ export function canProviderSubmitNewOffer(
   }
 
   return !hasReachedActiveJobLimit(session.id, offers);
+}
+
+/** `getOperationServiceCardStatus`'un dönüş tipi — bkz. o fonksiyonun dokümantasyonu. */
+export type OperationServiceCardStatus =
+  | { kind: "teklif-ver" }
+  | { kind: "label"; label: string; tone: "success" | "warning" | "neutral" | "danger" };
+
+/**
+ * Bir Offer.status'u operasyon hizmet kartlarının TEK durum alanında
+ * gösterilecek etikete çevirir — yeni bir durum sistemi İCAT ETMEZ, yalnızca
+ * mevcut `getOfferStatusLabel`/`Tone`i (rejected/withdrawn/agreement_failed
+ * için, "Teklifiniz: " öneki OLMADAN) ya da bu bağlamda daha isabetli sabit
+ * bir metni (pending/accepted/in_progress/completion_requested/
+ * completion_disputed/completed/cancelled için) döndürür.
+ * `getOperationServiceCardStatus` bu eşlemeyi hem "bu Hizmet Veren'in kendi
+ * teklifi" kolunda hem "ilanın job-geneli meşgul teklifi" kolunda (aşağıda)
+ * ORTAK olarak kullanır — ikisi ayrı ayrı bir eşleme yazmaz.
+ */
+function offerStatusToCardLabel(
+  status: OfferStatus,
+): { label: string; tone: "success" | "warning" | "neutral" | "danger" } {
+  switch (status) {
+    case "pending":
+      return { label: "Teklif Bekliyor", tone: "warning" };
+    case "accepted":
+      return { label: "Teklif Kabul Edildi", tone: "success" };
+    case "in_progress":
+      return { label: "Devam Ediyor", tone: "success" };
+    case "completion_requested":
+      return { label: "Tamamlama Onayı Bekleniyor", tone: "warning" };
+    case "completion_disputed":
+      return { label: "İtiraz Sürecinde", tone: "danger" };
+    case "completed":
+      return { label: "Tamamlandı", tone: "neutral" };
+    case "cancelled":
+      return { label: "İptal Edildi", tone: "danger" };
+    case "rejected":
+    case "withdrawn":
+    case "agreement_failed":
+      return { label: getOfferStatusLabel(status), tone: getOfferStatusTone(status) };
+  }
+}
+
+/**
+ * "Operasyon Durumu" kartının (operation-status-card.tsx — operasyon
+ * hizmetlerinin gösterildiği artık TEK yer; eski operation-sibling-jobs-card.tsx/
+ * operation-service-offers-card.tsx SİLİNDİ, bkz. o dosyanın doküman
+ * yorumu) her satırdaki TEK durum/aksiyon alanı için tek ortak doğruluk
+ * kaynağı. ÖNCEDEN (bu üç ayrı kart hâlâ var olduğu dönemde) GLOBAL ana rozeti
+ * (`getPublicOperationStatusBucket`/Label/Tone) ve İZLEYENE ÖZEL kişisel notu
+ * (eski `getViewerOfferStatusNote`, bu görevle birlikte SİLİNDİ) AYRI AYRI
+ * render ediyordu — bu da aynı satırda iki (bazen çelişkili görünen, ör.
+ * "Tamamlandı" rozeti + "Teklifiniz: Kabul Edildi" notu) durum göstermesine
+ * yol açıyordu. Bu fonksiyon ikisini TEK bir değere birleştirir; yeni bir iş
+ * kuralı İCAT ETMEZ, yalnızca mevcut merkezi fonksiyonları
+ * (`canProviderSubmitNewOffer`, `getOfferForJob`, `getProviderOfferFilter`,
+ * `getEngagedOfferForJob`, `getCompletedOfferForJob`, `getOperationStatusBucket`)
+ * ÇAĞIRIR.
+ *
+ * DÖNÜŞ DEĞERİ iki türden biridir:
+ *  - `{ kind: "teklif-ver" }`: bu izleyici (bir Hizmet Veren) şu an bu ilana
+ *    gerçekten yeni teklif verebilir (`canProviderSubmitNewOffer` ile
+ *    BİREBİR aynı kontrol — offer-panel.tsx'in kullandığı gerçek teklif
+ *    formunun kapı bekçisiyle aynı fonksiyon). Çağıran taraf bu durumda
+ *    "Teklif Ver" aksiyonunu (buton/link, kartın kendi tasarımına göre)
+ *    gösterir.
+ *  - `{ kind: "label"; label; tone }`: tek, çelişkisiz bir durum metni —
+ *    aşağıdaki sıralamayla türetilir:
+ *     1) Bu Hizmet Veren'in KENDİ teklifi varsa (`getOfferForJob`): "pending"
+ *        ise ya `getProviderOfferFilter`in "kapanan-teklifler" dediği kardeş-
+ *        kapanma durumunda "Başka Hizmet Verenle Anlaşıldı", ya da
+ *        `offerStatusToCardLabel("pending")` ("Teklif Bekliyor"); diğer TÜM
+ *        durumlarda yine `offerStatusToCardLabel`. Kendi teklifi yoksa ama
+ *        ilan GERÇEKTEN (`isJobClosedToNewOffers`) başka biriyle ilerlemişse
+ *        yine "Başka Hizmet Verenle Anlaşıldı" — aksi halde (kapasite/
+ *        cooldown gibi BAŞKA bir nedenle teklif veremiyor ama ilan hâlâ
+ *        açık) aşağıdaki job-geneli kola düşer.
+ *     2) job-geneli: tamamlanmış teklif (`getCompletedOfferForJob`) ya da
+ *        `job.status === "tamamlandi"` varsa "Tamamlandı"; yoksa meşgul
+ *        teklif (`getEngagedOfferForJob` — accepted/in_progress/
+ *        completion_requested/completion_disputed) varsa
+ *        `offerStatusToCardLabel`; o da yoksa bucket "iptal" ise "İptal
+ *        Edildi"; ilan sahibi içinse VE en az bir "pending" teklif varsa
+ *        "İşe Başlama Onayı Bekleniyor" (kararın kendisinden beklendiği
+ *        anlamına gelir — ayrı bir Kabul Et/Reddet aksiyonu bu kartların
+ *        kapsamında YOKTUR, bkz. incoming-offer-card.tsx/"Gelen Teklifler",
+ *        bu görevle DEĞİŞTİRİLMEDİ); son çare olarak "Teklife Açık".
+ *
+ * İZLEYEN İZOLASYONU: `session.id`/`session.role` yalnızca KENDİ teklifini
+ * (`getOfferForJob(job.id, session.id)`) ve ilan sahipliğini
+ * (`session.id === job.requesterId`) okur — başka bir Hizmet Veren'in
+ * teklifi asla bu fonksiyona sızmaz; aynı operasyondaki her `job` kendi
+ * `offers` listesiyle bağımsız değerlendirilir (aynı `session` ile art arda
+ * çağrılan farklı `job`lar farklı sonuç üretebilir).
+ *
+ * `allowOfferAction` (varsayılan `true`): çağıran taraf, gösterilen satır şu
+ * an görüntülenen ilanın KENDİSİYSE (`isCurrent`) `false` geçer — o ilanın
+ * gerçek teklif formu zaten aynı sayfada (OfferPanel) görünür durumdadır, bu
+ * yüzden kartta ayrıca bir "Teklif Ver" kısayoluna gerek yoktur; `false`
+ * olduğunda bu fonksiyon hiçbir zaman `"teklif-ver"` döndürmez, bunun yerine
+ * job-geneli/kendi-teklifi etiketine düşer (pratikte "Teklife Açık").
+ */
+export function getOperationServiceCardStatus(
+  job: Job,
+  offers: Offer[],
+  session: Session | null,
+  options?: { allowOfferAction?: boolean },
+): OperationServiceCardStatus {
+  const allowOfferAction = options?.allowOfferAction ?? true;
+
+  if (allowOfferAction && canProviderSubmitNewOffer(session, job, offers)) {
+    return { kind: "teklif-ver" };
+  }
+
+  if (session?.role === "hizmet-veren") {
+    const ownOffer = getOfferForJob(job.id, session.id);
+    if (ownOffer) {
+      if (ownOffer.status === "pending" && getProviderOfferFilter(ownOffer, offers) === "kapanan-teklifler") {
+        return { kind: "label", label: "Başka Hizmet Verenle Anlaşıldı", tone: "neutral" };
+      }
+      return { kind: "label", ...offerStatusToCardLabel(ownOffer.status) };
+    }
+    if (isJobClosedToNewOffers(job.id, offers)) {
+      return { kind: "label", label: "Başka Hizmet Verenle Anlaşıldı", tone: "neutral" };
+    }
+    // İlan hâlâ gerçekten teklife açık ama bu Hizmet Veren (kapasite/cooldown
+    // gibi kendine özel bir nedenle) teklif veremiyor — aşağıdaki job-geneli
+    // kola düşer (pratikte "Teklife Açık").
+  }
+
+  const completedOffer = getCompletedOfferForJob(job.id, offers);
+  if (completedOffer || job.status === "tamamlandi") {
+    return { kind: "label", label: "Tamamlandı", tone: "neutral" };
+  }
+
+  const engagedOffer = getEngagedOfferForJob(job.id, offers);
+  if (engagedOffer) {
+    return { kind: "label", ...offerStatusToCardLabel(engagedOffer.status) };
+  }
+
+  if (getOperationStatusBucket(job, offers) === "iptal") {
+    return { kind: "label", label: "İptal Edildi", tone: "danger" };
+  }
+
+  if (session?.id === job.requesterId) {
+    const hasPendingOffer = offers.some((offer) => offer.jobId === job.id && offer.status === "pending");
+    if (hasPendingOffer) {
+      return { kind: "label", label: "İşe Başlama Onayı Bekleniyor", tone: "warning" };
+    }
+  }
+
+  return { kind: "label", label: "Teklife Açık", tone: "success" };
 }
 
 export const DISAGREEMENT_REASON_OPTIONS: { value: DisagreementReason; label: string }[] = [
@@ -483,14 +527,22 @@ export function createOffer(
     }
   }
 
-  // Bir ilana kabul edilmiş/devam eden bir teklif olması artık YENİ teklif
-  // vermeyi engellemez (bkz. job-requests.ts#jobHasAcceptedOffer'ın
-  // güncellenmiş doküman notu) — diğer Hizmet Verenler de bu ilana teklif
-  // verebilir; aynı anda yalnızca TEK teklifin anlaşma sürecinin
-  // ilerleyebilmesi kuralı artık yalnızca Kabul Et/Reddet aksiyonu
-  // üzerinde uygulanır (bkz. updateOfferStatus#isOfferPendingActionBlocked).
+  // Bir ilana kabul edilmiş (ama işe HENÜZ başlanmamış — ön anlaşma/görüşme
+  // aşaması) bir teklif olması YENİ teklif vermeyi engellemez (bkz.
+  // job-requests.ts#isJobClosedToNewOffers dokümantasyonu, KRİTİK MİMARİ
+  // AYRIM) — diğer Hizmet Verenler de bu ilana teklif verebilir; aynı anda
+  // yalnızca TEK teklifin anlaşma sürecinin ilerleyebilmesi kuralı ayrıca
+  // Kabul Et/Reddet aksiyonu üzerinde uygulanır (bkz.
+  // updateOfferStatus#isOfferPendingActionBlocked). AMA iş fiilen
+  // BAŞLADIĞINDA (in_progress) ya da ötesine geçtiğinde (tamamlama
+  // süreçleri/completed) ilan KESİN olarak kapanır — "TEKLİF KABULÜ VE İŞE
+  // BAŞLAMA KİLİT KURALI" düzeltmesi, kök neden: bu kontrol önceden hiç
+  // yoktu.
   if (!isJobOpenForOffers(job.status)) {
     return { ok: false, error: "Bu ilan artık teklif almaya açık değil." };
+  }
+  if (isJobClosedToNewOffers(input.jobId, all)) {
+    return { ok: false, error: "Bu ilan için bir hizmet verenle iş başlamış, yeni teklif alınmıyor." };
   }
 
   // 2) Aktif iş kapasitesi kontrolü — yalnızca daha önce teklif verilmemişse
@@ -744,16 +796,31 @@ export function recordAgreementFailure(
 /**
  * İlan silme, kullanıcı arayüzünün çağırması gereken asıl (yetkilendirilmiş)
  * giriş noktasıdır — job-store.ts#deleteJob'ı doğrudan çağırmak yerine bunu
- * kullanın. İlan kaydı ve ona bağlı TÜM teklifler (durumu bekleyen,
- * reddedilen ya da anlaşma sağlanamayan fark etmez) birlikte silinir.
- * job-store.ts kendi başına teklif deposunu bilmediği için (bkz. o
+ * kullanın. job-store.ts kendi başına teklif deposunu bilmediği için (bkz. o
  * dosyadaki not), "kabul edilmiş/devam eden teklifi var mı" kontrolü burada
  * yapılır — offers.ts zaten jobs-lookup.ts üzerinden job-store.ts'e bağımlı
  * olduğundan (tersi mümkün değil, döngüsel import olurdu), hem ilan hem
- * teklif verisine erişebilen tek nokta burasıdır. Bildirimler ayrı bir
- * tabloda tutulmadığı, jobs+offers'tan türetildiği için (notifications.ts)
- * teklifler silinince bu ilana bağlı tüm bildirimler de kendiliğinden
- * ortadan kalkar — ayrı bir "bildirim temizleme" adımına gerek yoktur.
+ * teklif verisine erişebilen tek nokta burasıdır.
+ *
+ * OPERASYON HİZMET KALEMİ YAŞAM DÖNGÜSÜ DÜZELTMESİ: bu ilana bağlı hâlâ
+ * "pending" olan teklifler artık SİLİNMEZ — `"rejected"`e (mevcut, yeni bir
+ * durum İCAT EDİLMEDİ) çevrilir ve KORUNUR. Kök neden: bildirimler ayrı bir
+ * tabloda tutulmaz, jobs+offers'tan CANLI türetilir (notifications.ts) — bir
+ * Offer kaydı tamamen silinirse ondan artık HİÇBİR bildirim türetilemez, bu
+ * yüzden "İlan sahibi ilgili hizmet talebini yayından kaldırdı" bildirimi
+ * (bkz. notifications.ts#jobRemovedNotifications) teklif kaydının hayatta
+ * kalmasına muhtaçtır. `"rejected"` seçildi çünkü mekanik olarak DOĞRU
+ * (artık beklemede değil, aksiyon alınamaz, kapasiteyi serbest bırakır) ve
+ * TAMAMEN mevcut bir durumdur; `getOfferStatusLabel`/`getProviderOfferFilter`
+ * gibi hiçbir mevcut yardımcı fonksiyon değiştirilmez. Zaten terminal olan
+ * teklifler (rejected/withdrawn/agreement_failed/cancelled/completed)
+ * dokunulmadan aynen korunur — geçmiş/denetim izi kaybolmaz. Diğer tüm
+ * ekranlar (Gelen Teklifler, Verdiğim Teklifler) bu ilanı zaten `jobById`
+ * araması `undefined` döndüğü için mevcut "İlan artık mevcut değil"/"İlan
+ * bilgisine ulaşılamadı" GÜVENLİ fallback'leriyle (bkz. incoming-offer-card.tsx,
+ * my-offers-panel.tsx — hiçbiri değiştirilmedi) sorunsuz gösterir; Gelen
+ * Teklifler'de ise bu ilan artık `myJobIds`de olmadığı için teklifleri o
+ * ekrandan zaten otomatik düşer (bkz. incoming-offers-panel.tsx).
  */
 export async function deleteJobWithOffers(
   session: Session | null,
@@ -784,7 +851,14 @@ export async function deleteJobWithOffers(
     return jobDeleteResult;
   }
 
-  writeAllOffers(all.filter((offer) => offer.jobId !== jobId));
+  const now = new Date().toISOString();
+  writeAllOffers(
+    all.map((offer) =>
+      offer.jobId === jobId && offer.status === "pending"
+        ? { ...offer, status: "rejected" as const, updatedAt: now }
+        : offer,
+    ),
+  );
   return { ok: true };
 }
 
