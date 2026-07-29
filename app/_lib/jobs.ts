@@ -152,6 +152,20 @@ export function formatJobDate(isoDate: string): string {
 }
 
 /**
+ * `workDate`/`workEndDate` çiftinin TEK ortak gösterim biçimi — bitiş tarihi
+ * yoksa (bu alandan önce oluşturulmuş eski bir ilan) ya da başlangıçla AYNI
+ * güne denk geliyorsa yalnızca tek tarih gösterilir (gereksiz tekrar
+ * yapılmaz); farklıysa "başlangıç - bitiş" aralığı olarak gösterilir. İki
+ * tarih de ham "YYYY-MM-DD" (`<input type="date">`) biçiminde saklandığı
+ * için karşılaştırma doğrudan metin eşitliğiyle yapılır — saat dilimi
+ * dönüşümü riski yoktur.
+ */
+export function formatJobDateRange(workDate: string, workEndDate?: string): string {
+  if (!workEndDate || workEndDate === workDate) return formatJobDate(workDate);
+  return `${formatJobDate(workDate)} - ${formatJobDate(workEndDate)}`;
+}
+
+/**
  * Yalnızca bilgilendirme amaçlı: çalışma tarihi bugünden önceyse true
  * döner. Hiçbir işlemi engellemez, hiçbir alanı değiştirmez — yalnızca
  * arayüzde küçük bir öneri notu göstermek için kullanılır. Karşılaştırma

@@ -76,6 +76,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
   const locationUrlId = useId();
   const directionsNoteId = useId();
   const workDateId = useId();
+  const workEndDateId = useId();
   const operationDetailsId = useId();
   const photosId = useId();
 
@@ -109,6 +110,11 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
   const [locationUrl, setLocationUrl] = useState(job.locationUrl ?? "");
   const [directionsNote, setDirectionsNote] = useState(job.directionsNote ?? "");
   const [workDate, setWorkDate] = useState(job.workDate);
+  // Bu alandan önce oluşturulmuş bir ilanda workEndDate hiç yoktur — sahte
+  // bir tarih uydurmak yerine form boş başlar, kaydetmek için kullanıcının
+  // (mevcut oluşturma akışıyla AYNI kuralla, bkz. job-form-validation.ts#
+  // validateWorkDateRange) geçerli bir bitiş tarihi seçmesi gerekir.
+  const [workEndDate, setWorkEndDate] = useState(job.workEndDate ?? "");
   const [operationDetails, setOperationDetails] = useState(job.operationDetails);
   const [photoState, setPhotoState] = useState<{ keptPhotoIds: string[]; newPhotos: ReadyJobPhoto[] }>(
     () => ({ keptPhotoIds: job.photos.map((photo) => photo.id), newPhotos: [] }),
@@ -214,6 +220,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
       locationUrl,
       directionsNote,
       workDate,
+      workEndDate,
       operationDetails,
       photoCount,
     });
@@ -239,6 +246,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
         locationUrl,
         directionsNote,
         workDate,
+        workEndDate,
         description,
         operationDetails,
         keptPhotoIds: photoState.keptPhotoIds,
@@ -258,7 +266,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
-      <div className="grid gap-6 sm:grid-cols-2">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <label htmlFor={categoryId} className="text-sm font-medium text-foreground">
             Hizmet Kategorisi
@@ -291,7 +299,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
 
         <div>
           <label htmlFor={workDateId} className="text-sm font-medium text-foreground">
-            İş Tarihi
+            Başlangıç Tarihi
           </label>
           <input
             id={workDateId}
@@ -305,6 +313,26 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
           {errors.workDate && (
             <p id={`${workDateId}-error`} className="mt-2 text-sm text-danger">
               {errors.workDate}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor={workEndDateId} className="text-sm font-medium text-foreground">
+            Bitiş Tarihi
+          </label>
+          <input
+            id={workEndDateId}
+            type="date"
+            value={workEndDate}
+            onChange={(event) => setWorkEndDate(event.target.value)}
+            aria-invalid={errors.workEndDate ? true : undefined}
+            aria-describedby={errors.workEndDate ? `${workEndDateId}-error` : undefined}
+            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          {errors.workEndDate && (
+            <p id={`${workEndDateId}-error`} className="mt-2 text-sm text-danger">
+              {errors.workEndDate}
             </p>
           )}
         </div>

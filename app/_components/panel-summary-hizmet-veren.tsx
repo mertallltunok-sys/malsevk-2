@@ -24,7 +24,7 @@ export function PanelSummaryHizmetVeren({
 
   return (
     <div>
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+      <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
         Panel Özeti
       </h1>
       <p className="mt-3 text-base leading-relaxed text-muted-foreground">
@@ -86,7 +86,7 @@ export function PanelSummaryHizmetVeren({
       </div>
 
       <div className="mt-10">
-        <h2 className="text-lg font-semibold text-foreground">Hızlı İşlemler</h2>
+        <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Hızlı İşlemler</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <PanelQuickActionCard
             href="/ilanlar"
@@ -102,7 +102,7 @@ export function PanelSummaryHizmetVeren({
       </div>
 
       <div className="mt-10">
-        <h2 className="text-lg font-semibold text-foreground">Son Hareketler</h2>
+        <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Son Hareketler</h2>
         <p className="mt-1 text-sm text-muted-foreground">En son teklif ve işlem hareketleriniz</p>
         <div className="mt-4">
           <PanelActivityList

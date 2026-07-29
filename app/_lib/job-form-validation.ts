@@ -18,9 +18,45 @@ export type JobFormFields = {
   /** Yalnızca locationMode "custom" olduğunda anlamlı, isteğe bağlı. */
   directionsNote: string;
   workDate: string;
+  /** Bkz. types.ts#Job.workEndDate. İlan düzenleme (job-edit-form.tsx) her zaman bir değer gönderir — bu alandan önce oluşturulmuş (workEndDate'i hiç olmayan) bir ilan düzenlenirken form boş başlar ve validateWorkDateRange normal şekilde zorunlu kılar. */
+  workEndDate: string;
   operationDetails: string;
   photoCount: number;
 };
+
+/**
+ * Başlangıç/bitiş tarih çiftinin TEK ortak doğrulaması — hem `validateJobForm`
+ * (ilan düzenleme) hem `validateServiceItem` (ilan oluşturma) burayı çağırır;
+ * kural iki dosyada/iki yerde ayrı ayrı kopyalanmaz. Geçmiş tarih politikası:
+ * yalnızca boş/parse edilemez olup olmadığı kontrol edilir, geçmiş bir tarih
+ * reddedilmez. Aynı gün (workEndDate === workDate) geçerlidir.
+ */
+function validateWorkDateRange(
+  workDateRaw: string,
+  workEndDateRaw: string,
+): { workDate?: string; workEndDate?: string } {
+  const errors: { workDate?: string; workEndDate?: string } = {};
+
+  const workDate = workDateRaw.trim();
+  const workDateTime = new Date(workDateRaw).getTime();
+  if (workDate.length === 0) {
+    errors.workDate = "Başlangıç tarihini seçiniz.";
+  } else if (Number.isNaN(workDateTime)) {
+    errors.workDate = "Geçerli bir başlangıç tarihi seçiniz.";
+  }
+
+  const workEndDate = workEndDateRaw.trim();
+  const workEndDateTime = new Date(workEndDateRaw).getTime();
+  if (workEndDate.length === 0) {
+    errors.workEndDate = "Bitiş tarihini seçiniz.";
+  } else if (Number.isNaN(workEndDateTime)) {
+    errors.workEndDate = "Geçerli bir bitiş tarihi seçiniz.";
+  } else if (workDate.length > 0 && !Number.isNaN(workDateTime) && workEndDateTime < workDateTime) {
+    errors.workEndDate = "Bitiş tarihi başlangıç tarihinden önce olamaz.";
+  }
+
+  return errors;
+}
 
 export type JobFormErrors = Partial<Record<keyof JobFormFields, string>>;
 
@@ -126,11 +162,9 @@ export function validateJobForm(fields: JobFormFields): JobFormErrors {
     }
   }
 
-  if (fields.workDate.trim().length === 0) {
-    errors.workDate = "İş tarihini seçiniz.";
-  } else if (Number.isNaN(new Date(fields.workDate).getTime())) {
-    errors.workDate = "Geçerli bir tarih seçiniz.";
-  }
+  const dateRangeErrors = validateWorkDateRange(fields.workDate, fields.workEndDate);
+  if (dateRangeErrors.workDate) errors.workDate = dateRangeErrors.workDate;
+  if (dateRangeErrors.workEndDate) errors.workEndDate = dateRangeErrors.workEndDate;
 
   const operationDetails = fields.operationDetails.trim();
   if (operationDetails.length === 0) {
@@ -189,14 +223,14 @@ export const SERVICE_LOCATION_ERROR_KEYS: (keyof ServiceItemErrors)[] = [
 ];
 
 /**
- * Tek bir hizmet kartının tam doğrulaması. Geçmiş tarih politikası BİLEREK
- * mevcut `validateJobForm`'un `workDate` kuralıyla AYNI (yalnızca boş/parse
- * edilemez olup olmadığı kontrol edilir, geçmiş bir tarih reddedilmez) —
- * burada yeni ve çelişkili bir tarih politikası icat edilmez. Bir karttaki
- * hata yalnızca o kartın kendi `ServiceItemErrors` nesnesinde döner; çağıran
- * taraf (job-request-form.tsx) bunu her kartın kendi yerel kimliğiyle
- * (localId) eşleştirip AYRI AYRI gösterir, bu yüzden bir karttaki hata
- * diğerini hiç etkilemez.
+ * Tek bir hizmet kartının tam doğrulaması. Başlangıç/bitiş tarih çifti
+ * `validateWorkDateRange`'e (yukarıda) devredilir — `validateJobForm` (ilan
+ * düzenleme) da AYNI fonksiyonu çağırır, bu yüzden ikisi arasında asla
+ * farklı/çelişkili bir tarih politikası oluşamaz. Bir karttaki hata yalnızca
+ * o kartın kendi `ServiceItemErrors` nesnesinde döner; çağıran taraf
+ * (job-request-form.tsx) bunu her kartın kendi yerel kimliğiyle (localId)
+ * eşleştirip AYRI AYRI gösterir, bu yüzden bir karttaki hata diğerini hiç
+ * etkilemez.
  */
 export function validateServiceItem(fields: ServiceItemFields): ServiceItemErrors {
   const errors: ServiceItemErrors = {};
@@ -272,23 +306,9 @@ export function validateServiceItem(fields: ServiceItemFields): ServiceItemError
     }
   }
 
-  const workDate = fields.workDate.trim();
-  const workDateTime = new Date(fields.workDate).getTime();
-  if (workDate.length === 0) {
-    errors.workDate = "Başlangıç tarihini seçiniz.";
-  } else if (Number.isNaN(workDateTime)) {
-    errors.workDate = "Geçerli bir başlangıç tarihi seçiniz.";
-  }
-
-  const workEndDate = fields.workEndDate.trim();
-  const workEndDateTime = new Date(fields.workEndDate).getTime();
-  if (workEndDate.length === 0) {
-    errors.workEndDate = "Bitiş tarihini seçiniz.";
-  } else if (Number.isNaN(workEndDateTime)) {
-    errors.workEndDate = "Geçerli bir bitiş tarihi seçiniz.";
-  } else if (workDate.length > 0 && !Number.isNaN(workDateTime) && workEndDateTime < workDateTime) {
-    errors.workEndDate = "Bitiş tarihi başlangıç tarihinden önce olamaz.";
-  }
+  const serviceDateRangeErrors = validateWorkDateRange(fields.workDate, fields.workEndDate);
+  if (serviceDateRangeErrors.workDate) errors.workDate = serviceDateRangeErrors.workDate;
+  if (serviceDateRangeErrors.workEndDate) errors.workEndDate = serviceDateRangeErrors.workEndDate;
 
   return errors;
 }

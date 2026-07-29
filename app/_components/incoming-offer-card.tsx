@@ -129,14 +129,14 @@ export function IncomingOfferCard({
               </p>
             )}
             {identityRevealed ? (
-              <p className="mt-1 truncate text-sm font-semibold text-foreground">
+              <p className="mt-1 truncate text-sm font-bold tracking-heading leading-tight text-foreground">
                 {companyName}
                 <span className="ml-2 font-normal text-muted-foreground">
                   ({getRoleLabel("hizmet-veren")})
                 </span>
               </p>
             ) : (
-              <p className="mt-1 truncate text-sm font-semibold text-foreground">{anonymousLabel}</p>
+              <p className="mt-1 truncate text-sm font-bold tracking-heading leading-tight text-foreground">{anonymousLabel}</p>
             )}
             {identityRevealed && (
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

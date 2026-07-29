@@ -3,12 +3,12 @@
 import { CheckCircle2, Circle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useId, useMemo, useState } from "react";
+import { getProviderServiceCategoryIds } from "../_lib/provider-services";
 import {
   EXPERIENCE_RANGE_OPTIONS,
   SERVICE_CATEGORY_GROUPS,
   SERVICE_FEATURE_OPTIONS,
   getProviderServiceInfoCompletion,
-  isServiceCategoryId,
   isServiceFeature,
   migrateLegacyExpertiseToServiceCategoryIds,
 } from "../_lib/service-catalog";
@@ -33,16 +33,18 @@ const SERVICE_FEATURE_MULTISELECT_OPTIONS = SERVICE_FEATURE_OPTIONS.map((option)
  * Firma Profili'ndeki aynı `regions` alanını paylaşır (tek doğruluk
  * kaynağı, iki farklı ekrandan düzenlenir).
  *
- * MİGRASYON: `serviceCategories`in başlangıç değeri, kullanıcının eski
- * `expertise` (Uzmanlık Alanları, Hesap Ayarları) seçimlerinden mümkün
- * olanların yeni katalog id'lerine çevrilmiş hâliyle BİRLEŞTİRİLİR (bkz.
+ * MİGRASYON: `serviceCategories`in başlangıç değeri, provider-services.ts'teki
+ * (kayıt formu veya bu ekranın önceki bir kaydından yazılmış) güncel
+ * seçimlerle, kullanıcının eski `expertise` (Uzmanlık Alanları, Hesap
+ * Ayarları) seçimlerinden mümkün olanların yeni katalog id'lerine çevrilmiş
+ * hâlinin BİRLEŞTİRİLMESİYLE oluşur (bkz.
  * service-catalog.ts#migrateLegacyExpertiseToServiceCategoryIds) — bu
  * yüzden bu sayfayı ilk kez açan, daha önce yalnızca eski "Uzmanlık
  * Alanları"nı doldurmuş bir Hizmet Veren, uygulanabilir seçimlerinin
  * burada ZATEN işaretli geldiğini görür. Bu yalnızca OKUMA anındaki bir
  * birleştirmedir — orijinal `expertise` dizisi hiç değiştirilmez/silinmez,
- * yalnızca kullanıcı "Kaydet"e basarsa birleşik küme `serviceCategories`e
- * yazılır.
+ * yalnızca kullanıcı "Kaydet"e basarsa birleşik küme provider-services.ts'e
+ * yazılır (bkz. users.ts#updateProviderServiceInfo).
  */
 export function ServiceInfoEditor({ session, user }: { session: Session; user: StoredUser }) {
   const existing = user.providerProfile;
@@ -51,7 +53,7 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
   const [serviceCategories, setServiceCategories] = useState<string[]>(() =>
     Array.from(
       new Set([
-        ...(existing?.serviceCategories ?? []).filter(isServiceCategoryId),
+        ...getProviderServiceCategoryIds(user.id),
         ...migrateLegacyExpertiseToServiceCategoryIds(existing?.expertise ?? []),
       ]),
     ),
@@ -110,7 +112,7 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
 
   return (
     <div className="rounded-card border border-border bg-surface p-6">
-      <h2 className="text-lg font-semibold text-foreground">Hizmet Bilgilerim</h2>
+      <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Hizmet Bilgilerim</h2>
       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
         Verebileceğiniz hizmetleri, çalışma bölgelerinizi ve deneyiminizi belirtin — bu bilgiler ilan
         eşleştirme ve arama sonuçlarında kullanılacaktır.

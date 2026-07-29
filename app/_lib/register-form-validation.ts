@@ -15,8 +15,22 @@ export type RegisterFormErrors = Partial<{
   companyType: string;
   province: string;
   district: string;
-  kvkk: string;
-  terms: string;
+  /**
+   * Gizlilik Politikası/Kullanım Koşulları/KVKK Aydınlatma Metni'ni TEK
+   * birleşik onay kutusu üzerinden kapsar (bkz. login-form.tsx) — önceden
+   * ayrı `kvkk`/`terms` alanları vardı, kayıt formu tek bir "üçünü de
+   * okudum, kabul ediyorum" kutusuna geçtiği için (bkz. görev gereksinimi)
+   * TEK bir hata alanı yeterlidir. Her metin için ayrı kabul KAYDI hâlâ
+   * tutulur (bkz. legal-consent.ts#recordConsentForAllLegalDocuments) —
+   * yalnızca FORMDAKİ doğrulama/hata gösterimi birleştirildi.
+   */
+  legalConsent: string;
+  /** Yalnızca role "hizmet-veren" iken doğrulanır — bkz. "Verdiğiniz Hizmetler". */
+  providerServices: string;
+  /** Yalnızca role "hizmet-veren" iken doğrulanır — bkz. "Faaliyet Belgesi/Raporu Yükle". */
+  providerDocuments: string;
+  /** Yalnızca role "hizmet-veren" iken doğrulanır — bkz. "Belge Doğruluk Beyanı". */
+  documentDeclaration: string;
 }>;
 
 export type RegisterFormValidation = {
@@ -36,8 +50,13 @@ export function validateRegisterFormFields(fields: {
   companyType: string;
   province: string;
   district: string;
-  kvkkAccepted: boolean;
-  termsAccepted: boolean;
+  legalConsentAccepted: boolean;
+  /** Yalnızca role "hizmet-veren" iken anlamlıdır. */
+  providerServiceCategoryIds: string[];
+  /** Yalnızca role "hizmet-veren" iken anlamlıdır — henüz yükleme/doğrulama sürecinde olanlar SAYILMAZ, yalnızca hazır (ready) belgeler. */
+  providerDocumentCount: number;
+  /** Yalnızca role "hizmet-veren" iken anlamlıdır. */
+  documentDeclarationAccepted: boolean;
 }): RegisterFormValidation {
   const errors: RegisterFormErrors = {};
 
@@ -98,14 +117,25 @@ export function validateRegisterFormFields(fields: {
     if (fields.district.trim().length === 0) {
       errors.district = "İlçe zorunludur.";
     }
+
+    // Hizmet seçimi/belge yükleme/beyan yalnızca Hizmet Veren için zorunludur
+    // (görev gereksinimi) — Hizmet Alan akışı bu üç alanı hiç görmez/hiç
+    // doğrulanmaz.
+    if (fields.role === "hizmet-veren") {
+      if (fields.providerServiceCategoryIds.length === 0) {
+        errors.providerServices = "En az bir hizmet seçmelisiniz.";
+      }
+      if (fields.providerDocumentCount === 0) {
+        errors.providerDocuments = "En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz.";
+      }
+      if (!fields.documentDeclarationAccepted) {
+        errors.documentDeclaration = "Belge doğruluk beyanını kabul etmelisiniz.";
+      }
+    }
   }
 
-  if (!fields.kvkkAccepted) {
-    errors.kvkk = "KVKK Aydınlatma Metni'ni kabul etmelisiniz.";
-  }
-
-  if (!fields.termsAccepted) {
-    errors.terms = "Kullanım Koşulları'nı kabul etmelisiniz.";
+  if (!fields.legalConsentAccepted) {
+    errors.legalConsent = "Devam etmek için Gizlilik Politikası, Kullanım Koşulları ve KVKK Aydınlatma Metni'ni kabul etmelisiniz.";
   }
 
   return { errors, normalizedPhone };

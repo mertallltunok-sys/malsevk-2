@@ -1,10 +1,18 @@
-export type UserRole = "hizmet-alan" | "hizmet-veren";
+/**
+ * "admin" yalnızca Hizmet Veren Belge Kontrolü panelini (bkz. app/admin) kullanan,
+ * dev-seed ile oluşturulan (bkz. users.ts#DEV_ACCOUNTS) bir roldür — kayıt formunda
+ * ("Hesap Türü") hiçbir zaman bir seçenek olarak sunulmaz, kendi kaydını oluşturamaz.
+ */
+export type UserRole = "hizmet-alan" | "hizmet-veren" | "admin";
 
 export type Session = {
   id: string;
   name: string;
   role: UserRole;
 };
+
+/** Bkz. provider-document-reviews.ts. */
+export type ProviderDocumentReviewStatus = "pending" | "approved" | "rejected" | "revision_requested";
 
 /** Bkz. service-catalog.ts#SERVICE_FEATURE_OPTIONS. */
 export type ServiceFeature = "operatorlu" | "operatorsuz" | "7-24" | "acil-hizmet" | "faturali";
@@ -49,6 +57,15 @@ export type ProviderProfile = {
    * service-info-editor.tsx), ama bu alanın kendisi yalnızca kullanıcı
    * kaydettiğinde yazılır.
    */
+  /**
+   * DEPRECATED — 2026-07-29 itibarıyla artık YAZILMAZ. Bir hizmet-veren'in
+   * güncel hizmet seçimleri artık provider-services.ts (userId -> serviceCategoryId
+   * ilişkisel tablosu, tek doğruluk kaynağı) üzerinden okunur/yazılır — bu
+   * alan yalnızca BU DEĞİŞİKLİKTEN ÖNCE zaten localStorage'a yazılmış eski
+   * profillerin normalizeStoredUser'da hata vermeden okunabilmesi için
+   * tipte tutulur (bkz. `expertise` alanındaki AYNI "deprecated ama
+   * kaldırılmadı" deseni). Yeni kod bu alana ASLA yazmamalı.
+   */
   serviceCategories?: string[];
   /** Yeni (Aşama 2): hizmet özellikleri çoklu seçimi. Bu alandan önce oluşturulmuş profillerde yoktur. */
   serviceFeatures?: ServiceFeature[];
@@ -59,6 +76,13 @@ export type ProviderProfile = {
 export type Currency = "TRY" | "USD";
 
 export type JobStatus = "yayinda" | "tamamlandi" | "iptal";
+
+/** Bkz. job-closure.ts — bir ilanın Hizmet Alan tarafından manuel olarak neden kapatıldığı. */
+export type JobClosureReason =
+  | "baska-hizmet-verenle-anlasildi"
+  | "hizmete-ihtiyac-kalmadi"
+  | "yanlislikla-olusturuldu"
+  | "diger";
 
 export type JobPhoto = {
   id: string;
@@ -147,6 +171,59 @@ export type Job = {
   workEndDate?: string;
   /** Sıralı operasyon fotoğrafları. Eski/sabit ilanlarda boş dizi olabilir. */
   photos: JobPhoto[];
+  /**
+   * İlan Yayın Süresi Yönetimi: ilanın GERÇEKTEN oluşturulduğu an (ISO 8601
+   * zaman damgası — yalnızca tarih değil, saat/dakika/saniye de içerir; 14
+   * günlük süre bunun üzerinden milisaniye hassasiyetiyle hesaplanır, bkz.
+   * job-publish-window.ts). Bu alandan ÖNCE oluşturulmuş TÜM ilanlarda
+   * (sabit örnek ilanlar dahil) yoktur — yokluğu bir hata değildir, o ilanın
+   * yayın süresi kuralından TAMAMEN muaf olduğu (hiçbir zaman otomatik
+   * "süresi doldu" sayılmayacağı) anlamına gelir; bkz.
+   * job-publish-window.ts#isJobPublishWindowExpired'ın bu alanı zorunlu
+   * kılan kontrolü. `createJob`/`createJobsForOperation`/`republishJob`
+   * (job-store.ts) HER ZAMAN doldurur.
+   */
+  createdAt?: string;
+  /**
+   * `createdAt` + `job-publish-window.ts#JOB_PUBLISH_WINDOW_DAYS` (14) —
+   * yine job-publish-window.ts'in TEK yardımcı fonksiyonuyla (computePublishEndAt)
+   * üretilir, başka hiçbir yerde elle hesaplanmaz. `createdAt` gibi bu
+   * alandan önceki ilanlarda da yoktur ve aynı muafiyet mantığına tabidir.
+   */
+  publishEndAt?: string;
+  /**
+   * Yeniden Yayınlama: bu ilan, süresi dolmuş BAŞKA bir ilanın (bkz.
+   * `republishedToJobId`, aşağıda) yerine `job-store.ts#republishJob` ile
+   * KLONLANARAK oluşturulduysa, o eski ilanın id'sini taşır — geçmişin
+   * (hangi ilanın hangi ilandan doğduğunun) izlenebilir kalması için. Normal
+   * `createJob`/`createJobsForOperation` ile oluşturulmuş ilanlarda hiç
+   * yoktur.
+   */
+  republishedFromJobId?: string;
+  /**
+   * Yeniden Yayınlama: bu ilan süresi dolduktan SONRA `republishJob` ile
+   * yeniden yayınlandıysa, onun yerine geçen YENİ ilanın id'sini taşır. Bu
+   * alan set edildiği an bu (eski) ilan artık "aksiyon bekleyen süresi dolan
+   * ilan" değil, salt geçmiş kaydıdır — job-publish-window.ts#
+   * isExpiredListingAwaitingAction bunu ayırt eder, aynı zamanda AYNI eski
+   * ilanın birden fazla kez yeniden yayınlanmasını (kontrolsüz kopya
+   * üretimini) önlemenin de tek kaynağıdır (bkz. republishJob'ın bu alanı
+   * zaten dolu bir ilan için reddettiği kontrol).
+   */
+  republishedToJobId?: string;
+  /**
+   * İlan Kapatma: Hizmet Alan bu ilanı `job-closure.ts#closeJobListing` ile
+   * manuel olarak kapattıysa doluTUR (ISO zaman damgası) — İlan Yayın Süresi
+   * Yönetimi'ndeki `publishEndAt` ile AYNI ilkeyle, `Job.status`a HİÇ
+   * dokunulmaz (bkz. CLAUDE.md "No real backend"'in Job.status'un asla
+   * değişmediği notu); ilan yalnızca "aktif" sayılmaktan çıkar. Kayıt
+   * SİLİNMEZ — bu alan doluyken bile ilan, teklif geçmişi ve bildirimleri
+   * olduğu gibi erişilebilir kalır. Bu alandan önce oluşturulmuş/kapatılmamış
+   * TÜM ilanlarda yoktur.
+   */
+  closedAt?: string;
+  /** Yalnızca `closedAt` doluysa anlamlıdır — seçilen kapatma nedeni, kalıcı olarak saklanır. */
+  closureReason?: JobClosureReason;
 };
 
 /**

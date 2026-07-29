@@ -2,20 +2,60 @@
 
 import { CheckCircle2, Circle, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { getCompanyTypeFieldLabel, getCompanyTypeOptions, isCompanyType, type CompanyType } from "../_lib/company-type";
+import { recordConsentForAllLegalDocuments } from "../_lib/legal-consent";
+import { getLegalDocumentMeta, type LegalDocumentId } from "../_lib/legal-documents";
+import { STORAGE_WRITE_ERROR_MESSAGE } from "../_lib/local-storage";
 import { validateLoginFields } from "../_lib/login-form-validation";
 import { evaluatePasswordRules } from "../_lib/password-rules";
+import { PROVIDER_DOCUMENT_DECLARATION_TEXT } from "../_lib/provider-document-consents";
+import { registerProviderAccount } from "../_lib/provider-registration";
 import { validateRegisterFormFields, type RegisterFormErrors } from "../_lib/register-form-validation";
 import { setSession } from "../_lib/session";
+import { SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import type { UserRole } from "../_lib/types";
 import { getDistrictsByProvinceCode, getProvinces } from "../_lib/turkey-locations";
 import { registerUser, seedDevAccountsIfNeeded, verifyLogin } from "../_lib/users";
+import { LegalDocumentModal } from "./legal-document-modal";
+import { MultiSelectChips } from "./multi-select-chips";
+import { ProviderDocumentUpload, type ReadyProviderDocument } from "./provider-document-upload";
 import { SearchableSelect } from "./searchable-select";
 
 type Mode = "giris" | "kayit";
 
 const isDev = process.env.NODE_ENV !== "production";
+
+/**
+ * Kayıt formundaki TEK birleşik onay cümlesi içinde (bkz. bu dosyanın
+ * altındaki checkbox bloğu) üç hukuki metin adının HER BİRİ ayrı ayrı
+ * tıklanabilir olmalı ve kendi modalını açmalı (bkz. görev gereksinimi).
+ * `event.stopPropagation()` KRİTİK: bu buton bir `<label>` İÇİNDE render
+ * edildiği için, olayın kabarmasını engellemezsek tarayıcı tıklamayı
+ * label'ın ilişkili checkbox'ına da yönlendirir — kullanıcı yalnızca
+ * metni okumak isterken kutuyu da işaretlemiş/işaretini kaldırmış olur.
+ */
+function LegalDocumentInlineTrigger({
+  documentId,
+  onOpen,
+}: {
+  documentId: LegalDocumentId;
+  onOpen: (documentId: LegalDocumentId) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen(documentId);
+      }}
+      className="underline decoration-dotted underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+    >
+      {getLegalDocumentMeta(documentId).title}
+    </button>
+  );
+}
 
 function PasswordRulesChecklist({
   password,
@@ -64,8 +104,10 @@ export function LoginForm({
   const companyTypeId = useId();
   const provinceId = useId();
   const districtId = useId();
-  const kvkkId = useId();
-  const termsId = useId();
+  const legalConsentId = useId();
+  const providerServicesId = useId();
+  const providerDocumentsId = useId();
+  const documentDeclarationId = useId();
 
   const [mode, setMode] = useState<Mode>(initialMode);
   const [firstName, setFirstName] = useState("");
@@ -80,12 +122,25 @@ export function LoginForm({
   const [companyType, setCompanyType] = useState<CompanyType | "">("");
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
-  const [kvkkAccepted, setKvkkAccepted] = useState(false);
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
+  const [providerServiceCategoryIds, setProviderServiceCategoryIds] = useState<string[]>([]);
+  const [providerDocuments, setProviderDocuments] = useState<ReadyProviderDocument[]>([]);
+  const [providerDocumentsBusy, setProviderDocumentsBusy] = useState(false);
+  const [documentDeclarationAccepted, setDocumentDeclarationAccepted] = useState(false);
   const [errors, setErrors] = useState<RegisterFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [justRegistered, setJustRegistered] = useState(false);
+  const [openLegalDocumentId, setOpenLegalDocumentId] = useState<LegalDocumentId | null>(null);
+  // React state (submitting) yalnızca UI'yi (buton disabled/metin) sürer —
+  // aynı JS event-loop turunda art arda iki tıklama/Enter, ikisi de state
+  // commit edilmeden ÖNCE handleSubmit'in kayıt (kayit) yoluna ulaşabilir,
+  // bu yüzden çift-gönderim koruması BUNA dayanamaz. `job-request-form.tsx#
+  // handlePublish`teki `submitLockRef` ile AYNI desen: senkron, render'dan
+  // bağımsız bir kilit — ilk geçerli çağrıda hemen kapanır, ikinci çağrı
+  // state güncellemesini beklemeden bu kilidi görüp döner. Yalnızca kayıt
+  // yoluna özeldir; giriş (giris) dalı bundan hiç etkilenmez.
+  const registerSubmitLockRef = useRef(false);
 
   useEffect(() => {
     void seedDevAccountsIfNeeded();
@@ -122,6 +177,19 @@ export function LoginForm({
   function handleRoleChange(nextRole: UserRole) {
     setRole(nextRole);
     clearFieldError("role");
+
+    // Hesap türü Hizmet Veren'den uzaklaştırılırsa o role özel doğrulama
+    // hataları temizlenir (görev gereksinimi) ve yüklenmiş-ama-henüz-hiçbir
+    // kullanıcıya bağlanmamış belge listesi sıfırlanır — ProviderDocumentUpload
+    // bu değişiklikle birlikte unmount olacağı için kendi IndexedDB blob'larını
+    // zaten temizler (bkz. o bileşenin unmount efekti), burada yalnızca bu
+    // formun artık geçersiz olan referansları bırakılır.
+    if (nextRole !== "hizmet-veren") {
+      clearFieldError("providerServices");
+      clearFieldError("providerDocuments");
+      clearFieldError("documentDeclaration");
+      setProviderDocuments([]);
+    }
   }
 
   // İl değiştiğinde ilçe seçimi temizlenir — eski ilçe artık yeni ile ait
@@ -157,67 +225,113 @@ export function LoginForm({
         setFormError(result.error);
         return;
       }
-      setSession({ id: result.user.id, name: result.user.name, role: result.user.role });
+      const sessionWritten = setSession({ id: result.user.id, name: result.user.name, role: result.user.role });
+      if (!sessionWritten) {
+        setFormError(STORAGE_WRITE_ERROR_MESSAGE);
+        return;
+      }
       router.push(redirectTo);
       return;
     }
 
-    const provinceName = provinces.find((item) => item.code === provinceCode)?.name ?? "";
-    const { errors: fieldErrors } = validateRegisterFormFields({
-      firstName,
-      lastName,
-      email,
-      phone,
-      password,
-      confirmPassword,
-      role,
-      companyName,
-      companyType,
-      province: provinceName,
-      district,
-      kvkkAccepted,
-      termsAccepted,
-    });
-    setErrors(fieldErrors);
-    if (Object.keys(fieldErrors).length > 0) return;
+    // Senkron kilit: state (submitting) commit edilmeden önce gelebilecek
+    // ikinci bir kayıt denemesini de hemen durdurur (bkz. registerSubmitLockRef
+    // tanımı). `finally` sayesinde validasyon hatası, registerUser'ın
+    // {ok:false} sonucu ya da beklenmeyen bir exception dahil HER çıkış
+    // yolunda kilit mutlaka açılır — takılı kalmaz.
+    if (registerSubmitLockRef.current) return;
+    registerSubmitLockRef.current = true;
+    try {
+      const provinceName = provinces.find((item) => item.code === provinceCode)?.name ?? "";
+      const { errors: fieldErrors } = validateRegisterFormFields({
+        firstName,
+        lastName,
+        email,
+        phone,
+        password,
+        confirmPassword,
+        role,
+        companyName,
+        companyType,
+        province: provinceName,
+        district,
+        legalConsentAccepted,
+        providerServiceCategoryIds,
+        providerDocumentCount: providerDocuments.length,
+        documentDeclarationAccepted,
+      });
+      setErrors(fieldErrors);
+      if (Object.keys(fieldErrors).length > 0) return;
 
-    setSubmitting(true);
-    const result = await registerUser({
-      name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-      email,
-      phone,
-      password,
-      role: role as UserRole,
-      companyName,
-      companyType: isCompanyType(companyType) ? companyType : undefined,
-      province: provinceName,
-      district,
-    });
-    setSubmitting(false);
-    if (!result.ok) {
-      setFormError(result.error);
-      return;
+      setSubmitting(true);
+      const baseInput = {
+        name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        email,
+        phone,
+        password,
+        role: role as UserRole,
+        companyName,
+        companyType: isCompanyType(companyType) ? companyType : undefined,
+        province: provinceName,
+        district,
+      };
+      // Hizmet Alan akışı registerUser'ı doğrudan çağırmaya devam eder
+      // (mevcut kayıt mekanizması hiç değişmedi); Hizmet Veren'in hizmet
+      // seçimi/belge/beyan yazımlarının hepsi ya da hiçbiri atomikliği
+      // yalnızca provider-registration.ts üzerinden sağlanabildiği için o
+      // akış ayrı bir fonksiyon çağırır (bkz. o dosyanın dokümantasyonu).
+      const result =
+        role === "hizmet-veren"
+          ? await registerProviderAccount({
+              ...baseInput,
+              serviceCategoryIds: providerServiceCategoryIds,
+              documents: providerDocuments.map((doc) => ({
+                indexedDbStorageKey: doc.indexedDbStorageKey,
+                originalFileName: doc.originalFileName,
+                mimeType: doc.mimeType,
+                extension: doc.extension,
+                size: doc.size,
+              })),
+              documentDeclarationAccepted,
+            })
+          : await registerUser(baseInput);
+      if (!result.ok) {
+        setFormError(result.error);
+        return;
+      }
+
+      // TEK birleşik onay kutusu, üç metnin de ("Gizlilik Politikası, Kullanım
+      // Koşulları ve KVKK Aydınlatma Metni'ni ... kabul ediyorum") kabul
+      // edildiği anlamına gelir — bu yüzden kayıt başarılı olur olmaz her üç
+      // belge için de AYRI birer kabul kaydı üretilir (bkz. legal-consent.ts
+      // dokümantasyonu), yeni oluşturulan kullanıcının id'siyle ilişkilendirilir.
+      recordConsentForAllLegalDocuments(result.user.id);
+
+      // Kayıt başarılı: kullanıcı otomatik oturum açmaz — giriş sekmesine
+      // yönlendirilir ve orada başarı mesajı gösterilir. `email` bilerek
+      // temizlenmez (giriş formunda önceden dolu gelsin diye); şifre ve diğer
+      // kayıt alanları temizlenir.
+      setFirstName("");
+      setLastName("");
+      setPhone("");
+      setPassword("");
+      setConfirmPassword("");
+      setRole("");
+      setCompanyName("");
+      setCompanyType("");
+      setProvinceCode("");
+      setDistrict("");
+      setLegalConsentAccepted(false);
+      setProviderServiceCategoryIds([]);
+      setProviderDocuments([]);
+      setDocumentDeclarationAccepted(false);
+      setErrors({});
+      setMode("giris");
+      setJustRegistered(true);
+    } finally {
+      registerSubmitLockRef.current = false;
+      setSubmitting(false);
     }
-
-    // Kayıt başarılı: kullanıcı otomatik oturum açmaz — giriş sekmesine
-    // yönlendirilir ve orada başarı mesajı gösterilir. `email` bilerek
-    // temizlenmez (giriş formunda önceden dolu gelsin diye); şifre ve diğer
-    // kayıt alanları temizlenir.
-    setFirstName("");
-    setLastName("");
-    setPhone("");
-    setPassword("");
-    setConfirmPassword("");
-    setRole("");
-    setCompanyName("");
-    setCompanyType("");
-    setProvinceCode("");
-    setDistrict("");
-    setKvkkAccepted(false);
-    setTermsAccepted(false);
-    setErrors({});
-    setMode("giris");
-    setJustRegistered(true);
   }
 
   return (
@@ -591,66 +705,122 @@ export function LoginForm({
                 )}
               </div>
             </div>
+
+            {role === "hizmet-veren" && (
+              <>
+                <fieldset>
+                  <legend className="text-sm font-medium text-foreground">Verdiğiniz Hizmetler</legend>
+                  <p className="mt-1 text-xs text-muted-foreground">Birden fazla hizmet seçebilirsiniz.</p>
+                  <div
+                    id={providerServicesId}
+                    aria-describedby={errors.providerServices ? `${providerServicesId}-error` : undefined}
+                    className="mt-3 flex flex-col gap-5"
+                  >
+                    {SERVICE_CATEGORY_GROUPS.map((group) => (
+                      <MultiSelectChips
+                        key={group.id}
+                        id={`${providerServicesId}-${group.id}`}
+                        label={group.label}
+                        options={group.categories.map((category) => ({ value: category.id, label: category.label }))}
+                        selected={providerServiceCategoryIds}
+                        onChange={(next) => {
+                          setProviderServiceCategoryIds(next);
+                          clearFieldError("providerServices");
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {errors.providerServices && (
+                    <p id={`${providerServicesId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                      {errors.providerServices}
+                    </p>
+                  )}
+                </fieldset>
+
+                <div>
+                  <p className="text-sm font-medium text-foreground">Faaliyet Belgesi veya Faaliyet Raporu Yükle</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Şirketinizin faaliyetini gösteren en az bir belge yükleyin (PDF, Word, Excel, ODT veya görsel
+                    biçimde).
+                  </p>
+                  <div className="mt-3">
+                    <ProviderDocumentUpload
+                      onDocumentsChange={(documents) => {
+                        setProviderDocuments(documents);
+                        clearFieldError("providerDocuments");
+                      }}
+                      onBusyChange={setProviderDocumentsBusy}
+                      disabled={submitting}
+                      errorId={errors.providerDocuments ? `${providerDocumentsId}-error` : undefined}
+                    />
+                  </div>
+                  {errors.providerDocuments && (
+                    <p id={`${providerDocumentsId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                      {errors.providerDocuments}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={documentDeclarationId}
+                    className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
+                  >
+                    <input
+                      id={documentDeclarationId}
+                      type="checkbox"
+                      checked={documentDeclarationAccepted}
+                      onChange={(event) => {
+                        setDocumentDeclarationAccepted(event.target.checked);
+                        clearFieldError("documentDeclaration");
+                      }}
+                      aria-invalid={errors.documentDeclaration ? true : undefined}
+                      aria-describedby={errors.documentDeclaration ? `${documentDeclarationId}-error` : undefined}
+                      className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
+                    />
+                    <span className="text-sm leading-relaxed text-foreground">{PROVIDER_DOCUMENT_DECLARATION_TEXT}</span>
+                  </label>
+                  {errors.documentDeclaration && (
+                    <p id={`${documentDeclarationId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                      {errors.documentDeclaration}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
 
         {mode === "kayit" && (
-          <div className="flex flex-col gap-3">
-            <div>
-              <label
-                htmlFor={kvkkId}
-                className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-              >
-                <input
-                  id={kvkkId}
-                  type="checkbox"
-                  checked={kvkkAccepted}
-                  onChange={(event) => {
-                    setKvkkAccepted(event.target.checked);
-                    clearFieldError("kvkk");
-                  }}
-                  aria-invalid={errors.kvkk ? true : undefined}
-                  aria-describedby={errors.kvkk ? `${kvkkId}-error` : undefined}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                />
-                <span className="text-sm leading-relaxed text-foreground">
-                  KVKK Aydınlatma Metni&apos;ni okudum ve kabul ediyorum.
-                </span>
-              </label>
-              {errors.kvkk && (
-                <p id={`${kvkkId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                  {errors.kvkk}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor={termsId}
-                className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-              >
-                <input
-                  id={termsId}
-                  type="checkbox"
-                  checked={termsAccepted}
-                  onChange={(event) => {
-                    setTermsAccepted(event.target.checked);
-                    clearFieldError("terms");
-                  }}
-                  aria-invalid={errors.terms ? true : undefined}
-                  aria-describedby={errors.terms ? `${termsId}-error` : undefined}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                />
-                <span className="text-sm leading-relaxed text-foreground">
-                  Kullanım Koşulları&apos;nı kabul ediyorum.
-                </span>
-              </label>
-              {errors.terms && (
-                <p id={`${termsId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                  {errors.terms}
-                </p>
-              )}
-            </div>
+          <div>
+            <label
+              htmlFor={legalConsentId}
+              className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
+            >
+              <input
+                id={legalConsentId}
+                type="checkbox"
+                checked={legalConsentAccepted}
+                onChange={(event) => {
+                  setLegalConsentAccepted(event.target.checked);
+                  clearFieldError("legalConsent");
+                }}
+                aria-invalid={errors.legalConsent ? true : undefined}
+                aria-describedby={errors.legalConsent ? `${legalConsentId}-error` : undefined}
+                className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
+              />
+              <span className="text-sm leading-relaxed text-foreground">
+                <LegalDocumentInlineTrigger documentId="privacy_policy" onOpen={setOpenLegalDocumentId} />,{" "}
+                <LegalDocumentInlineTrigger documentId="terms_of_service" onOpen={setOpenLegalDocumentId} /> ve{" "}
+                <LegalDocumentInlineTrigger documentId="kvkk" onOpen={setOpenLegalDocumentId} />
+                &apos;ni okudum, anladım ve kabul ediyorum.
+              </span>
+            </label>
+            {errors.legalConsent && (
+              <p id={`${legalConsentId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                {errors.legalConsent}
+              </p>
+            )}
           </div>
         )}
 
@@ -660,21 +830,35 @@ export function LoginForm({
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          aria-disabled={submitting}
-          className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
-        >
-          {submitting && <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
-          {mode === "giris"
-            ? submitting
-              ? "Giriş yapılıyor..."
-              : "Giriş Yap"
-            : submitting
-              ? "Hesap oluşturuluyor..."
-              : "Hesap Oluştur"}
-        </button>
+        {(() => {
+          // Belge yükleme/doğrulama sürüyorken (istemci -> sunucu -> IndexedDB
+          // zinciri henüz tamamlanmadıysa) gönderim kilitlenir — aksi halde
+          // henüz "ready" olmamış bir belge sessizce listeden düşmüş gibi
+          // kaydedilebilirdi.
+          const providerBusy = mode === "kayit" && role === "hizmet-veren" && providerDocumentsBusy;
+          const isSubmitDisabled = submitting || providerBusy;
+          return (
+            <button
+              type="submit"
+              disabled={isSubmitDisabled}
+              aria-disabled={isSubmitDisabled}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {(submitting || providerBusy) && (
+                <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
+              )}
+              {mode === "giris"
+                ? submitting
+                  ? "Giriş yapılıyor..."
+                  : "Giriş Yap"
+                : providerBusy
+                  ? "Belgeler doğrulanıyor..."
+                  : submitting
+                    ? "Hesap oluşturuluyor..."
+                    : "Hesap Oluştur"}
+            </button>
+          );
+        })()}
 
         {isDev && (
           <div className="rounded-md border border-dashed border-border bg-background p-4 text-xs leading-relaxed text-muted-foreground">
@@ -684,9 +868,19 @@ export function LoginForm({
             <p className="mt-1">Hizmet Alan: zeynep@test.com / Zeynep1!</p>
             <p>Hizmet Veren: mert@test.com / Mert123!</p>
             <p>Hizmet Veren: mehmet.demir.demo@malsevk.com / Demo123!</p>
+            <p>Nakliyeci: nakliyeci@test.com / Nakliye123!</p>
+            <p>Admin (Belge Kontrolü): admin@test.com / Admin123!</p>
           </div>
         )}
       </form>
+
+      {openLegalDocumentId && (
+        <LegalDocumentModal
+          documentId={openLegalDocumentId}
+          mode="consent"
+          onClose={() => setOpenLegalDocumentId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -51,7 +51,7 @@ export function JobRatingWidget({ offer, session }: { offer: Offer; session: Ses
             Değerlendirmeniz için teşekkür ederiz.
           </p>
         )}
-        <p className="text-sm font-semibold text-foreground">Verdiğiniz puan</p>
+        <p className="text-sm font-bold tracking-heading leading-tight text-foreground">Verdiğiniz puan</p>
         <div className="mt-2 flex items-center gap-3">
           <StarRatingInput value={existingRating.stars} onChange={() => {}} disabled />
           <span className="text-sm font-medium text-muted-foreground">{existingRating.stars} / 5</span>
@@ -69,7 +69,7 @@ export function JobRatingWidget({ offer, session }: { offer: Offer; session: Ses
 
   return (
     <div className="mt-4 rounded-card border border-border bg-background p-4">
-      <p className="text-sm font-semibold text-foreground">Bu hizmeti henüz değerlendirmediniz.</p>
+      <p className="text-sm font-bold tracking-heading leading-tight text-foreground">Bu hizmeti henüz değerlendirmediniz.</p>
       <button
         type="button"
         onClick={() => setModalOpen(true)}

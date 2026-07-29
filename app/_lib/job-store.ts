@@ -1,9 +1,12 @@
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "./job-requests";
-import { writeJson } from "./local-storage";
-import { deletePhotoBlob, deletePhotoBlobs, putPhotoBlob } from "./photo-blob-store";
+import { createPublishWindow, isJobListingExpired } from "./job-publish-window";
+import { isJobClosureReason, isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE } from "./job-closure";
+import { isJobDateInPast } from "./jobs";
+import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
+import { deletePhotoBlob, deletePhotoBlobs, getPhotoBlob, putPhotoBlob } from "./photo-blob-store";
 import { MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
 import { getServiceCategoryLabel, isServiceCategoryId } from "./service-catalog";
-import type { Job, JobPhoto, JobStatus, Offer, Session } from "./types";
+import type { Job, JobClosureReason, JobPhoto, JobStatus, Offer, Session } from "./types";
 
 const USER_JOBS_STORAGE_KEY = "malsevk.jobs.v1";
 
@@ -77,6 +80,20 @@ function normalizeStoredJob(value: unknown): Job | null {
     directionsNote: typeof record.directionsNote === "string" ? record.directionsNote : undefined,
     operationId: typeof record.operationId === "string" ? record.operationId : undefined,
     workEndDate: typeof record.workEndDate === "string" ? record.workEndDate : undefined,
+    // İlan Yayın Süresi Yönetimi: bu dört alan bu özellikten önce oluşturulmuş
+    // TÜM ilanlarda (sabit örnek ilanlar dahil) yoktur — eksikliği bir hata
+    // değildir, job-publish-window.ts bu durumu "yayın süresi kuralından
+    // muaf" olarak güvenle yorumlar (bkz. o dosyanın dokümantasyonu). Kayıt
+    // hiçbir şekilde bozulmaz/silinmez/yanlış bölüme taşınmaz.
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : undefined,
+    publishEndAt: typeof record.publishEndAt === "string" ? record.publishEndAt : undefined,
+    republishedFromJobId: typeof record.republishedFromJobId === "string" ? record.republishedFromJobId : undefined,
+    republishedToJobId: typeof record.republishedToJobId === "string" ? record.republishedToJobId : undefined,
+    // İlan Kapatma: bu alanlar bu özellikten önce oluşturulmuş/hiç
+    // kapatılmamış TÜM ilanlarda yoktur — aynı "eksikliği hata sayma"
+    // ilkesiyle (bkz. photos/facilityId) undefined'a normalize edilir.
+    closedAt: typeof record.closedAt === "string" ? record.closedAt : undefined,
+    closureReason: isJobClosureReason(record.closureReason) ? record.closureReason : undefined,
   } as Job;
 }
 
@@ -131,11 +148,19 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-function writeUserCreatedJobs(jobs: Job[]): void {
-  writeJson(USER_JOBS_STORAGE_KEY, jobs);
+/**
+ * `writeJson` başarısız olursa (bkz. local-storage.ts) `false` döner ve
+ * ÖNBELLEK/BİLDİRİM (notify) HİÇ TETİKLENMEZ — bu, arayüzün eski (gerçekte
+ * hâlâ geçerli olan) veriyi göstermeye devam etmesini, yazılmamış bir
+ * değişikliği asla "başarılı" gibi yansıtmamasını sağlar (bkz. CLAUDE.md B1
+ * düzeltmesi). Her çağıran, bu sonucu kendi `{ok,error}` sözleşmesine çevirir.
+ */
+function writeUserCreatedJobs(jobs: Job[]): boolean {
+  if (!writeJson(USER_JOBS_STORAGE_KEY, jobs)) return false;
   cachedRaw = null;
   hasCached = false;
   notify();
+  return true;
 }
 
 export const userJobsStore = {
@@ -196,7 +221,7 @@ export async function removeUserCreatedJobsByIds(ids: string[]): Promise<Job[]> 
   const all = readUserCreatedJobsSnapshot();
   const removed = all.filter((job) => idSet.has(job.id));
   if (removed.length === 0) return [];
-  writeUserCreatedJobs(all.filter((job) => !idSet.has(job.id)));
+  if (!writeUserCreatedJobs(all.filter((job) => !idSet.has(job.id)))) return [];
 
   const photoKeys = removed.flatMap((job) => job.photos.map((photo) => photo.storageKey));
   if (photoKeys.length > 0) {
@@ -348,6 +373,10 @@ export async function createJob(
     return { ok: false, error: "Fotoğraflar kaydedilemedi. Lütfen tekrar deneyin." };
   }
 
+  // İlan Yayın Süresi Yönetimi: kullanıcı yayın süresi seçemez/değiştiremez —
+  // sistem `createdAt`/`publishEndAt`i burada, formdan tamamen bağımsız
+  // olarak belirler (bkz. job-publish-window.ts, tek doğruluk kaynağı).
+  const { createdAt, publishEndAt } = createPublishWindow();
   const job: Job = {
     id: crypto.randomUUID(),
     title: input.title.trim(),
@@ -362,10 +391,18 @@ export async function createJob(
     status: "yayinda",
     requesterId: session.id,
     photos,
+    createdAt,
+    publishEndAt,
   };
 
   const all = readUserCreatedJobsSnapshot();
-  writeUserCreatedJobs([...all, job]);
+  if (!writeUserCreatedJobs([...all, job])) {
+    // Fotoğraflar zaten IndexedDB'ye yazıldı (yukarıda) ama ilan kaydı
+    // hiçbir yere bağlanamadı — sahipsiz blob bırakmamak için geri alınır
+    // (persistPhotosOrRollback'teki kısmi-yazım geri alma ile aynı gerekçe).
+    await deletePhotoBlobs(photos.map((photo) => photo.storageKey));
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   return { ok: true, job };
 }
@@ -534,6 +571,13 @@ export async function createJobsForOperation(
     persistedPhotoSets.push(photos);
   }
 
+  // İlan Yayın Süresi Yönetimi: aynı operasyondaki TÜM hizmetler aynı
+  // anda (bu tek çağrıda) oluşturulduğu için AYNI `createdAt`/`publishEndAt`
+  // çiftini paylaşır — her biri kendi bağımsız Job kaydında taşır (bkz.
+  // job-publish-window.ts'in "her ilan kendi oluşturulma zamanına göre"
+  // notu: burada hepsinin oluşturulma zamanı gerçekten aynı andır, bu yüzden
+  // paylaşmak veri uydurmak değildir).
+  const { createdAt, publishEndAt } = createPublishWindow();
   const jobs: Job[] = input.services.map((service, index) => ({
     id: crypto.randomUUID(),
     title: service.title.trim(),
@@ -549,10 +593,20 @@ export async function createJobsForOperation(
     requesterId: session.id,
     operationId,
     photos: persistedPhotoSets[index],
+    createdAt,
+    publishEndAt,
   }));
 
   const all = readUserCreatedJobsSnapshot();
-  writeUserCreatedJobs([...all, ...jobs]);
+  if (!writeUserCreatedJobs([...all, ...jobs])) {
+    // Her hizmet için ayrı ayrı persistlenmiş TÜM fotoğraf setleri (yukarıda)
+    // hiçbir ilana bağlanamadan sahipsiz kalmasın diye geri alınır — "hepsi ya
+    // da hiçbiri" atomikliğinin yazma başarısızlığına da uygulanmış hali.
+    await Promise.all(
+      persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
+    );
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   return { ok: true, jobs, operationId };
 }
@@ -572,6 +626,8 @@ export type UpdateJobInput = {
   locationUrl?: string;
   directionsNote?: string;
   workDate: string;
+  /** Bkz. types.ts#Job.workEndDate. Opsiyonel: verilmezse (undefined) mevcut kayıttaki değer korunur — job-edit-form.tsx her zaman bir değer gönderir, bu yalnızca geriye dönük uyumluluk içindir. */
+  workEndDate?: string;
   description: string;
   operationDetails: string;
   /** Korunacak mevcut fotoğrafların id'leri (silinenler bu listede olmaz). */
@@ -613,7 +669,12 @@ export async function updateJob(
   if (!existing || existing.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
-  if (!isJobEditable(jobId, offers)) {
+  // İlan Kapatma: kapatılmış bir ilan artık aktif sayılmadığından (bkz.
+  // job-closure.ts) düzenleme de anlamsızdır — `isJobEditable`in kendisi
+  // teklif durumlarına bakar, kapatma ise tamamen ayrı/manuel bir işlemdir,
+  // bu yüzden burada AYRICA kontrol edilir. Aynı, mevcut hata mesajı
+  // kullanılır (yeni bir metin icat edilmez).
+  if (!isJobEditable(jobId, offers) || isJobManuallyClosed(existing)) {
     return { ok: false, error: JOB_NOT_EDITABLE_MESSAGE };
   }
 
@@ -644,13 +705,21 @@ export async function updateJob(
     district: input.district.trim(),
     ...resolveLocationFields(input),
     workDate: input.workDate,
+    workEndDate: input.workEndDate ?? existing.workEndDate,
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),
     photos: combinedPhotos,
   };
 
   const all = readUserCreatedJobsSnapshot();
-  writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)));
+  if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
+    // Bu düzenlemede eklenen YENİ fotoğraflar (yukarıda persistlenmiş) hiçbir
+    // ilana bağlanamadan sahipsiz kalmasın diye geri alınır. Mevcut (korunan)
+    // fotoğraflara hiç dokunulmaz — eski kayıt localStorage'da olduğu gibi
+    // durur, kullanıcı hâlâ eski hâline erişebilir.
+    await deletePhotoBlobs(newlyPersisted.map((photo) => photo.storageKey));
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   // Kayıt başarıyla güncellendikten SONRA artık kullanılmayan eski
   // fotoğraf blob'larını sil — sıra önemli: kayıt önce, silme sonra, ki
@@ -695,7 +764,6 @@ export async function deleteJobPhoto(
     return { ok: false, error: "Fotoğraf bulunamadı." };
   }
 
-  await deletePhotoBlob(target.storageKey);
   const remaining = job.photos
     .filter((photo) => photo.id !== photoId)
     .sort((a, b) => a.order - b.order)
@@ -703,8 +771,17 @@ export async function deleteJobPhoto(
 
   const updated: Job = { ...job, photos: remaining };
   const all = readUserCreatedJobsSnapshot();
-  writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)));
+  // Ana yazım ÖNCE, blob silme SONRA (bkz. updateJob'daki aynı sıralama
+  // ilkesi) — ÖNCEDEN bu fonksiyon tersini yapıyordu (blob önce silinip
+  // Job kaydı sonra yazılıyordu), bu yüzden localStorage yazımı başarısız
+  // olursa ilan hâlâ artık var olmayan bir storageKey'e referans veriyor,
+  // fotoğraf bir daha hiç yüklenemiyordu. Kayıt yazılamazsa blob'a hiç
+  // dokunulmaz — kullanıcı fotoğrafına erişmeye devam eder.
+  if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
+  await deletePhotoBlob(target.storageKey);
   return { ok: true, job: updated };
 }
 
@@ -742,11 +819,208 @@ export async function deleteJob(session: Session | null, jobId: string): Promise
   }
 
   const all = readUserCreatedJobsSnapshot();
-  writeUserCreatedJobs(all.filter((item) => item.id !== jobId));
+  if (!writeUserCreatedJobs(all.filter((item) => item.id !== jobId))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   if (existing.photos.length > 0) {
     await deletePhotoBlobs(existing.photos.map((photo) => photo.storageKey));
   }
 
   return { ok: true };
+}
+
+export type CloseJobResult = { ok: true; job: Job } | { ok: false; error: string };
+
+/**
+ * Bir ilan kaydını KAPATIR (bkz. job-closure.ts) — silmez, `Job.status`a
+ * dokunmaz, yalnızca `closedAt`/`closureReason` yazar. `deleteJob`ın izlediği
+ * AYNI bölünme: bu fonksiyon yalnızca ilan tablosunu bilir — "MALSEVK
+ * üzerinden işe başlanmış/tamamlanma sürecine girmiş bir teklif var mı"
+ * kontrolü (bkz. job-closure.ts#JOB_CLOSURE_BLOCKED_MESSAGE) teklif verisine
+ * ihtiyaç duyduğu için offers.ts#closeJobListing içinde yapılır — normal
+ * kullanıcı akışının çağırması gereken, asıl yetkilendirilmiş giriş noktası
+ * odur. Zaten kapatılmış bir ilan için ikinci bir çağrı KESİN olarak
+ * reddedilir (rule: işlem geri alınamaz — bir ilan iki kez, farklı
+ * nedenlerle kapatılamaz).
+ */
+export function closeJob(
+  session: Session | null,
+  jobId: string,
+  reason: JobClosureReason,
+): CloseJobResult {
+  if (!session) {
+    return { ok: false, error: "İlanı kapatmak için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-alan") {
+    return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan kapatabilir." };
+  }
+
+  const existing = findUserCreatedJobById(jobId);
+  if (!existing || existing.requesterId !== session.id) {
+    return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
+  }
+  if (isJobManuallyClosed(existing)) {
+    return { ok: false, error: JOB_ALREADY_CLOSED_MESSAGE };
+  }
+
+  const updated: Job = { ...existing, closedAt: new Date().toISOString(), closureReason: reason };
+  const all = readUserCreatedJobsSnapshot();
+  if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
+  return { ok: true, job: updated };
+}
+
+/**
+ * Bir ilanın mevcut fotoğraflarını YENİ `storageKey`lerle IndexedDB'ye
+ * kopyalar — `republishJob` (aşağıda) için. `persistPhotosOrRollback`ın
+ * "createJobsForOperation'daki kardeş ilanlar arasında AYNI storageKey
+ * PAYLAŞILMAZ" kuralıyla BİREBİR aynı gerekçe: yeniden yayınlanan ilan,
+ * eski (artık salt geçmiş) ilandan TAMAMEN bağımsız olmalı — biri silinirse
+ * (ör. eski ilan "Kalıcı Olarak Sil" ile kaldırılırsa) diğerinin fotoğrafı
+ * kırılmamalı. Bir fotoğraf okunamazsa/yazılamazsa o ana kadar başarıyla
+ * kopyalanmış olan blob'lar geri alınır (silinir) ve `null` döner — kısmi/
+ * tutarsız bir kopya seti ASLA Job kaydına yazılmaz.
+ */
+async function duplicateJobPhotos(photos: JobPhoto[]): Promise<JobPhoto[] | null> {
+  const copied: JobPhoto[] = [];
+  try {
+    for (const photo of photos) {
+      const blob = await getPhotoBlob(photo.storageKey);
+      if (!blob) throw new Error(`Fotoğraf bulunamadı: ${photo.storageKey}`);
+      const storageKey = crypto.randomUUID();
+      await putPhotoBlob(storageKey, blob);
+      copied.push({ ...photo, storageKey });
+    }
+    return copied;
+  } catch {
+    await deletePhotoBlobs(copied.map((photo) => photo.storageKey));
+    return null;
+  }
+}
+
+export type RepublishJobInput = {
+  workDate: string;
+  workEndDate: string;
+};
+
+export type RepublishJobResult = { ok: true; job: Job } | { ok: false; error: string };
+
+/**
+ * Süresi dolmuş bir ilanı YENİ bir yayın dönemiyle yeniden yayınlar —
+ * job-requests-panel.tsx'teki "Süresi Dolan İlanlar" bölümünün "Yeniden
+ * Yayınla" aksiyonunun TEK yetkilendirilmiş giriş noktası.
+ *
+ * KÖK YAKLAŞIM — MEVCUT KAYDI MUTASYONA UĞRATMAK YERİNE KLONLAMA: eski ilan
+ * SİLİNMEZ/DEĞİŞTİRİLMEZ (yalnızca `republishedToJobId` eklenir) ve YENİ,
+ * bağımsız bir `Job` kaydı (yeni id) oluşturulur. Bu tercih, "eski tekliflerin
+ * yeni yayın dönemine karışmaması" gereksinimini YAPISAL olarak, hiçbir ek
+ * filtreleme koduna gerek kalmadan sağlar: teklifler `jobId`ye bağlıdır (bkz.
+ * types.ts#Offer.jobId) — yeni ilan YENİ bir id taşıdığı için, eski ilana ait
+ * hiçbir Offer/bildirim/geçmiş kaydı yeni ilana asla "sızamaz". Aynı sebeple
+ * offers.ts/notifications.ts/job-requests.ts içinde bu görev için TEK BİR
+ * satır bile değiştirilmesi gerekmedi.
+ *
+ * İki yönlü bağ: yeni ilanda `republishedFromJobId = existing.id`, eski
+ * ilanda `republishedToJobId = yeni.id` — geçmiş HER İKİ yönden de izlenebilir
+ * kalır (bkz. types.ts). `existing.republishedToJobId` zaten doluysa (bu eski
+ * ilan DAHA ÖNCE yeniden yayınlanmış) istek KESİN olarak reddedilir — aynı
+ * eski ilan üzerinden ikinci bir kopya asla üretilemez.
+ *
+ * KORUNAN ALANLAR: başlık, kategori, il/ilçe/lokasyon (facilityId/addressText/
+ * locationMode/neighborhood/locationUrl/directionsNote), açıklama, operasyon
+ * detayları, `operationId` (aynı operasyonun bir parçası olmaya devam eder —
+ * kardeş ilanlar bundan ETKİLENMEZ, bkz. CLAUDE.md "sibling jobs are fully
+ * independent") ve fotoğraflar (yeni storageKey'lerle kopyalanır, bkz.
+ * `duplicateJobPhotos`) — hepsi eski kayıttan aynen taşınır. YENİ olan
+ * yalnızca: id, `workDate`/`workEndDate` (kullanıcıdan alınan yeni tarihler),
+ * `createdAt`/`publishEndAt` (yeni 14 günlük pencere) ve `photos`un
+ * storageKey'leri.
+ */
+export async function republishJob(
+  session: Session | null,
+  jobId: string,
+  offers: Offer[],
+  input: RepublishJobInput,
+): Promise<RepublishJobResult> {
+  if (!session) {
+    return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-alan") {
+    return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan yeniden yayınlayabilir." };
+  }
+
+  const existing = findUserCreatedJobById(jobId);
+  if (!existing || existing.requesterId !== session.id) {
+    return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
+  }
+
+  // Arayüzden bağımsız, veri katmanındaki asıl yetkilendirme: yalnızca
+  // GERÇEKTEN süresi dolmuş bir ilan yeniden yayınlanabilir (bkz.
+  // job-publish-window.ts#isJobListingExpired, tek doğruluk kaynağı) — bu
+  // ekranın DIŞINDA (ör. konsoldan doğrudan çağrılarak) hâlâ aktif bir
+  // ilanın "yeniden yayınlanması" kılığında ikinci bir kopyası üretilemez.
+  if (!isJobListingExpired(existing, offers)) {
+    return { ok: false, error: "Bu ilan süresi dolmadığı için yeniden yayınlanamaz." };
+  }
+  // Aynı eski ilan üzerinden KONTROLSÜZ tekrar tetiklenirse (ör. çift
+  // tıklama, iki açık sekme, ya da kullanıcı zaten yeniden yayınlanmış bir
+  // kaydı yeniden denerse) mevcut `republishedToJobId` durumu buradan
+  // KESİN olarak engeller — ikinci bir kopya asla oluşmaz.
+  if (existing.republishedToJobId) {
+    return { ok: false, error: "Bu ilan zaten yeniden yayınlanmış." };
+  }
+
+  const start = new Date(input.workDate).getTime();
+  const end = new Date(input.workEndDate).getTime();
+  if (input.workDate.trim().length === 0 || Number.isNaN(start)) {
+    return { ok: false, error: "Geçerli bir başlangıç tarihi giriniz." };
+  }
+  if (input.workEndDate.trim().length === 0 || Number.isNaN(end)) {
+    return { ok: false, error: "Geçerli bir bitiş tarihi giriniz." };
+  }
+  if (isJobDateInPast(input.workDate)) {
+    return { ok: false, error: "Başlangıç tarihi geçmiş bir tarih olamaz." };
+  }
+  if (end < start) {
+    return { ok: false, error: "Bitiş tarihi başlangıç tarihinden önce olamaz." };
+  }
+
+  const duplicatedPhotos = await duplicateJobPhotos(existing.photos);
+  if (!duplicatedPhotos) {
+    return { ok: false, error: "Fotoğraflar kopyalanamadı. Lütfen tekrar deneyin." };
+  }
+
+  const { createdAt, publishEndAt } = createPublishWindow();
+  const newJobId = crypto.randomUUID();
+  const republished: Job = {
+    ...existing,
+    id: newJobId,
+    workDate: input.workDate,
+    workEndDate: input.workEndDate,
+    photos: duplicatedPhotos,
+    createdAt,
+    publishEndAt,
+    republishedFromJobId: existing.id,
+    republishedToJobId: undefined,
+  };
+
+  const updatedExisting: Job = { ...existing, republishedToJobId: newJobId };
+
+  const all = readUserCreatedJobsSnapshot();
+  if (
+    !writeUserCreatedJobs([
+      ...all.map((item) => (item.id === jobId ? updatedExisting : item)),
+      republished,
+    ])
+  ) {
+    // Yeni ilan için kopyalanmış fotoğraflar (yukarıda) hiçbir kayda
+    // bağlanamadan sahipsiz kalmasın diye geri alınır; eski ilan hiç
+    // değiştirilmediği için ona dokunmaya gerek yok.
+    await deletePhotoBlobs(duplicatedPhotos.map((photo) => photo.storageKey));
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
+
+  return { ok: true, job: republished };
 }

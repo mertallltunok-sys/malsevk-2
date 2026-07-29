@@ -5,6 +5,9 @@ import {
   getSettledOfferForJob,
   isOfferVisibleInNormalLists,
 } from "./job-requests";
+import { isExpiredListingAwaitingAction } from "./job-publish-window";
+import { getJobClosureNotificationMessage, isJobManuallyClosed } from "./job-closure";
+import { getProviderDocumentsForUser } from "./provider-documents";
 import type { Job, Offer, Session } from "./types";
 import { findUserById } from "./users";
 
@@ -23,7 +26,12 @@ export type NotificationType =
   | "itiraz_kaydedildi"
   | "is_iptal_edildi"
   | "teklif_geri_cekildi"
-  | "hizmet_kalemi_kaldirildi";
+  | "hizmet_kalemi_kaldirildi"
+  | "ilan_kapatildi"
+  | "ilan_yayin_suresi_doldu"
+  | "belge_onaylandi"
+  | "belge_reddedildi"
+  | "belge_revizyon_istendi";
 
 export type AppNotification = {
   id: string;
@@ -32,7 +40,14 @@ export type AppNotification = {
   title?: string;
   message: string;
   ilanId: string;
-  offerId: string;
+  /**
+   * Bu bildirim TEK bir Offer'a değil, doğrudan bir Job'a bağlıysa
+   * (bugün yalnızca "ilan_yayin_suresi_doldu" — ilanın yayın süresi hiç
+   * teklif gelmeden de dolabilir) bu alan yoktur. Hiçbir bileşen bu alanı
+   * gerçekten OKUMAZ (yalnızca `id`/`ilanId`/`href` kullanılır) — opsiyonel
+   * yapmak, var olmayan bir teklife sahte bir kimlik uydurmaktan güvenlidir.
+   */
+  offerId?: string;
   /** Bildirime tıklanınca gidilecek hedef route. */
   href: string;
   createdAt: string;
@@ -67,9 +82,18 @@ export type AppNotification = {
  *    gönderdiğinde "tamamlanma_onayi_bekleniyor" + kendi onayladığı
  *    tamamlanma için (işlem kaydı) "is_tamamlandi" + kendi gönderdiği
  *    itiraz için (işlem kaydı) "itiraz_kaydedildi" + geri çekilen teklif
- *    için "teklif_geri_cekildi".
+ *    için "teklif_geri_cekildi" + 14 günlük yayın süresi dolan (ve henüz
+ *    yeniden yayınlanmamış) bir ilan için "ilan_yayin_suresi_doldu" — bu
+ *    SONUNCUSU, diğer altısından farklı olarak `offers` değil DOĞRUDAN
+ *    `Job` üzerinden türetilir (bkz. expiredListingNotifications, aşağıda —
+ *    job-publish-window.ts#isExpiredListingAwaitingAction tek doğruluk
+ *    kaynağı) ve bu yüzden `offerId`si yoktur.
  *  - Hizmet Veren: kabul edilen teklifi için "teklif_kabul_edildi" +
- *    reddedilen teklifi için "teklif_reddedildi" + işe başlanan teklifi
+ *    reddedilen teklifi için "teklif_reddedildi" (ilan silinmişse
+ *    "hizmet_kalemi_kaldirildi", ilan manuel kapatılmışsa "ilan_kapatildi" —
+ *    bkz. jobRemovedNotifications/jobClosedNotifications, aşağıda; üçü de
+ *    AYNI "rejected" durumundan, yalnızca ilanın kendi durumuna göre
+ *    ayrışarak türetilir) + işe başlanan teklifi
  *    için "is_basladi" + anlaşma sağlanamayan teklifi için
  *    "anlasma_saglanamadi" + Hizmet Alan'ın onayladığı tamamlanma için
  *    "tamamlanma_onaylandi" + Hizmet Alan'ın itiraz ettiği tamamlanma
@@ -204,6 +228,40 @@ export function getNotificationsForSession(
         };
       });
 
+    // İlan Yayın Süresi Yönetimi: DİĞER tüm Hizmet Alan bildirimlerinden
+    // farklı olarak `offers`e değil DOĞRUDAN `Job`a bağlıdır — bir ilanın
+    // yayın süresi hiç teklif gelmeden de dolabilir (bkz. job-publish-window.ts).
+    // `id` yalnızca `job.id`ye bağlıdır (offer.id YOKTUR, bu yüzden
+    // `offerId` alanı hiç yazılmaz — bkz. AppNotification.offerId'nin
+    // opsiyonel olma gerekçesi) — bu, TEK SEFERLİK bildirim garantisinin
+    // kaynağıdır: `isExpiredListingAwaitingAction` (job-publish-window.ts)
+    // true kaldığı SÜRECE (ilan süresi dolmuş VE henüz yeniden
+    // yayınlanmamışken) her render'da AYNI id ile türetilir — bu,
+    // notification-reads.ts/notification-dismissals.ts'in bu bildirimi BİR
+    // KEZ okunmuş/kapatılmış olarak hatırlamasını sağlar, ayrı bir "zaten
+    // bildirildi" bayrağına gerek yoktur (tıpkı diğer tüm bildirim türleri
+    // gibi). İlan yeniden yayınlandığında (`republishedToJobId` dolduğunda)
+    // bu bildirim kendiliğinden listeden kalkar — GEÇİCİ bir bildirimdir,
+    // "artık aksiyon gerekmiyor" anlamına gelir (bkz. o fonksiyonun
+    // dokümantasyonu). `createdAt` olarak `publishEndAt`in kendisi kullanılır
+    // (bildirimin "olay zamanı" gerçekten süresinin dolduğu andır); bu alan
+    // `isExpiredListingAwaitingAction` true olduğunda HER ZAMAN dolu olsa da
+    // (bkz. isJobPublishWindowExpired'ın createdAt/publishEndAt'i zorunlu
+    // kılan kontrolü) TypeScript bunu türden bilemediği için güvenli bir
+    // yedek sağlanır.
+    const expiredListingNotifications: AppNotification[] = myJobs
+      .filter((job) => isExpiredListingAwaitingAction(job, offers))
+      .map((job) => ({
+        id: `listing-expired-${job.id}`,
+        notificationType: "ilan_yayin_suresi_doldu" as const,
+        title: "İlan Süresi Doldu",
+        message:
+          "İlanınızın yayın süresi doldu. İlan yeni tekliflere kapatıldı ve Süresi Dolan İlanlar bölümüne taşındı.",
+        ilanId: job.id,
+        href: `/panel/hizmet-taleplerim?durum=suresi-dolmus&ilanId=${job.id}`,
+        createdAt: job.publishEndAt ?? job.createdAt ?? new Date(0).toISOString(),
+      }));
+
     return [
       ...newOfferNotifications,
       ...reopenedNotifications,
@@ -211,20 +269,22 @@ export function getNotificationsForSession(
       ...completedNotifications,
       ...disputeRecordNotifications,
       ...withdrawnNotifications,
+      ...expiredListingNotifications,
     ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   if (session.role === "hizmet-veren") {
     const myOffers = offers.filter((offer) => offer.providerId === session.id);
-    // Bir teklifin ilanı hâlâ var mı — "rejected" durumunun İKİ farklı
-    // kök nedenini (Hizmet Alan'ın bilinçli reddi VS ilanın tamamen
-    // kaldırılması, bkz. offers.ts#deleteJobWithOffers) birbirinden
-    // ayırmak için tek kontrol noktası. Yeni bir Offer.status İCAT
-    // EDİLMEDİ — ikisi de "rejected"tir, yalnızca BİLDİRİM METNİ bu ek
-    // koşulla ayrışır (tıpkı aşağıdaki siblingClosedNotifications'ın
-    // "pending" durumunu getProviderOfferFilter ile ayrıştırması gibi,
-    // AYNI desen).
-    const jobExistsById = new Set(jobs.map((job) => job.id));
+    // Bir teklifin ilanı hâlâ var mı — "rejected" durumunun ÜÇ farklı kök
+    // nedenini (Hizmet Alan'ın bilinçli reddi VS ilanın tamamen kaldırılması,
+    // bkz. offers.ts#deleteJobWithOffers, VS ilanın manuel kapatılması, bkz.
+    // offers.ts#closeJobListing) birbirinden ayırmak için tek kontrol
+    // noktası. Yeni bir Offer.status İCAT EDİLMEDİ — üçü de "rejected"tir,
+    // yalnızca BİLDİRİM METNİ bu ek koşullarla ayrışır (tıpkı aşağıdaki
+    // siblingClosedNotifications'ın "pending" durumunu getProviderOfferFilter
+    // ile ayrıştırması gibi, AYNI desen). Set yerine Map kullanılır — ilanın
+    // KENDİSİ de (yalnızca var olup olmadığı değil, `closedAt`i de) gerekir.
+    const jobById = new Map(jobs.map((job) => [job.id, job] as const));
 
     const acceptedNotifications: AppNotification[] = myOffers
       .filter((offer) => offer.status === "accepted")
@@ -239,7 +299,14 @@ export function getNotificationsForSession(
       }));
 
     const rejectedNotifications: AppNotification[] = myOffers
-      .filter((offer) => offer.status === "rejected" && jobExistsById.has(offer.jobId))
+      .filter((offer) => {
+        if (offer.status !== "rejected") return false;
+        const job = jobById.get(offer.jobId);
+        // İlan manuel olarak kapatıldıysa bu teklif aşağıdaki
+        // jobClosedNotifications'a düşer — aynı teklif için iki farklı,
+        // çelişkili bildirim ASLA birlikte üretilmez.
+        return job !== undefined && !isJobManuallyClosed(job);
+      })
       .map((offer) => ({
         id: `offer-rejected-${offer.id}`,
         notificationType: "teklif_reddedildi",
@@ -256,10 +323,10 @@ export function getNotificationsForSession(
     // artık `jobs` içinde bulunamadığı hâlde, buradan GERÇEK (yayından
     // kaldırma) nedeni bildiren AYRI bir bildirim türetilebilir. Yukarıdaki
     // genel `rejectedNotifications` bu teklifleri BİLEREK hariç tutar
-    // (`jobExistsById.has(...)` koşuluyla) — aynı teklif için iki farklı,
+    // (`jobById.has(...)` koşuluyla) — aynı teklif için iki farklı,
     // çelişkili bildirim ASLA birlikte üretilmez.
     const jobRemovedNotifications: AppNotification[] = myOffers
-      .filter((offer) => offer.status === "rejected" && !jobExistsById.has(offer.jobId))
+      .filter((offer) => offer.status === "rejected" && !jobById.has(offer.jobId))
       .map((offer) => ({
         id: `job-removed-${offer.id}`,
         notificationType: "hizmet_kalemi_kaldirildi" as const,
@@ -270,6 +337,34 @@ export function getNotificationsForSession(
         href: getProviderOfferNotificationHref(offer, offers),
         createdAt: offer.updatedAt,
       }));
+
+    // İlan Kapatma: Hizmet Alan bu ilanı manuel olarak kapattığında (bkz.
+    // offers.ts#closeJobListing) hâlâ "pending" olan teklifler de AYNI
+    // mekanikle "rejected"e çevrilir — ama ilan (yukarıdaki senaryonun
+    // aksine) SİLİNMEZ, `jobById`de bulunmaya devam eder. Bu yüzden ayrı,
+    // üçüncü bir dal: ilan var VE `closedAt` dolu. Mesaj, seçilen kapatma
+    // nedenine göre değişir (bkz. job-closure.ts#getJobClosureNotificationMessage,
+    // tek doğruluk kaynağı) — "Başka bir hizmet verenle anlaşıldı" seçiliyse
+    // görev gereksiniminde BİREBİR verilen cümle üretilir.
+    const jobClosedNotifications: AppNotification[] = myOffers
+      .filter((offer) => {
+        if (offer.status !== "rejected") return false;
+        const job = jobById.get(offer.jobId);
+        return job !== undefined && isJobManuallyClosed(job);
+      })
+      .map((offer) => {
+        const job = jobById.get(offer.jobId)!;
+        return {
+          id: `job-closed-${offer.id}`,
+          notificationType: "ilan_kapatildi" as const,
+          title: "İlan Kapatıldı",
+          message: getJobClosureNotificationMessage(job.closureReason),
+          ilanId: offer.jobId,
+          offerId: offer.id,
+          href: getProviderOfferNotificationHref(offer, offers, job),
+          createdAt: offer.updatedAt,
+        };
+      });
 
     const startedNotifications: AppNotification[] = myOffers
       .filter((offer) => offer.status === "in_progress")
@@ -381,6 +476,7 @@ export function getNotificationsForSession(
       ...acceptedNotifications,
       ...rejectedNotifications,
       ...jobRemovedNotifications,
+      ...jobClosedNotifications,
       ...startedNotifications,
       ...agreementFailedNotifications,
       ...siblingClosedNotifications,
@@ -391,4 +487,66 @@ export function getNotificationsForSession(
   }
 
   return [];
+}
+
+/**
+ * Faaliyet Belgesi/Raporu inceleme sonucu bildirimleri — DİĞER tüm
+ * bildirimlerin tersine `Offer`den değil `provider-documents.ts#
+ * StoredProviderDocument.reviewStatus`ten türetilir, bu yüzden
+ * `getNotificationsForSession`in `(session, jobs, offers)` imzasına
+ * eklenmek yerine BİLEREK ayrı bir fonksiyondur (o imzayı genişletmek
+ * reset-demo-data.ts dahil her çağıranı etkilerdi). Yalnızca
+ * use-notifications.ts tarafından, mevcut listeye eklenerek kullanılır.
+ * `reviewStatus === "pending"` için hiçbir bildirim üretilmez (henüz
+ * incelenmemiş bir belge, kullanıcı için "bekleniyor" dışında bildirilecek
+ * bir olay değildir) — bu üçü de TERMİNAL/eyleme-dönüştürülebilir
+ * durumlardır, bu yüzden (Offer.status'un terminal durumları gibi) kalıcıdır:
+ * belge yeniden incelenip durumu değişene kadar bildirim listede kalır.
+ */
+export function getProviderDocumentReviewNotifications(session: Session): AppNotification[] {
+  if (session.role !== "hizmet-veren") return [];
+
+  const documents = getProviderDocumentsForUser(session.id);
+
+  const approved: AppNotification[] = documents
+    .filter((doc) => doc.reviewStatus === "approved")
+    .map((doc) => ({
+      id: `document-approved-${doc.id}`,
+      notificationType: "belge_onaylandi" as const,
+      title: "Belgeniz Onaylandı",
+      message: `"${doc.originalFileName}" belgeniz yönetici tarafından onaylandı.`,
+      ilanId: "",
+      href: "/panel/hesap-ayarlari",
+      createdAt: doc.reviewedAt ?? doc.uploadedAt,
+    }));
+
+  const rejected: AppNotification[] = documents
+    .filter((doc) => doc.reviewStatus === "rejected")
+    .map((doc) => ({
+      id: `document-rejected-${doc.id}`,
+      notificationType: "belge_reddedildi" as const,
+      title: "Belgeniz Reddedildi",
+      message: doc.reviewNote
+        ? `"${doc.originalFileName}" belgeniz reddedildi: ${doc.reviewNote}`
+        : `"${doc.originalFileName}" belgeniz reddedildi.`,
+      ilanId: "",
+      href: "/panel/hesap-ayarlari",
+      createdAt: doc.reviewedAt ?? doc.uploadedAt,
+    }));
+
+  const revisionRequested: AppNotification[] = documents
+    .filter((doc) => doc.reviewStatus === "revision_requested")
+    .map((doc) => ({
+      id: `document-revision-requested-${doc.id}`,
+      notificationType: "belge_revizyon_istendi" as const,
+      title: "Belge Güncellemesi Gerekiyor",
+      message: doc.reviewNote
+        ? `"${doc.originalFileName}" belgeniz için yeniden yükleme isteniyor: ${doc.reviewNote}`
+        : `"${doc.originalFileName}" belgeniz için yeniden yükleme isteniyor.`,
+      ilanId: "",
+      href: "/panel/hesap-ayarlari",
+      createdAt: doc.reviewedAt ?? doc.uploadedAt,
+    }));
+
+  return [...approved, ...rejected, ...revisionRequested].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

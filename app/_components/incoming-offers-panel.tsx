@@ -3,7 +3,12 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { groupIncomingOffersByCategoryAndJob } from "../_lib/incoming-offer-grouping";
-import { getJobRequestFilter, isOfferVisibleInNormalLists, sortIncomingOffersForDisplay } from "../_lib/job-requests";
+import {
+  getJobRequestFilter,
+  isOfferShownInIncomingOffersScreen,
+  isOfferVisibleInNormalLists,
+  sortIncomingOffersForDisplay,
+} from "../_lib/job-requests";
 import type { Offer } from "../_lib/types";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
@@ -67,10 +72,25 @@ export function IncomingOffersPanel() {
     // ekrandan (incoming-offer-card.tsx içindeki OfferOutcomePanel) verdiği
     // için bu akışlara ASLA dokunulmaz. Silinen bir ilanın teklifleri zaten
     // `myJobIds`den düştüğü için ayrıca burada ele alınmaz.
+    // SADECE İŞLEM BEKLEYEN TEKLİFLER: "rejected" (zaten reddedilmiş) ve
+    // "agreement_failed" (anlaşma sağlanamadı) BİLEREK bu ekrandan çıkarılır
+    // — bkz. job-requests.ts#isOfferShownInIncomingOffersScreen (tek ortak
+    // doğruluk kaynağı). Teklif SİLİNMEZ: durumu, bildirimi, geçmişi ve diğer
+    // ekranlardaki (Verdiğim Teklifler > Kapanan Teklifler) görünürlüğü
+    // korunur — yalnızca bu ekranın render listesinden çıkar. Bu filtre bir
+    // JOB'u/kategoriyi ayrıca "boşaltmaz": aşağıdaki gruplama
+    // (`groupIncomingOffersByCategoryAndJob`) yalnızca GERÇEKTEN mevcut olan
+    // tekliflerden grup kurduğu için, bir ilanın gösterilecek son teklifi de
+    // burada elenirse o ilan grubu (ve gerekirse tüm hizmet türü kutusu)
+    // kendiliğinden hiç oluşmaz — boşluk bırakmadan, elle "grup kaldırma"
+    // adımına gerek kalmadan. Aynı hizmet türüne daha sonra yeni bir teklif
+    // geldiğinde grup, aynı canlı hesaplamayla (useMemo) otomatik olarak
+    // yeniden belirir.
     const incoming = sortIncomingOffersForDisplay(
       offers
         .filter((offer) => myJobIds.has(offer.jobId))
         .filter(isOfferVisibleInNormalLists)
+        .filter(isOfferShownInIncomingOffersScreen)
         .filter((offer) => {
           const job = jobById.get(offer.jobId);
           return !job || getJobRequestFilter(job, offers) !== "tamamlandi";
@@ -95,41 +115,72 @@ export function IncomingOffersPanel() {
     );
   }
 
-  if (groups.length === 0) {
-    return (
-      <div className="rounded-card border border-border bg-surface p-8 text-center">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Henüz gelen teklif yok.
-        </p>
-      </div>
-    );
-  }
-
+  // KRİTİK: `ratingModalOffer`/`justRated` render'ı (en altta) BİLEREK bu
+  // `if` bloğunun (ve aşağıdaki boş-durum erken `return`ünün) DIŞINDA,
+  // ortak bir üst gövdede tutulur. KÖK NEDEN (önceden mevcut bir hataydı):
+  // bir teklif tam olarak Gelen Teklifler'deki SON/TEK görünür teklifken
+  // tamamlanma onaylanırsa, `onCompleted` -> `setRatingModalOffer` state'i
+  // AYNI render'da ayarlansa bile, o teklif artık "tamamlandi" olduğu için
+  // (bkz. yukarıdaki useMemo filtre zinciri) `groups` de AYNI render'da boş
+  // hâle gelir — eğer boş-durum dalı erken `return` ederse (aşağıdaki eski
+  // hâliyle olduğu gibi), değerlendirme modalının render bloğuna hiç
+  // ulaşılmaz ve modal SESSİZCE hiç açılmaz. Birden fazla teklif/şablon
+  // varken (yalnızca biri kalkarken) bu hata gizli kalır — `groups` o zaman
+  // hâlâ boş olmadığı için ana `return` zaten çalışır ve modal görünür;
+  // yalnızca "son kalan teklif tamamlandı" özel durumunda ortaya çıkar.
   return (
     <>
-      {/*
-        DİNAMİK GRİD DÜZENİ: kategori kutuları sabit bir 2 sütunlu ızgaraya
-        pinlenmez. Tam olarak TEK kategori kaldığında (`groups.length === 1`)
-        tam genişliğe geçer — iki sütunun yalnızca solunda yarım kalmaz.
-        2 ve üzeri kategoride mevcut `xl:grid-cols-2` deseni aynen sürer:
-        standart CSS grid auto-flow, tek/çift kategori sayısı fark etmeksizin
-        boş hücre/sütun bırakmaz (tek kalan bir kategori kendi satırının sol
-        hücresinde durur, bu tasarım gereği ve görev örnekleriyle birebir
-        aynı — masonry benzeri düzensiz bir yeniden diziliş İSTENMEDİ).
-        `groups` zaten her render'da canlı veriden yeniden hesaplandığı için
-        (yukarıdaki useMemo) bu sınıf da otomatik olarak güncel kalır.
-      */}
-      <div className={groups.length === 1 ? "grid grid-cols-1 gap-6" : "grid grid-cols-1 gap-6 xl:grid-cols-2"}>
-        {groups.map((group) => (
-          <IncomingOfferCategorySection
-            key={group.categoryKey}
-            group={group}
-            session={session}
-            highlightOfferId={highlightOfferId}
-            onOfferCompleted={(offer) => setRatingModalOffer(offer)}
-          />
-        ))}
-      </div>
+      {groups.length === 0 ? (
+        <div className="rounded-card border border-border bg-surface p-8 text-center">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Henüz gelen teklif yok.
+          </p>
+        </div>
+      ) : (
+        // MASONRY DÜZENİ (CSS multi-column) — bir standart `grid-cols-2` İLE
+        // DEĞİL: standart CSS grid'de her "satır"ın yüksekliği o satırdaki EN
+        // UZUN hücreye göre belirlenir; kategori kutuları içerik bazlı (farklı
+        // sayıda ilan grubu/teklif kartı) FARKLI yüksekliklerde olduğu için, kısa
+        // bir kutunun altındaki hücre kendi kısa komşusunun hemen altında değil,
+        // o SATIRIN tamamı bitince başlar — bu da tam olarak bildirilen "büyük
+        // boşluk" hatasıydı (bir şablon kaldırılınca kalanlar YER DEĞİŞTİRİR
+        // ama satır-yükseklik eşleşmesi eski boşluğu doldurmaz). `columns-2`
+        // (native CSS multi-column) bunun yerine kutuları TEK sürekli bir akışa
+        // yerleştirir: her kutu, mevcut GERÇEK render yüksekliğine göre hangi
+        // sütunda yer varsa oraya akar (satıra kilitlenmez) — bir kutu
+        // kaldırıldığında/yeniden göründüğünde (yukarıdaki filtre zincirinden,
+        // `groups` her render'da canlı veriden yeniden hesaplandığı için) kalan
+        // TÜM kutular bu akışa göre otomatik yeniden dağılır, DOM'da gizli
+        // hücre/placeholder/sabit yükseklik bırakmadan (kaldırılan kategori zaten
+        // `groups` dizisinde hiç yok — aşağıdaki `.map` onun için hiçbir şey
+        // render etmez). Her kutu kendi `break-inside-avoid-column` sarmalayıcısı
+        // İÇİNDE tek/bölünmez birim olarak taşınır (yoksa tarayıcı bir kutuyu
+        // sütun sınırında ortadan kesebilir). `gap-6` burada yalnızca sütunlar
+        // ARASI (column-gap) boşluğu verir — multi-column'da "satır" kavramı
+        // olmadığından `row-gap`in bir karşılığı yok; DİKEY boşluk bu yüzden
+        // `space-y-6` (kardeşler arası margin-top) ile sağlanır, bu da görsel
+        // sütun yerleşiminden bağımsız olarak HER kutu çiftinin arasında aynı
+        // 24px boşluğu garanti eder. Tam olarak TEK kategori kaldığında
+        // (`groups.length === 1`) hâlâ tam genişliğe geçer — iki sütunun
+        // yalnızca birinde yarım genişlikte durmaz; bu dal `columns-2`
+        // kullanmadığı için ayrıca korunmuştur.
+        <div
+          className={
+            groups.length === 1 ? "grid grid-cols-1 gap-6" : "columns-1 gap-6 xl:columns-2 space-y-6"
+          }
+        >
+          {groups.map((group) => (
+            <div key={group.categoryKey} className="break-inside-avoid-column">
+              <IncomingOfferCategorySection
+                group={group}
+                session={session}
+                highlightOfferId={highlightOfferId}
+                onOfferCompleted={(offer) => setRatingModalOffer(offer)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {justRated && (
         <p role="status" aria-live="polite" className="mt-4 text-sm font-medium text-success">

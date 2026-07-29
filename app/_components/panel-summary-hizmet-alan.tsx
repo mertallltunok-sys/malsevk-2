@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ClipboardList, Clock, Inbox } from "lucide-react";
+import { CalendarX, CheckCircle2, ClipboardList, Clock, Inbox } from "lucide-react";
 import { getHizmetAlanPanelSummary } from "../_lib/panel-summary";
 import type { Job, Offer, Session } from "../_lib/types";
 import { PanelActivityList } from "./panel-activity-list";
@@ -21,7 +21,7 @@ export function PanelSummaryHizmetAlan({
 
   return (
     <div>
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+      <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
         Panel Özeti
       </h1>
       <p className="mt-3 text-base leading-relaxed text-muted-foreground">
@@ -63,10 +63,17 @@ export function PanelSummaryHizmetAlan({
           value={summary.completedCount}
           href="/panel/hizmet-taleplerim?durum=tamamlandi"
         />
+        <PanelStatCard
+          icon={CalendarX}
+          label="Süresi Dolan İlanlar"
+          description="14 günlük yayın süresi dolan talepleriniz"
+          value={summary.expiredListingCount}
+          href="/panel/hizmet-taleplerim?durum=suresi-dolmus"
+        />
       </div>
 
       <div className="mt-10">
-        <h2 className="text-lg font-semibold text-foreground">Hızlı İşlemler</h2>
+        <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Hızlı İşlemler</h2>
         <div className="mt-4 max-w-md">
           <PanelQuickActionCard
             href="/hizmet-talebi-olustur"
@@ -77,7 +84,7 @@ export function PanelSummaryHizmetAlan({
       </div>
 
       <div className="mt-10">
-        <h2 className="text-lg font-semibold text-foreground">Son Hareketler</h2>
+        <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Son Hareketler</h2>
         <p className="mt-1 text-sm text-muted-foreground">En son teklif ve işlem hareketleriniz</p>
         <div className="mt-4">
           <PanelActivityList

@@ -20,7 +20,7 @@ export function FinalCtaSection() {
         <div className="rounded-2xl bg-primary px-6 py-12 text-center sm:px-12 sm:py-16">
           <h2
             id="son-cta-baslik"
-            className="text-2xl font-semibold text-primary-foreground sm:text-3xl"
+            className="text-2xl font-bold tracking-heading leading-tight text-primary-foreground sm:text-3xl"
           >
             Lojistik hizmet ihtiyacınızı bugün oluşturun
           </h2>

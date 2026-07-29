@@ -4,7 +4,7 @@ import type { ContactInfo } from "../_lib/contact-access";
 export function ContactInfoBlock({ contact }: { contact: ContactInfo }) {
   return (
     <div className="mt-4 rounded-md border border-success/30 bg-success-soft p-4">
-      <p className="text-sm font-semibold text-foreground">İletişim Bilgileri</p>
+      <p className="text-sm font-bold tracking-heading leading-tight text-foreground">İletişim Bilgileri</p>
       <dl className="mt-3 flex flex-col gap-2 text-sm text-foreground">
         <div className="flex items-center gap-2">
           <User className="h-4 w-4 shrink-0 text-success" aria-hidden="true" />

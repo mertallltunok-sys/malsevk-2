@@ -142,7 +142,7 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
 
   return (
     <div className="rounded-card border border-border bg-surface p-6">
-      <h2 className="text-lg font-semibold text-foreground">Firma Profili</h2>
+      <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Firma Profili</h2>
       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
         Hizmet Alan&apos;ların gelen teklifler ekranında göreceği firma bilgilerinizi düzenleyin.
       </p>

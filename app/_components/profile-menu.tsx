@@ -125,7 +125,7 @@ function RoleLabel({ session }: { session: Session }) {
     <div className="flex items-center gap-2.5">
       <RoleIcon role={session.role} className="h-5 w-5 shrink-0 text-foreground" />
       <div className="flex flex-col items-start leading-tight">
-        <p className="text-sm font-semibold text-foreground">{session.name}</p>
+        <p className="text-sm font-bold tracking-heading text-foreground">{session.name}</p>
         <p className="text-xs text-muted-foreground">
           {session.role === "hizmet-veren" ? "Hizmet Veren" : "Hizmet Alan"}
         </p>

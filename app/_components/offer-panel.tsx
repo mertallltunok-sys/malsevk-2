@@ -4,6 +4,7 @@ import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { isJobClosedToNewOffers, isReofferCooldownStatus } from "../_lib/job-requests";
+import { isJobListingExpired } from "../_lib/job-publish-window";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
@@ -25,7 +26,7 @@ const REOFFER_BLOCKED_MESSAGES: Record<"withdrawn" | "rejected" | "agreement_fai
 function OfferSummaryCard({ offer }: { offer: Offer }) {
   return (
     <div className="rounded-card border border-border bg-background p-6">
-      <p className="text-sm font-semibold text-foreground">
+      <p className="text-sm font-bold tracking-heading leading-tight text-foreground">
         {formatMoney(offer.amount, offer.currency)}
       </p>
       <dl className="mt-4 flex flex-col gap-2 text-sm text-muted-foreground">
@@ -103,7 +104,7 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
     if (!remaining.isExpired) {
       return (
         <div className="rounded-card border border-border bg-background p-6">
-          <p className="text-sm font-semibold text-foreground">
+          <p className="text-sm font-bold tracking-heading leading-tight text-foreground">
             {REOFFER_BLOCKED_MESSAGES[currentOffer.status]}
           </p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
@@ -142,6 +143,25 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
   // ilerleyebilmesi kuralı, Hizmet Alan'ın Kabul Et/Reddet aksiyonları
   // üzerinde uygulanır (bkz. incoming-offer-card.tsx#isOfferPendingActionBlocked),
   // bu ekranda değil.
+
+  // İlan Yayın Süresi Yönetimi: bu ilanın 14 günlük yayın süresi dolmuşsa
+  // (bkz. job-publish-window.ts, tek doğruluk kaynağı) — HENÜZ hiçbir
+  // teklifi kabul edilmemiş olması koşuluyla, zaten `isJobListingExpired`in
+  // kendi istisnası bunu garanti eder — bu ilan artık teklif alamaz. Bu,
+  // yalnızca GÖRSEL bir engeldir; asıl yetkilendirme her zaman olduğu gibi
+  // offers.ts#createOffer'da (arayüzden bağımsız) uygulanır, bu kontrol onun
+  // bir YANSIMASIDIR. Bu Hizmet Veren'in KENDİ eski teklifi varsa (yukarıdaki
+  // `currentOffer` dalları) bu blok hiç çalışmaz — geçmiş teklifi görüntülemeye
+  // devam eder.
+  if (isJobListingExpired(job, offers)) {
+    return (
+      <div className="rounded-card border border-border bg-background p-6">
+        <p className="text-sm font-medium text-foreground">
+          Bu ilanın yayın süresi dolduğu için yeni teklif verilemez.
+        </p>
+      </div>
+    );
+  }
 
   // "TEKLİF KABULÜ VE İŞE BAŞLAMA KİLİT KURALI" DÜZELTMESİ: iş fiilen
   // BAŞLADIĞINDA (in_progress) ya da ötesine geçtiğinde (tamamlama

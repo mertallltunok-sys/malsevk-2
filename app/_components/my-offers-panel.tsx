@@ -11,6 +11,7 @@ import {
   getProviderOffersTabHref,
   type ProviderOfferFilter,
 } from "../_lib/job-requests";
+import { useFilterVisibleJobs } from "../_lib/job-visibility";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
@@ -83,7 +84,7 @@ function RequestCompletionDialog({
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-md rounded-card border border-border bg-surface p-6 shadow-md"
       >
-        <h2 id="tamamlandi-isaretle-baslik" className="text-lg font-semibold text-foreground">
+        <h2 id="tamamlandi-isaretle-baslik" className="text-lg font-bold tracking-heading leading-tight text-foreground">
           Tamamlandı Olarak İşaretle
         </h2>
         <p className="mt-2 text-sm font-medium text-foreground">{jobTitle}</p>
@@ -155,7 +156,7 @@ function WithdrawOfferDialog({
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-md rounded-card border border-border bg-surface p-6 shadow-md"
       >
-        <h2 id="teklifden-vazgec-baslik" className="text-lg font-semibold text-foreground">
+        <h2 id="teklifden-vazgec-baslik" className="text-lg font-bold tracking-heading leading-tight text-foreground">
           Tekliften Vazgeç
         </h2>
         <p className="mt-2 text-sm font-medium text-foreground">{jobTitle}</p>
@@ -226,7 +227,17 @@ const tabHref = getProviderOffersTabHref;
 export function MyOffersPanel() {
   const session = useSession();
   const jobs = useAllJobs();
-  const jobById = new Map(jobs.map((job) => [job.id, job]));
+  // Nakliye izolasyonu (bkz. job-visibility.ts): Nakliye'ye kilitlenmiş bir
+  // Hizmet Veren'in DAHA ÖNCE (Nakliye'yi seçmeden önce) verdiği, artık
+  // görünürlük dışı bir ilana ait teklifi burada listede kalmaya devam eder
+  // (kendi geçmişi/işlem kaydıdır, "keşif" değildir — bkz. offers.ts#
+  // withdrawOffer/requestCompletion'ın bilerek job-visibility kontrolü hiç
+  // yapmaması) ama o ilanın kendisi (`jobById.get` `undefined` döner) MEVCUT
+  // "İlan artık mevcut değil" güvenli fallback'iyle gösterilir — bkz.
+  // aşağıdaki `job ? ... : "İlan artık mevcut değil"` — ayrı bir yeni metin
+  // eklenmedi, tıpkı ilan GERÇEKTEN silinmiş olsaydı olacağı gibi.
+  const visibleJobs = useFilterVisibleJobs(session, jobs);
+  const jobById = new Map(visibleJobs.map((job) => [job.id, job]));
   const searchParams = useSearchParams();
   // Yalnızca kendi tekliflerimiz değil, TÜM teklifler gerekli — "Kapanan
   // Teklifler" sekmesi bir kardeş teklifin (başka bir Hizmet Veren'e ait)
@@ -316,7 +327,9 @@ export function MyOffersPanel() {
       : "aktif";
   const isClosedTab = activeTab === "kapanan-teklifler";
 
-  const visible = offers.filter((offer) => getProviderOfferFilter(offer, allOffers) === activeTab);
+  const visible = offers.filter(
+    (offer) => getProviderOfferFilter(offer, allOffers, jobById.get(offer.jobId)) === activeTab,
+  );
 
   return (
     <div>
@@ -360,7 +373,10 @@ export function MyOffersPanel() {
           <div className="flex flex-col gap-5">
             {visible.map((offer) => {
               const job = jobById.get(offer.jobId);
-              const revealedContact = getRevealedContactForOffer(session, offer.id);
+              // İlan görünürlük dışıysa (job undefined) karşı tarafın
+              // iletişim bilgisi de gösterilmez — aksi halde ilan bilgisi
+              // gizliyken bile telefon/e-posta sızmış olurdu.
+              const revealedContact = job ? getRevealedContactForOffer(session, offer.id) : null;
               const isLong = offer.description.length > DESCRIPTION_PREVIEW_LENGTH;
               const preview = isLong
                 ? `${offer.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`
@@ -386,7 +402,7 @@ export function MyOffersPanel() {
                           {getCategoryDisplayLabel(job.category)}
                         </span>
                       )}
-                      <h3 className="mt-2 text-lg font-semibold text-foreground">
+                      <h3 className="mt-2 text-lg font-bold tracking-heading leading-tight text-foreground">
                         {job ? job.title : "İlan artık mevcut değil"}
                       </h3>
                       {job && (
@@ -465,7 +481,7 @@ export function MyOffersPanel() {
 
                   {offer.status === "completion_requested" && (
                     <div className="mt-4 rounded-card border border-border bg-background p-4">
-                      <p className="text-sm font-semibold text-foreground">Tamamlanma onayı bekleniyor</p>
+                      <p className="text-sm font-bold tracking-heading leading-tight text-foreground">Tamamlanma onayı bekleniyor</p>
                       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                         Hizmet Alan&apos;ın onayı bekleniyor.
                       </p>

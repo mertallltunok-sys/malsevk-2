@@ -1,10 +1,13 @@
 import { isCompanyType, type CompanyType } from "./company-type";
-import { readJson, writeJson } from "./local-storage";
+import { readJson, STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { deletePhotoBlob, putPhotoBlob } from "./photo-blob-store";
 import { isPasswordValid } from "./password-rules";
 import { normalizePhoneNumber } from "./phone";
+import { recordProviderDocumentConsent, hasAcceptedProviderDocumentDeclaration } from "./provider-document-consents";
+import { addProviderDocuments, getProviderDocumentsForUser, updateProviderDocumentReviewFields } from "./provider-documents";
+import { getProviderServiceCategoryIds, setProviderServiceCategoryIds } from "./provider-services";
 import { validateProviderProfileForm } from "./provider-profile";
-import { isExperienceRange, isServiceFeature } from "./service-catalog";
+import { NAKLIYE_SERVICE_CATEGORY_ID, isExperienceRange, isServiceFeature } from "./service-catalog";
 import type { ExperienceRange, ProviderProfile, ServiceFeature, Session, UserRole } from "./types";
 
 const USERS_STORAGE_KEY = "malsevk.users.v1";
@@ -61,7 +64,7 @@ function isStoredUserCore(value: unknown): value is Record<string, unknown> {
     typeof user.email === "string" &&
     typeof user.phone === "string" &&
     typeof user.passwordHash === "string" &&
-    (user.role === "hizmet-alan" || user.role === "hizmet-veren")
+    (user.role === "hizmet-alan" || user.role === "hizmet-veren" || user.role === "admin")
   );
 }
 
@@ -123,8 +126,8 @@ function readUsers(): StoredUser[] {
   return raw.map(normalizeStoredUser).filter((user): user is StoredUser => user !== null);
 }
 
-function writeUsers(users: StoredUser[]): void {
-  writeJson(USERS_STORAGE_KEY, users);
+function writeUsers(users: StoredUser[]): boolean {
+  return writeJson(USERS_STORAGE_KEY, users);
 }
 
 function normalizeEmail(email: string): string {
@@ -148,6 +151,18 @@ export function findUserById(id: string): StoredUser | null {
 /** Tüm kullanıcıları döndürür — yalnızca sayım/rapor amaçlı araçlar için (bkz. reset-demo-data.ts). */
 export function getAllUsers(): StoredUser[] {
   return readUsers();
+}
+
+/**
+ * Bir kullanıcı kaydını KALICI olarak siler. Genel bir "hesap sil" özelliği
+ * DEĞİLDİR — tek çağıranı provider-registration.ts'in kayıt geri alma
+ * (rollback) senaryosudur: Hizmet Veren kaydı sırasında hizmet/belge/beyan
+ * yazımlarından biri başarısız olursa, az önce oluşturulmuş yarım kullanıcı
+ * kaydının kendisi de geri alınır. Kayıt tamamlanmış (gerçek) bir kullanıcı
+ * için ASLA çağrılmamalıdır.
+ */
+export function deleteUserById(userId: string): boolean {
+  return writeUsers(readUsers().filter((user) => user.id !== userId));
 }
 
 async function hashPassword(password: string): Promise<string> {
@@ -213,7 +228,9 @@ export async function registerUser(input: RegisterInput): Promise<RegisterResult
     district: input.district?.trim() || undefined,
   };
 
-  writeUsers([...readUsers(), user]);
+  if (!writeUsers([...readUsers(), user])) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, user };
 }
 
@@ -259,6 +276,37 @@ const DEV_ACCOUNTS: RegisterInput[] = [
     password: "Demo123!",
     role: "hizmet-veren",
   },
+  {
+    // Nakliye izolasyon kuralını (bkz. job-visibility.ts) elle veri
+    // hazırlamadan test edebilmek için — bu hesabın hizmet seçimi
+    // (yalnızca Nakliye), belgesi ve beyanı `seedNakliyeciProviderProfileIfNeeded`
+    // tarafından, bu döngü tamamlandıktan SONRA ayrıca kurulur (bkz. aşağıda);
+    // burada yalnızca temel StoredUser alanları (login-form.tsx'teki gerçek
+    // Hizmet Veren kaydıyla aynı şekle sahip: firma adı/tipi/il/ilçe) yer alır.
+    // "Ad: Nakliye, Soyad: Demo" — registerUser'ın `name` alanını nasıl
+    // ürettiğiyle (Ad+Soyad birleşimi) AYNI şekle uysun diye tek bir alanda
+    // birleştirilmiştir; StoredUser.name zaten yalnızca birleşik adı tutar,
+    // ayrı ad/soyad alanı yok (bkz. RegisterInput.name).
+    name: "Nakliye Demo",
+    email: "nakliyeci@test.com",
+    phone: "+905556667788",
+    password: "Nakliye123!",
+    role: "hizmet-veren",
+    companyName: "MALSEVK Nakliye Demo",
+    companyType: "limited-sirket",
+    province: "Kocaeli",
+    district: "Gebze",
+  },
+  {
+    // Yalnızca app/admin (Hizmet Veren Belge Kontrolü) panelini test etmek için —
+    // kayıt formunda "admin" hiçbir zaman bir Hesap Türü seçeneği olarak sunulmaz
+    // (bkz. types.ts#UserRole), bu rolün TEK oluşturulma yolu bu dev-seed'dir.
+    name: "Admin Kullanıcı",
+    email: "admin@test.com",
+    phone: "+905554445566",
+    password: "Admin123!",
+    role: "admin",
+  },
 ];
 
 /**
@@ -290,6 +338,10 @@ async function upsertDevAccount(account: RegisterInput): Promise<void> {
       existing.phone === phoneResult.value &&
       existing.passwordHash === passwordHash &&
       existing.role === account.role &&
+      existing.companyName === account.companyName &&
+      existing.companyType === account.companyType &&
+      existing.province === account.province &&
+      existing.district === account.district &&
       typeof existing.createdAt === "string";
     if (alreadyUpToDate) return;
 
@@ -299,6 +351,15 @@ async function upsertDevAccount(account: RegisterInput): Promise<void> {
       phone: phoneResult.value,
       passwordHash,
       role: account.role,
+      // companyName/companyType/province/district önceki DEV_ACCOUNTS
+      // girdilerinde hiç kullanılmıyordu (hepsi undefined), Nakliyeci
+      // hesabıyla birlikte ilk kez gerçek değerler taşıyorlar — RegisterInput
+      // zaten bu alanları tanımlıyordu, yalnızca bu fonksiyon onları
+      // StoredUser'a hiç KOPYALAMIYORDU; bu, o eksikliğin düzeltmesidir.
+      companyName: account.companyName,
+      companyType: account.companyType,
+      province: account.province,
+      district: account.district,
       // Zaten bir createdAt'i varsa dokunulmaz (demo hesap "katılım tarihi"
       // her senkronda ileri kaymasın diye) — yalnızca bu alandan önce
       // oluşturulmuş demo kayıtlarda bir kerelik eklenir.
@@ -318,6 +379,10 @@ async function upsertDevAccount(account: RegisterInput): Promise<void> {
     phone: phoneResult.value,
     passwordHash,
     role: account.role,
+    companyName: account.companyName,
+    companyType: account.companyType,
+    province: account.province,
+    district: account.district,
     createdAt: new Date().toISOString(),
   };
   writeUsers([...readUsers(), user]);
@@ -332,14 +397,129 @@ async function upsertDevAccount(account: RegisterInput): Promise<void> {
  * değer alırsa bile demo hesap oluşturma varsayılan olarak KAPALI kalır.
  * Idempotenttir — tekrar tekrar çağrılsa da hesapları yinelemez, yalnızca
  * güncel olmayan alanları senkronlar; mevcut kullanıcı kayıtlarına dokunmaz.
+ *
+ * `login-form.tsx` bu fonksiyonu HEM mount anındaki bir efektten (fire-and-
+ * forget) HEM her giriş denemesinde (`await` ile) çağırır — bu iki çağrı
+ * neredeyse aynı anda üst üste binebilir. `upsertDevAccount` "oku -> hashle
+ * (await ile asenkron boşluk) -> yaz" şeklinde çalıştığı için, aynı anda
+ * çalışan İKİ bağımsız döngü, birbirinin `writeUsers` yazımını (o yazımdan
+ * ÖNCEKİ bir localStorage anlık görüntüsünden hareketle) ezerek en son
+ * eklenen hesabı (dizideki SON hesap, DEV_ACCOUNTS'a yeni bir hesap
+ * eklendikçe risk penceresi büyür) sessizce kaybedebilir — kalıcı, gözlenmiş
+ * bir "lost update" yarışı. `inFlightSeeding` bunu, aynı anda yalnızca TEK
+ * bir gerçek döngünün çalışmasını garanti ederek (ikinci çağıran, YENİ bir
+ * döngü başlatmak yerine SÜREN döngünün aynı promise'ini bekler) ortadan
+ * kaldırır.
  */
-export async function seedDevAccountsIfNeeded(): Promise<void> {
-  if (process.env.NODE_ENV !== "development") return;
-  if (typeof window === "undefined") return;
+const NAKLIYECI_DEMO_EMAIL = "nakliyeci@test.com";
+const ADMIN_DEMO_EMAIL = "admin@test.com";
+const NAKLIYECI_DEMO_DOCUMENT: { originalFileName: string; mimeType: string; extension: string } = {
+  originalFileName: "malsevk-nakliye-demo-faaliyet-belgesi.pdf",
+  mimeType: "application/pdf",
+  extension: "pdf",
+};
 
-  for (const account of DEV_ACCOUNTS) {
-    await upsertDevAccount(account);
+/**
+ * Nakliyeci demo hesabının (bkz. DEV_ACCOUNTS'taki "nakliyeci@test.com"
+ * girdisi) provider-services.ts/provider-documents.ts/
+ * provider-document-consents.ts kayıtlarını kurar — bu üç tablo `upsertDevAccount`'un
+ * bilmediği, StoredUser'ın DIŞINDA duran ilişkisel veridir (bkz. o
+ * modüllerin kendi dokümantasyonu), bu yüzden AYRI bir adımdır. Yalnızca
+ * `nakliyeciEmail`in StoredUser'ı zaten varsa (yukarıdaki ana döngü onu
+ * oluşturduktan/senkronladıktan SONRA) çalışır.
+ *
+ * Görev gereksinimi: "eski ProviderProfile.serviceCategories alanına
+ * yazma" — provider-services.ts zaten TEK doğruluk kaynağı olduğu için
+ * (bkz. o dosya) burada da başka hiçbir yere yazılmaz.
+ *
+ * İdempotentlik: hizmet kümesi `setProviderServiceCategoryIds` ile TAM
+ * değiştirme (replace) olduğu için tekrar tekrar çağrılması çoğaltma
+ * üretmez; belge/beyan yalnızca HİÇ yoksa (bkz. `hasDocuments`/
+ * `hasAcceptedProviderDocumentDeclaration`) bir kez oluşturulur — kullanıcı
+ * silinip yeniden oluşturulursa (yeni bir `user.id` ile) bu kontroller
+ * doğal olarak "yok" bulur ve baştan kurar.
+ */
+async function seedNakliyeciProviderProfileIfNeeded(): Promise<void> {
+  const user = findUserByEmail(NAKLIYECI_DEMO_EMAIL);
+  if (!user) return;
+
+  const currentServiceIds = getProviderServiceCategoryIds(user.id);
+  if (currentServiceIds.length !== 1 || currentServiceIds[0] !== NAKLIYE_SERVICE_CATEGORY_ID) {
+    setProviderServiceCategoryIds(user.id, [NAKLIYE_SERVICE_CATEGORY_ID]);
   }
+
+  const hasDocuments = getProviderDocumentsForUser(user.id).length > 0;
+  if (!hasDocuments) {
+    const storageKey = crypto.randomUUID();
+    const demoBlob = new Blob(
+      ["MALSEVK Nakliye Demo - Faaliyet Belgesi (geliştirme ortamı demo hesabı için otomatik oluşturuldu)."],
+      { type: NAKLIYECI_DEMO_DOCUMENT.mimeType },
+    );
+    try {
+      await putPhotoBlob(storageKey, demoBlob);
+    } catch {
+      // IndexedDB bu ortamda kullanılamıyorsa (ör. bazı test/SSR bağlamları)
+      // yarım bir belge metadata kaydı bırakmamak için burada durulur —
+      // hizmet seçimi yine de yukarıda zaten kurulmuş olur.
+      return;
+    }
+
+    if (
+      !addProviderDocuments(user.id, [
+        {
+          originalFileName: NAKLIYECI_DEMO_DOCUMENT.originalFileName,
+          mimeType: NAKLIYECI_DEMO_DOCUMENT.mimeType,
+          extension: NAKLIYECI_DEMO_DOCUMENT.extension,
+          size: demoBlob.size,
+          indexedDbStorageKey: storageKey,
+        },
+      ])
+    ) {
+      await deletePhotoBlob(storageKey);
+      return;
+    }
+
+    const created = getProviderDocumentsForUser(user.id).find(
+      (doc) => doc.indexedDbStorageKey === storageKey,
+    );
+    if (created) {
+      // Demo kullanımını hiçbir admin onayı beklemeden test edilebilir
+      // kılmak için doğrudan "approved" olarak işaretlenir — reviewedByAdminId
+      // aynı seed döngüsünde zaten oluşturulmuş/senkronlanmış demo admin
+      // hesabına (bkz. ADMIN_DEMO_EMAIL) işaret eder; o hesap her nasılsa
+      // yoksa (ör. dev seed'in yalnızca bir kısmı çalıştıysa) kendi id'sine
+      // geri düşer — sahte bir kimlik uydurulmaz.
+      const admin = findUserByEmail(ADMIN_DEMO_EMAIL);
+      updateProviderDocumentReviewFields({
+        documentId: created.id,
+        status: "approved",
+        adminId: admin?.id ?? user.id,
+      });
+    }
+  }
+
+  if (!hasAcceptedProviderDocumentDeclaration(user.id)) {
+    recordProviderDocumentConsent(user.id);
+  }
+}
+
+let inFlightSeeding: Promise<void> | null = null;
+
+export function seedDevAccountsIfNeeded(): Promise<void> {
+  if (process.env.NODE_ENV !== "development") return Promise.resolve();
+  if (typeof window === "undefined") return Promise.resolve();
+
+  if (!inFlightSeeding) {
+    inFlightSeeding = (async () => {
+      for (const account of DEV_ACCOUNTS) {
+        await upsertDevAccount(account);
+      }
+      await seedNakliyeciProviderProfileIfNeeded();
+    })().finally(() => {
+      inFlightSeeding = null;
+    });
+  }
+  return inFlightSeeding;
 }
 
 export type UpdateProviderProfileInput = {
@@ -390,6 +570,7 @@ export async function updateProviderProfile(
 
   const previousLogoStorageKey = existing.providerProfile?.logoStorageKey;
   let logoStorageKey = previousLogoStorageKey;
+  let newlyPersistedLogoKey: string | undefined;
 
   if (input.logo === null) {
     logoStorageKey = undefined;
@@ -401,6 +582,7 @@ export async function updateProviderProfile(
       return { ok: false, error: "Logo kaydedilemedi. Lütfen tekrar deneyin." };
     }
     logoStorageKey = newKey;
+    newlyPersistedLogoKey = newKey;
   }
 
   const profile: ProviderProfile = {
@@ -410,18 +592,26 @@ export async function updateProviderProfile(
     regions: input.regions,
     expertise: input.expertise,
     logoStorageKey,
-    // Bu form (Hesap Ayarları > Firma Profili) serviceCategories/
-    // serviceFeatures/experienceRange'i hiç düzenlemez (bkz. Panel >
-    // Profilim > Hizmet Bilgilerim, updateProviderServiceInfo aşağıda) —
-    // var olan değerleri olduğu gibi taşımazsak bu form kaydedildiğinde
-    // diğer ekranda girilmiş veriler sessizce silinmiş olurdu.
-    serviceCategories: existing.providerProfile?.serviceCategories,
+    // Bu form (Hesap Ayarları > Firma Profili) serviceFeatures/
+    // experienceRange'i hiç düzenlemez (bkz. Panel > Profilim > Hizmet
+    // Bilgilerim, updateProviderServiceInfo aşağıda) — var olan değerleri
+    // olduğu gibi taşımazsak bu form kaydedildiğinde diğer ekranda girilmiş
+    // veriler sessizce silinmiş olurdu. Hizmet seçimleri artık
+    // provider-services.ts'te tutulur, bu profil nesnesinde hiç yoktur.
     serviceFeatures: existing.providerProfile?.serviceFeatures,
     experienceRange: existing.providerProfile?.experienceRange,
   };
 
   const updated: StoredUser = { ...existing, providerProfile: profile };
-  writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)));
+  if (!writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)))) {
+    // Kayıt yazılamadıysa, bu çağrıda yeni yüklenmiş logo blob'u hiçbir
+    // kullanıcı kaydına bağlanmadan sahipsiz kalmasın diye geri alınır —
+    // job-store.ts#persistPhotosOrRollback ile aynı gerekçe.
+    if (newlyPersistedLogoKey) {
+      await deletePhotoBlob(newlyPersistedLogoKey);
+    }
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   if (previousLogoStorageKey && previousLogoStorageKey !== logoStorageKey) {
     await deletePhotoBlob(previousLogoStorageKey);
@@ -473,6 +663,16 @@ export async function updateProviderServiceInfo(
     return { ok: false, error: "Kullanıcı bulunamadı." };
   }
 
+  // Hizmet seçimleri artık provider-services.ts (userId -> serviceCategoryId
+  // ilişkisel tablosu) üzerinden yazılır — profile.serviceCategories'e BİR
+  // DAHA YAZILMAZ (bkz. types.ts#ProviderProfile.serviceCategories'in
+  // deprecated notu). Önce hizmet tablosu yazılır: bu adım başarısız olursa
+  // aşağıdaki profil yazımı hiç denenmez, iki tablo arasında yarım/tutarsız
+  // bir durum oluşmaz.
+  if (!setProviderServiceCategoryIds(session.id, input.serviceCategories)) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
+
   const currentProfile = existing.providerProfile;
   const profile: ProviderProfile = {
     companyName: currentProfile?.companyName ?? "",
@@ -481,13 +681,14 @@ export async function updateProviderServiceInfo(
     logoStorageKey: currentProfile?.logoStorageKey,
     expertise: currentProfile?.expertise ?? [],
     regions: input.regions,
-    serviceCategories: input.serviceCategories,
     serviceFeatures: input.serviceFeatures,
     experienceRange: input.experienceRange ?? undefined,
   };
 
   const updated: StoredUser = { ...existing, providerProfile: profile };
-  writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)));
+  if (!writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   return { ok: true, profile };
 }

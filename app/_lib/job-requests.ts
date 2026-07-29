@@ -1,3 +1,4 @@
+import { isJobManuallyClosed } from "./job-closure";
 import { isJobOpenForOffers } from "./jobs";
 import type { Job, Offer, OfferStatus, Session } from "./types";
 
@@ -124,19 +125,71 @@ export function isOfferVisibleInNormalLists(offer: Offer): boolean {
 }
 
 /**
+ * "Gelen Teklifler" ekranına (incoming-offers-panel.tsx) ÖZEL bir görünürlük
+ * filtresi — TEK ortak doğruluk kaynağı, `isOfferVisibleInNormalLists`
+ * (yukarıda) BİLEREK AYRI tutulur: o fonksiyon panel-summary.ts/
+ * notifications.ts/job-listing-filters.ts/job-listing-row.ts gibi birçok
+ * PAYLAŞILAN ekranda kullanılır ve yalnızca "withdrawn"ı eler — bu görev
+ * yalnızca Gelen Teklifler'i etkileyeceği için (bkz. görev gereksinimi) o
+ * paylaşılan fonksiyona dokunmak yerine yeni, dar kapsamlı bir filtre
+ * eklenir.
+ *
+ * Amaç: bu ekranı yalnızca Hizmet Alan'dan GERÇEKTEN bir karar/aksiyon
+ * bekleyen ya da takip edilmesi gereken tekliflerle sınırlı tutmak —
+ * "rejected" (zaten reddedilmiş, geri dönüşü olmayan bir karar) ve
+ * "agreement_failed" (anlaşma sağlanamadı, iş hiç başlamadı) sonuçlanmış ve
+ * bu ekranda artık hiçbir aksiyon/takip gerektirmeyen iki durumdur. Kayıt
+ * SİLİNMEZ/değişmez — teklif hâlâ mevcut, `getOfferStatusLabel`/bildirimleri
+ * (notifications.ts)/geçmişi/diğer ekranlardaki görünürlüğü (ör. Verdiğim
+ * Teklifler > Kapanan Teklifler) BU fonksiyondan tamamen bağımsız, olduğu
+ * gibi korunur; yalnızca bu TEK ekranın render listesinden çıkar.
+ *
+ * "cancelled" (bir tamamlanma anlaşmazlığının iptalle sonuçlanması) BİLEREK
+ * bu listede DEĞİL — görev yalnızca "Reddedildi" ve "Anlaşma Sağlanamadı"yı
+ * saymıştır; diğer tüm durumlar (pending/accepted/in_progress/tamamlanma
+ * süreci/cancelled) bu filtreden etkilenmeden görünmeye devam eder.
+ */
+export function isOfferShownInIncomingOffersScreen(offer: Offer): boolean {
+  return offer.status !== "rejected" && offer.status !== "agreement_failed";
+}
+
+/**
  * "Gelen Teklifler" panelinde AYNI ilana (şablona) ait tekliflerin gösterim
  * ÖNCELİK sırası — TEK ortak doğruluk kaynağı, `sortIncomingOffersForDisplay`
  * dışında hiçbir yerde tekrar yazılmaz. Düşük sayı = daha yüksek öncelik
- * (daha üstte). Sıra kasıtlı olarak şu iş anlamını izler: teklif hâlâ bir
- * karar/aksiyon bekliyorsa (pending/accepted/in_progress/tamamlanma süreci)
- * en üstte; sonuçlanmış ama BAŞARIYLA bittiyse (completed) ondan sonra;
- * sonuçsuz/olumsuz kapananlar (agreement_failed/cancelled) daha da altta;
- * "rejected" HER ZAMAN en alt sırada — Hizmet Alan onu zaten daha en
+ * (daha üstte).
+ *
+ * "KABUL EDİLDİ AŞAĞI DÜŞMESİN" DÜZELTMESİ: "accepted" artık "pending"in
+ * ÜSTÜNDE (bkz. görev gereksinimi) — eskiden tam tersiydi ("pending" HER
+ * ZAMAN "accepted"tan üstteydi, bkz. bu fonksiyonun önceki sürümü). KÖK
+ * NEDEN: bir teklif Kabul Et ile "accepted" olduğu anda, aynı ilandaki hâlâ
+ * "pending" kalan kardeşleri (varsa) o teklifin ÜSTÜNE geçiyordu — Hizmet
+ * Alan'ın az önce kendi kabul ettiği teklif, kendi ekranında aşağı kayıyordu.
+ * Artık "accepted" en üst kademede: bir teklif kabul edildiği ANDA aşağı
+ * TAŞINMAZ, ilan/şablon içinde üstte ve görünür kalır — "pending" kardeşler
+ * (varsa) hâlâ görünmeye devam eder (bkz. isOfferShownInIncomingOffersScreen,
+ * yukarıda — yalnızca "rejected"/"agreement_failed" bu ekrandan çıkar), ama
+ * artık kabul edilenin ALTINDA sıralanır; aksiyon butonlarının kilitli kalması
+ * kuralı (isOfferPendingActionBlocked) bu sıralamadan bağımsız, DEĞİŞMEDİ.
+ *
+ * Sıra kasıtlı olarak şu iş anlamını izler: teklif hâlâ bir karar/aksiyon/
+ * takip bekliyorsa (accepted/pending/in_progress/tamamlanma süreci) en
+ * üstte — bu grubun İÇİNDE "accepted" en öncelikli, "pending" hemen
+ * ardından, "diğer görünür aktif durumlar" (in_progress/tamamlanma süreci)
+ * onların altında; sonuçlanmış ama BAŞARIYLA bittiyse (completed) ondan
+ * sonra; sonuçsuz/olumsuz kapananlar (agreement_failed/cancelled) daha da
+ * altta; "rejected" HER ZAMAN en alt sırada — Hizmet Alan onu zaten daha en
  * başında reddettiği için tekrar dikkat çekmesine gerek yoktur. "withdrawn"
  * bu fonksiyona pratikte hiç ulaşmaz (bkz. `sortIncomingOffersForDisplay`
  * çağıranı, `isOfferVisibleInNormalLists` ile önceden elenir) — yalnızca
  * `OfferStatus` union'ının tamamını kapsayan bir switch yazabilmek için en
- * düşük önceliğe atanır.
+ * düşük önceliğe atanır. AYNI SEBEPLE "rejected"/"agreement_failed" de artık
+ * bu fonksiyona pratikte hiç ulaşmaz (bkz. `isOfferShownInIncomingOffersScreen`,
+ * yukarıda, `sortIncomingOffersForDisplay` çağıranında ("Gelen Teklifler"
+ * ekranı) bunları önceden eler) — kendi ağırlıkları burada, mevcut deseni
+ * bozmamak ve `OfferStatus` switch'ini eksiksiz tutmak için SİLİNMEDEN kalır;
+ * bu fonksiyonun kendisi genel amaçlı kalır (ör. "cancelled" hâlâ gerçekten
+ * ulaşır).
  *
  * "completion_requested" ve "completion_disputed" BİLEREK AYNI ("Tamamlanma
  * Süreci") ağırlığı paylaşır — ikisi de iş fiilen bitmiş ama iki tarafça da
@@ -146,9 +199,9 @@ export function isOfferVisibleInNormalLists(offer: Offer): boolean {
  */
 function incomingOfferSortWeight(status: OfferStatus): number {
   switch (status) {
-    case "pending":
-      return 0;
     case "accepted":
+      return 0;
+    case "pending":
       return 1;
     case "in_progress":
       return 2;
@@ -171,7 +224,7 @@ function incomingOfferSortWeight(status: OfferStatus): number {
  * "Gelen Teklifler" panelinin (incoming-offers-panel.tsx) gösterim sırası —
  * TEK ortak doğruluk kaynağı. AYNI ilana (şablona) ait teklifler arasında
  * `incomingOfferSortWeight` (yukarıda) tanımlı yedi kademeli iş-öncelik
- * sırasını uygular (Beklemede -> Kabul Edildi -> İşe Başlandı/Devam Eden ->
+ * sırasını uygular (Kabul Edildi -> Beklemede -> İşe Başlandı/Devam Eden ->
  * Tamamlanma Süreci -> Tamamlandı -> Anlaşma Sağlanamadı/İptal -> Reddedildi);
  * AYNI ağırlık kademesindeki teklifler arasında (ör. iki "pending") sıra
  * recency'dir (en yeni ilk, `offer.createdAt`). Bu, salt bir GÖRÜNTÜLEME
@@ -583,6 +636,21 @@ export function getJobRequestFilterTone(
 }
 
 /**
+ * "Hizmet Taleplerim > Devam Eden" sekmesinde, Hizmet Veren'in tamamlandı
+ * bildirdiği ve Hizmet Alan'ın onayını/itirazını beklediği işleri (bkz.
+ * offer-outcome-panel.tsx'in "Tamamlandı Onayı Bekleniyor" bloğu) diğer
+ * devam eden işlerden ayırt eden TEK ortak doğruluk kaynağı —
+ * job-requests-panel.tsx dışında tekrar yazılmaz. Yeni bir durum icat
+ * etmez, yalnızca mevcut "completion_requested" (bkz.
+ * IN_PROGRESS_OFFER_STATUSES) durumunu adlandırır. `engagedOffer`
+ * parametresi `null` olabilir (ör. `getEngagedOfferForJob` bir sonuç
+ * bulamadığında) — bu durumda güvenle `false` döner.
+ */
+export function isOfferAwaitingCompletionConfirmation(engagedOffer: Offer | null): boolean {
+  return engagedOffer?.status === "completion_requested";
+}
+
+/**
  * Çoklu Hizmet Operasyonu — Aşama 4: "Operasyon Durumu" özet kartının (bkz.
  * operation-status-card.tsx) TEK ortak durum-türetme yardımcısı. YENİ bir
  * durum sistemi İCAT ETMEZ — `getJobRequestFilter`in 4 değerine (yukarıda),
@@ -801,13 +869,28 @@ function isOfferClosedByJobProgress(offer: Offer, offers: Offer[]): boolean {
  * diye BİLEREK herhangi bir TabKey ile eşleşmez (my-offers-panel.tsx'teki
  * `=== activeTab` karşılaştırması bu yüzden ek bir filtre satırına gerek
  * duymadan withdrawn'ı otomatik eler).
+ *
+ * DÖRDÜNCÜ (İlan Kapatma) durum: offers.ts#closeJobListing, bir ilan manuel
+ * olarak kapatıldığında hâlâ "pending" olan teklifleri de (deleteJobWithOffers
+ * ile AYNI mekanik) "rejected"e çevirir — ama bu "rejected" bir gerçek
+ * reddetme DEĞİLDİR, bu yüzden yalnızca job-closure.ts#isJobManuallyClosed
+ * ile işaretli bir ilana ait "rejected" bir teklif de "kapanan-teklifler"e
+ * düşer (tıpkı jobRemovedNotifications'ın "rejected"i "job yok" koşuluyla
+ * ayrıştırması gibi, AYNI desen). `job` parametresi isteğe bağlıdır — yalnızca
+ * bu üçüncü koşulu değerlendirmek için gerekir, geçirilmezse (eski çağıranlar)
+ * davranış aynen korunur (yalnızca bu YENİ dal hiç tetiklenmez).
  */
-export function getProviderOfferFilter(offer: Offer, offers: Offer[]): ProviderOfferFilter | null {
+export function getProviderOfferFilter(
+  offer: Offer,
+  offers: Offer[],
+  job?: Job | null,
+): ProviderOfferFilter | null {
   if (!isOfferVisibleInNormalLists(offer)) return null;
   if (IN_PROGRESS_OFFER_STATUSES.includes(offer.status)) return "devam-eden";
   if (COMPLETED_OFFER_STATUSES.includes(offer.status)) return "tamamlandi";
   if (offer.status === "agreement_failed" || offer.status === "cancelled") return "kapanan-teklifler";
   if (offer.status === "pending" && isOfferClosedByJobProgress(offer, offers)) return "kapanan-teklifler";
+  if (offer.status === "rejected" && job && isJobManuallyClosed(job)) return "kapanan-teklifler";
   return "aktif";
 }
 
@@ -841,10 +924,14 @@ export function getProviderOffersTabHref(filter: ProviderOfferFilter): string {
  * "pending" kolundan değil "agreement_failed"/"cancelled" kollarından da.
  * `?? "aktif"` yalnızca tip güvenliği içindir — bu fonksiyonu çağıran hiçbir
  * bildirim türü "withdrawn" bir teklif için üretilmez (bkz. notifications.ts),
- * o yüzden pratikte hiç tetiklenmez.
+ * o yüzden pratikte hiç tetiklenmez. `job` (isteğe bağlı) yalnızca
+ * getProviderOfferFilter'ın İlan Kapatma dalı için ileri aktarılır —
+ * notifications.ts#jobClosedNotifications bunu her zaman geçirir, diğer
+ * bildirim türleri (job kapatılmamış olduğu için bu dalın hiç tetiklenmediği
+ * durumlar) geçirmese de sonuç değişmez.
  */
-export function getProviderOfferNotificationHref(offer: Offer, offers: Offer[]): string {
-  return getProviderOffersTabHref(getProviderOfferFilter(offer, offers) ?? "aktif");
+export function getProviderOfferNotificationHref(offer: Offer, offers: Offer[], job?: Job | null): string {
+  return getProviderOffersTabHref(getProviderOfferFilter(offer, offers, job) ?? "aktif");
 }
 
 /**

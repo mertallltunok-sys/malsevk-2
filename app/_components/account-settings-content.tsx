@@ -62,7 +62,7 @@ export function AccountSettingsContent() {
 
   return (
     <div>
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+      <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
         Hesap Ayarları
       </h1>
       <p className="mt-3 text-base leading-relaxed text-muted-foreground">
@@ -83,7 +83,7 @@ export function AccountSettingsContent() {
         )}
 
         <div className="rounded-card border border-border bg-surface p-6">
-          <h2 className="text-lg font-semibold text-foreground">Güvenlik</h2>
+          <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Güvenlik</h2>
           <ComingSoonAction
             title="Şifre Değiştir"
             description="Hesap şifrenizi güncelleyin."
@@ -92,7 +92,7 @@ export function AccountSettingsContent() {
         </div>
 
         <div className="rounded-card border border-border bg-surface p-6">
-          <h2 className="text-lg font-semibold text-foreground">Oturum</h2>
+          <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Oturum</h2>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             Hesabınızdan güvenli şekilde çıkış yapabilirsiniz.
           </p>
@@ -107,7 +107,7 @@ export function AccountSettingsContent() {
         </div>
 
         <div className="rounded-card border border-danger/30 bg-surface p-6">
-          <h2 className="text-lg font-semibold text-foreground">Hesabı Sil</h2>
+          <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Hesabı Sil</h2>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             Hesabınızı ve verilerinizi kalıcı olarak silin. Bu işlem geri alınamaz.
           </p>

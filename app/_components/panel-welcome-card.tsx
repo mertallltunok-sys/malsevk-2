@@ -18,7 +18,7 @@ export function PanelWelcomeCard({ name, subtitle }: { name: string; subtitle: s
           {getInitials(name)}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-lg font-semibold text-foreground">Hoş geldiniz, {name}</p>
+          <p className="truncate text-lg font-bold tracking-heading leading-tight text-foreground">Hoş geldiniz, {name}</p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{subtitle}</p>
         </div>
       </div>

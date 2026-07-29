@@ -106,7 +106,7 @@ function NotificationBellRow({
             aria-hidden="true"
           />
           <span className="min-w-0 flex-1 break-words">
-            {notification.title && <span className="block font-semibold text-foreground">{notification.title}</span>}
+            {notification.title && <span className="block font-bold tracking-heading leading-tight text-foreground">{notification.title}</span>}
             {notification.message}
           </span>
         </Link>

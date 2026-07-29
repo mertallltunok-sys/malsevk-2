@@ -9,7 +9,8 @@ import {
   getJobOfferAvailabilityLabel,
   getJobOfferAvailabilityTone,
 } from "../_lib/job-requests";
-import { formatJobDate, isJobDateInPast, isJobOpenForOffers } from "../_lib/jobs";
+import { formatJobDateRange, isJobDateInPast, isJobOpenForOffers } from "../_lib/jobs";
+import { useIsJobVisibleToSession } from "../_lib/job-visibility";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useAllOffers } from "../_lib/use-offers";
 import { useJobById } from "../_lib/use-jobs";
@@ -24,10 +25,19 @@ export function JobDetailContent({ id }: { id: string }) {
   const offers = useAllOffers();
   const session = useSession();
 
-  if (!job) {
+  // Nakliye izolasyonu (bkz. job-visibility.ts): doğrudan jobId URL erişimi
+  // DAHİL, bu sayfaya ULAŞAN her yol (panel içi bağlantılar, bildirimler,
+  // operasyon kardeş ilan linkleri) buradan geçer — bu yüzden merkezi kapı
+  // burada uygulanmak, tüm bu yolları TEK seferde kapatmak için yeterlidir.
+  // Görünmeyen bir ilan, mevcut "gerçekten yok" durumuyla AYNI mesajı
+  // gösterir (bkz. aşağıdaki `!job` dalı) — ilanın var olduğu ama
+  // erişilemediği bilgisi bile sızdırılmaz.
+  const isVisible = useIsJobVisibleToSession(session, job);
+
+  if (!job || !isVisible) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-20 text-center sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-semibold text-foreground">
+        <h1 className="text-2xl font-bold tracking-heading leading-tight text-foreground">
           İlan bulunamadı veya artık yayında değil.
         </h1>
         <Link
@@ -58,7 +68,7 @@ export function JobDetailContent({ id }: { id: string }) {
           <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
             {getCategoryDisplayLabel(job.category)}
           </span>
-          <h1 className="mt-3 max-w-2xl break-words text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl">
+          <h1 className="mt-3 max-w-2xl break-words text-3xl font-bold leading-tight tracking-heading text-foreground sm:text-4xl">
             {job.title}
           </h1>
         </div>
@@ -82,7 +92,7 @@ export function JobDetailContent({ id }: { id: string }) {
           </span>
           <span className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {formatJobDate(job.workDate)}
+            {formatJobDateRange(job.workDate, job.workEndDate)}
           </span>
         </div>
         {showAddress && (
@@ -120,13 +130,13 @@ export function JobDetailContent({ id }: { id: string }) {
       <div className="mt-10 grid gap-6 lg:grid-cols-2">
         <div className="flex flex-col gap-6">
           <div className="rounded-card border border-border bg-surface p-6">
-            <h2 className="text-lg font-semibold text-foreground">İş Açıklaması</h2>
+            <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">İş Açıklaması</h2>
             <p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground">
               {job.description}
             </p>
           </div>
           <div className="rounded-card border border-border bg-surface p-6">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+            <h2 className="flex items-center gap-2 text-lg font-bold tracking-heading leading-tight text-foreground">
               <ClipboardList className="h-5 w-5 text-accent" aria-hidden="true" />
               Operasyon Detayları
             </h2>
@@ -137,7 +147,7 @@ export function JobDetailContent({ id }: { id: string }) {
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Teklif Ver</h2>
+          <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Teklif Ver</h2>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             Yalnızca Hizmet Veren kullanıcılar bu ilana teklif verebilir.
           </p>

@@ -31,7 +31,7 @@ export function IncomingOfferCategorySection({
   return (
     <section className="flex h-fit min-w-0 flex-col gap-6 rounded-card border border-border bg-surface p-4 sm:p-6">
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-4">
-        <h2 className="text-lg font-bold text-foreground">{group.categoryLabel}</h2>
+        <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">{group.categoryLabel}</h2>
         <span className="text-sm text-muted-foreground">{group.offerCount} Teklif</span>
       </header>
 
@@ -53,7 +53,7 @@ export function IncomingOfferCategorySection({
           <div key={jobGroup.jobId} className="flex min-w-0 flex-col gap-4">
             <div className="min-w-0 rounded-md bg-background px-4 py-3">
               <h3
-                className="line-clamp-2 break-words text-base font-semibold text-foreground"
+                className="line-clamp-2 break-words text-base font-bold tracking-heading leading-tight text-foreground"
                 title={jobGroup.job?.title}
               >
                 {jobGroup.job ? jobGroup.job.title : "İlan bilgisine ulaşılamadı"}

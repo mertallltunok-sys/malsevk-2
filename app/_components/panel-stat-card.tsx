@@ -37,7 +37,7 @@ function CardBody({
       <p className="mt-4 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
 
       {/* min-h, iki satırlık başlıklarda bile tüm kartların hizalı kalması için */}
-      <p className="mt-2 min-h-[2.75rem] text-sm font-semibold leading-snug text-foreground">
+      <p className="mt-2 min-h-[2.75rem] text-sm font-bold tracking-heading leading-snug text-foreground">
         {label}
       </p>
 

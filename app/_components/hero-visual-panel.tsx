@@ -26,7 +26,7 @@ export function HeroVisualPanel() {
           <Container className="h-5 w-5" aria-hidden="true" />
         </span>
         <div>
-          <p className="text-sm font-semibold text-foreground">
+          <p className="text-sm font-bold tracking-heading leading-tight text-foreground">
             MALSEVK Operasyon Akışı
           </p>
           <p className="text-xs text-muted-foreground">
@@ -50,7 +50,7 @@ export function HeroVisualPanel() {
               )}
             </div>
             <div className={index < flowSteps.length - 1 ? "pb-6" : ""}>
-              <p className="text-sm font-semibold text-foreground">
+              <p className="text-sm font-bold tracking-heading leading-tight text-foreground">
                 {step.title}
               </p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">

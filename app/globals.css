@@ -55,6 +55,16 @@
 
   --radius-card: var(--radius-lg);
 
+  /*
+   * Başlık tipografisi (kart/sayfa/bölüm başlıkları) için TEK doğruluk
+   * kaynağı — `tracking-heading` utility'si buradan üretilir. Yalnızca
+   * font-weight 700 (`font-bold`, zaten Tailwind'in kendi ölçeğinde) ve
+   * `leading-tight`le (zaten Tailwind'in kendi ölçeğinde) birlikte
+   * başlıklara uygulanır; gövde metni/buton/form alanları BU token'ı hiç
+   * kullanmaz. Font ailesi/renk/boyut değişmedi — yalnızca harf aralığı.
+   */
+  --tracking-heading: -0.015em;
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 

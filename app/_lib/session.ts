@@ -13,7 +13,7 @@ function isValidSession(value: unknown): value is Session {
   return (
     typeof candidate.id === "string" &&
     typeof candidate.name === "string" &&
-    (candidate.role === "hizmet-alan" || candidate.role === "hizmet-veren")
+    (candidate.role === "hizmet-alan" || candidate.role === "hizmet-veren" || candidate.role === "admin")
   );
 }
 
@@ -69,16 +69,34 @@ export function getSession(): Session | null {
   return readSessionSnapshot();
 }
 
-export function setSession(session: Session): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+/**
+ * `localStorage.setItem` başarısız olursa (kota dolu, gizli sekme vb.)
+ * `false` döner ve oturum ASLA yazılmamış sayılır — çağıran (login-form.tsx)
+ * bu durumda yönlendirme yapmamalı/oturum açılmış gibi davranmamalıdır (bkz.
+ * CLAUDE.md B1 düzeltmesi).
+ */
+export function setSession(session: Session): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch (error) {
+    console.error("Oturum bilgisi kaydedilemedi:", error);
+    return false;
+  }
   notify();
+  return true;
 }
 
-export function clearSession(): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+export function clearSession(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (error) {
+    console.error("Oturum bilgisi silinemedi:", error);
+    return false;
+  }
   notify();
+  return true;
 }
 
 export const sessionStore = {

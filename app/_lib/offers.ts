@@ -11,12 +11,16 @@ import {
   isReofferCooldownStatus,
   jobHasAcceptedOffer,
 } from "./job-requests";
-import { deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
+import { isJobListingExpired } from "./job-publish-window";
+import { isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE, JOB_CLOSURE_BLOCKED_MESSAGE } from "./job-closure";
+import { closeJob as closeJobRecord, deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
+import { isJobVisibleToSession } from "./job-visibility";
 import { findJobById } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
+import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
 import { hasReachedActiveJobLimit } from "./provider-capacity";
-import type { Currency, DisagreementReason, Job, Offer, OfferStatus, Session } from "./types";
+import type { Currency, DisagreementReason, Job, JobClosureReason, Offer, OfferStatus, Session } from "./types";
 
 const OFFERS_STORAGE_KEY = "malsevk.offers.v1";
 const REOFFER_COOLDOWN_MS = REOFFER_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
@@ -119,12 +123,21 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-function writeAllOffers(offers: Offer[]): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(OFFERS_STORAGE_KEY, JSON.stringify(offers));
+/**
+ * ÖNCEDEN bu fonksiyon `localStorage.setItem`i hiç try/catch İÇİNDE
+ * ÇAĞIRMIYORDU — bir exception (kota dolu, gizli sekme vb.) doğrudan, KONTROLSÜZ
+ * biçimde çağıran her teklif fonksiyonundan (createOffer/updateOfferStatus/...)
+ * yukarı fırlıyordu. Artık merkezi `writeJson` (bkz. local-storage.ts) hatayı
+ * yakalayıp loglar ve `false` döner; burada da (job-store.ts#writeUserCreatedJobs
+ * ile AYNI desen) başarısızlıkta önbellek/notify hiç tetiklenmez — her çağıran
+ * bu sonucu kendi `{ok,error}` sözleşmesine çevirir (bkz. CLAUDE.md B1 düzeltmesi).
+ */
+function writeAllOffers(offers: Offer[]): boolean {
+  if (!writeJson(OFFERS_STORAGE_KEY, offers)) return false;
   cachedRaw = null;
   hasCached = false;
   notify();
+  return true;
 }
 
 export const offersStore = {
@@ -267,8 +280,28 @@ export function canProviderSubmitNewOffer(
   offers: Offer[],
 ): boolean {
   if (!session || session.role !== "hizmet-veren") return false;
+  // Nakliye izolasyonu (bkz. job-visibility.ts) — Nakliye'ye kilitlenmiş bir
+  // Hizmet Veren, Nakliye dışındaki hiçbir ilana teklif VEREMEZ; bu kontrol
+  // yalnızca "Teklif Ver" butonunu gizlemekle kalmaz, veri katmanında da
+  // (aşağıdaki createOffer'da tekrar) uygulanır — arayüz atlanabilir bir tek
+  // nokta değildir.
+  if (!isJobVisibleToSession(session, job)) return false;
   if (!isJobOpenForOffers(job.status)) return false;
   if (isJobClosedToNewOffers(job.id, offers)) return false;
+  // İlan Kapatma: Hizmet Alan bu ilanı manuel olarak kapattıysa (bkz.
+  // job-closure.ts) — `isJobClosedToNewOffers`ten TAMAMEN bağımsız, ayrı bir
+  // kapı (o yalnızca teklif ilerlemesine bakar, bu ise Hizmet Alan'ın kendi
+  // kararına). Kapatma yalnızca hiçbir teklif işe başlamamışken/tamamlanma
+  // sürecine girmemişken mümkündür (bkz. offers.ts#closeJobListing), bu
+  // yüzden burada da çakışma riski yoktur.
+  if (isJobManuallyClosed(job)) return false;
+  // İlan Yayın Süresi Yönetimi: 14 günlük yayın süresi dolmuş bir ilan
+  // (bkz. job-publish-window.ts, tek doğruluk kaynağı) yeni teklif alamaz —
+  // bu, `isJobClosedToNewOffers`ten TAMAMEN ayrı, bağımsız bir kapı. Zaten
+  // meşgul (kabul edilmiş/işe başlanmış/vb.) bir ilan `isJobListingExpired`e
+  // göre hiçbir zaman "süresi dolmuş" sayılmaz (bkz. o fonksiyonun kendi
+  // istisnası), bu yüzden burada çakışma/çelişki riski yoktur.
+  if (isJobListingExpired(job, offers)) return false;
 
   const currentOffer = getOfferForJob(job.id, session.id);
   if (currentOffer) {
@@ -392,10 +425,22 @@ export function getOperationServiceCardStatus(
     return { kind: "teklif-ver" };
   }
 
+  // İlan Kapatma: kapatılmış bir ilan hiçbir zaman "meşgul" bir teklife
+  // (kabul edilmiş/işe başlanmış/tamamlanma sürecinde) sahip olamaz (bkz.
+  // offers.ts#closeJobListing'in bunu ön koşul olarak zorunlu kılması), bu
+  // yüzden bu kontrol aşağıdaki "kendi teklifi"/"job-geneli" dallarından
+  // ÖNCE, erken bir çıkışla yapılır — aksi halde ör. hâlâ "pending" kalıp
+  // kapatma nedeniyle "rejected"e çevrilmiş kendi teklifi olan bir Hizmet
+  // Veren için "Başka Hizmet Verenle Anlaşıldı" gibi YANLIŞ/alakasız bir
+  // etiket üretilirdi.
+  if (isJobManuallyClosed(job)) {
+    return { kind: "label", label: "İlan Kapatıldı", tone: "neutral" };
+  }
+
   if (session?.role === "hizmet-veren") {
     const ownOffer = getOfferForJob(job.id, session.id);
     if (ownOffer) {
-      if (ownOffer.status === "pending" && getProviderOfferFilter(ownOffer, offers) === "kapanan-teklifler") {
+      if (ownOffer.status === "pending" && getProviderOfferFilter(ownOffer, offers, job) === "kapanan-teklifler") {
         return { kind: "label", label: "Başka Hizmet Verenle Anlaşıldı", tone: "neutral" };
       }
       return { kind: "label", ...offerStatusToCardLabel(ownOffer.status) };
@@ -425,8 +470,24 @@ export function getOperationServiceCardStatus(
   if (session?.id === job.requesterId) {
     const hasPendingOffer = offers.some((offer) => offer.jobId === job.id && offer.status === "pending");
     if (hasPendingOffer) {
+      // İlan Yayın Süresi Yönetimi: bekleyen bir teklif varsa, ilanın yayın
+      // süresi dolmuş olsa bile bu satır hâlâ ilan sahibinden bir karar
+      // bekler — kabul edilirse iş akışı normal şekilde devam eder (bkz.
+      // job-publish-window.ts'in "kabul edilmiş teklif yayın süresi
+      // kuralından muaftır" istisnası). Bu yüzden "Süresi Doldu" yerine
+      // BİLEREK bu daha spesifik durum gösterilir.
       return { kind: "label", label: "İşe Başlama Onayı Bekleniyor", tone: "warning" };
     }
+  }
+
+  // İlan Yayın Süresi Yönetimi: buraya kadar hiçbir dal eşleşmediyse (teklif
+  // yok, ya da yalnızca reddedilmiş/geri çekilmiş/anlaşma sağlanamamış
+  // teklifler var) ve ilanın 14 günlük yayın süresi dolmuşsa, "Teklife Açık"
+  // göstermek YANLIŞ/yanıltıcı olurdu — bu satır artık gerçekten teklif
+  // alamaz (bkz. canProviderSubmitNewOffer'daki AYNI kontrol, bu fonksiyonun
+  // en başındaki "teklif-ver" dalını zaten engelliyor).
+  if (isJobListingExpired(job, offers)) {
+    return { kind: "label", label: "Süresi Doldu", tone: "neutral" };
   }
 
   return { kind: "label", label: "Teklife Açık", tone: "success" };
@@ -487,6 +548,14 @@ export function createOffer(
     return { ok: false, error: "İlan bulunamadı veya artık yayında değil." };
   }
 
+  // Nakliye izolasyonu (bkz. job-visibility.ts) — Nakliye'ye kilitlenmiş bir
+  // Hizmet Veren'in görünürlük dışı bir ilana AYNI ("bulunamadı") mesajla
+  // reddedilmesi bilerek gerçek bir "yok" durumundan AYIRT EDİLEMEZ hâle
+  // getirilir — ilanın var olduğu ama erişilemediği bilgisi bile sızmaz.
+  if (!isJobVisibleToSession(session, job)) {
+    return { ok: false, error: "İlan bulunamadı veya artık yayında değil." };
+  }
+
   // Teklif oluşturmanın tek yetkilendirme noktası burasıdır — arayüz bu
   // kontrolü tekrar yazmaz, yalnızca sonucu gösterir (bkz. CLAUDE.md "No
   // real backend"). Bu proje istemci-tarafı çalıştığı için gerçek bir HTTP
@@ -544,6 +613,23 @@ export function createOffer(
   if (isJobClosedToNewOffers(input.jobId, all)) {
     return { ok: false, error: "Bu ilan için bir hizmet verenle iş başlamış, yeni teklif alınmıyor." };
   }
+  // İlan Kapatma: arayüzden bağımsız, ASIL yetkilendirme noktası —
+  // offer-panel.tsx'teki görsel engel (canProviderSubmitNewOffer üzerinden)
+  // yalnızca bunun bir YANSIMASIDIR (bkz. job-closure.ts, tek doğruluk
+  // kaynağı). Hizmet Alan bu ilanı manuel olarak kapattıysa artık hiçbir
+  // yeni teklif kabul edilmez.
+  if (isJobManuallyClosed(job)) {
+    return { ok: false, error: "Bu ilan, ilan sahibi tarafından kapatılmıştır ve artık teklif alamaz." };
+  }
+  // İlan Yayın Süresi Yönetimi: arayüzden bağımsız, ASIL yetkilendirme
+  // noktası — offer-panel.tsx'teki görsel engel yalnızca bunun bir
+  // YANSIMASIDIR (bkz. job-publish-window.ts, tek doğruluk kaynağı).
+  // Kullanıcı arayüzü atlayıp bu fonksiyonu doğrudan çağırsa (ör. eski bir
+  // bağlantı/istemci taraflı manipülasyon) bile süresi dolmuş bir ilana
+  // teklif KESİN olarak oluşturulamaz.
+  if (isJobListingExpired(job, all)) {
+    return { ok: false, error: "Bu ilanın yayın süresi sona ermiştir ve artık teklif verilemez." };
+  }
 
   // 2) Aktif iş kapasitesi kontrolü — yalnızca daha önce teklif verilmemişse
   // anlamlıdır (bkz. yukarıdaki sıralama notu). Arayüzdeki pasif "Teklif
@@ -593,7 +679,9 @@ export function createOffer(
     updatedAt: now,
   };
 
-  writeAllOffers([...all, offer]);
+  if (!writeAllOffers([...all, offer])) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer };
 }
 
@@ -635,7 +723,9 @@ export function withdrawOffer(session: Session | null, offerId: string): Withdra
   }
 
   const updated: Offer = { ...offer, status: "withdrawn", updatedAt: new Date().toISOString() };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -693,8 +783,25 @@ export function updateOfferStatus(
     return { ok: false, error: OFFER_PENDING_BLOCKED_MESSAGE };
   }
 
+  // Aktif İş Kapasitesi: `createOffer`/`canProviderSubmitNewOffer`'ın teklif
+  // OLUŞTURULURKEN uyguladığı aynı kural, KABUL anında da uygulanmalı —
+  // aksi halde kapasitesi boşken bağımsız ilanlara verilmiş birden fazla
+  // teklif, farklı ilan sahiplerince birbirinden habersiz kabul edildiğinde
+  // MAX_ACTIVE_JOBS'ı aşabilir. `all` bu fonksiyonun başında taze okunmuş
+  // liste olduğu için "eski/stale" bir duruma güvenilmez; teklifin kendisi
+  // hâlâ "pending" olduğundan (henüz `updated` yazılmadı) kendi kendini
+  // sayıma dahil etmez.
+  if (nextStatus === "accepted" && hasReachedActiveJobLimit(offer.providerId, all)) {
+    return {
+      ok: false,
+      error: "Bu hizmet veren aktif iş kapasitesine ulaştığı için teklif şu anda kabul edilemiyor.",
+    };
+  }
+
   const updated: Offer = { ...offer, status: nextStatus, updatedAt: new Date().toISOString() };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -731,7 +838,9 @@ export function startWorkForOffer(session: Session | null, offerId: string): Sta
   }
 
   const updated: Offer = { ...offer, status: "in_progress", updatedAt: new Date().toISOString() };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -789,7 +898,9 @@ export function recordAgreementFailure(
     disagreementNote: reason === "diger" && trimmedNote ? trimmedNote : undefined,
     updatedAt: new Date().toISOString(),
   };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -851,14 +962,112 @@ export async function deleteJobWithOffers(
     return jobDeleteResult;
   }
 
+  // Ana yazım (ilan kaydının silinmesi) YUKARIDA zaten başarıyla tamamlandı —
+  // bu, kullanıcının istediği asıl işlemdir. Bu ikinci yazım yalnızca ikincil
+  // bir tutarlılık/bildirim adımıdır (bkz. fonksiyonun üstündeki dokümantasyon);
+  // başarısız olursa büyük bir rollback (silinen ilanı geri getirmek) yerine
+  // gerçek hata konsola loglanır ve ilan silme sonucu yine de başarı olarak
+  // döner — zaten gerçekleşmiş olan silme işlemini burada geri almak, bu
+  // görevin kapsamı dışındaki bir transaction sistemi gerektirirdi.
   const now = new Date().toISOString();
-  writeAllOffers(
-    all.map((offer) =>
-      offer.jobId === jobId && offer.status === "pending"
-        ? { ...offer, status: "rejected" as const, updatedAt: now }
-        : offer,
-    ),
-  );
+  if (
+    !writeAllOffers(
+      all.map((offer) =>
+        offer.jobId === jobId && offer.status === "pending"
+          ? { ...offer, status: "rejected" as const, updatedAt: now }
+          : offer,
+      ),
+    )
+  ) {
+    console.error(
+      "deleteJobWithOffers: ilan silindi ancak bekleyen tekliflerin durumu güncellenemedi.",
+    );
+  }
+  return { ok: true };
+}
+
+export type CloseJobListingResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * İlan kapatma, kullanıcı arayüzünün çağırması gereken asıl (yetkilendirilmiş)
+ * giriş noktasıdır — job-store.ts#closeJob'ı doğrudan çağırmak yerine bunu
+ * kullanın. `deleteJobWithOffers` ile AYNI bölünme gerekçesi: job-store.ts
+ * kendi başına teklif deposunu bilmediği için, "MALSEVK üzerinden işe
+ * başlanmış/tamamlanma sürecine girmiş bir teklif var mı" kontrolü (bkz.
+ * job-closure.ts#JOB_CLOSURE_BLOCKED_MESSAGE) burada yapılır.
+ *
+ * Bu kontrol BİLEREK `isJobClosedToNewOffers`i (job-requests.ts, KRİTİK
+ * MİMARİ AYRIM) kullanır — YENİ bir eşik İCAT EDİLMEZ: settled teklif hâlâ
+ * yalnızca "accepted" (kabul edildi, işe HENÜZ başlanmadı — ön anlaşma/
+ * görüşme aşaması) ise kapatmayı ENGELLEMEZ; yalnızca settled teklif
+ * "accepted"ın ÖTESİNE geçtiğinde (in_progress/completion_requested/
+ * completion_disputed/completed) kapatma reddedilir. Bu, görev
+ * gereksiniminin "işe başlanmış VEYA tamamlanma sürecine girmiş" ifadesiyle
+ * birebir örtüşür.
+ *
+ * OPERASYON HİZMET KALEMİ YAŞAM DÖNGÜSÜ İLE AYNI DESEN: bu ilana bağlı hâlâ
+ * "pending" olan teklifler `deleteJobWithOffers`teki BİREBİR aynı mekanikle
+ * "rejected"e çevrilir (yeni bir Offer.status İCAT EDİLMEZ) — kayıt SİLİNMEZ,
+ * yalnızca artık aksiyon alınamaz/kapasiteyi serbest bırakır hale gelir.
+ * `job-requests.ts#getProviderOfferFilter`in İlan Kapatma dalı, bu "rejected"i
+ * job.closedAt doluluğuna bakarak "kapanan-teklifler"e (ve normal "aktif"
+ * teklif listelerinin dışına) taşır; notifications.ts#jobClosedNotifications
+ * ise aynı ayrımı kullanarak seçilen nedene uygun bilgilendirme bildirimini
+ * üretir. Zaten terminal olan teklifler (rejected/withdrawn/agreement_failed/
+ * cancelled/completed) dokunulmadan aynen korunur.
+ *
+ * Aynı operasyona bağlı KARDEŞ ilanlar (varsa) hiç etkilenmez — bu fonksiyon
+ * yalnızca TEK bir `jobId` üzerinde çalışır, `Job.operationId` burada hiç
+ * okunmaz/yazılmaz (bkz. CLAUDE.md "sibling jobs are fully independent").
+ */
+export async function closeJobListing(
+  session: Session | null,
+  jobId: string,
+  reason: JobClosureReason,
+): Promise<CloseJobListingResult> {
+  if (!session) {
+    return { ok: false, error: "İlanı kapatmak için giriş yapmalısınız." };
+  }
+  if (session.role !== "hizmet-alan") {
+    return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan kapatabilir." };
+  }
+
+  const job = findJobById(jobId);
+  if (!job || job.requesterId !== session.id) {
+    return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
+  }
+
+  if (isJobManuallyClosed(job)) {
+    return { ok: false, error: JOB_ALREADY_CLOSED_MESSAGE };
+  }
+
+  const all = readAllOffersSnapshot();
+  if (isJobClosedToNewOffers(jobId, all)) {
+    return { ok: false, error: JOB_CLOSURE_BLOCKED_MESSAGE };
+  }
+
+  const closeResult = closeJobRecord(session, jobId, reason);
+  if (!closeResult.ok) {
+    return closeResult;
+  }
+
+  // Ana yazım (ilanın kapatılması) YUKARIDA zaten başarıyla tamamlandı — bu,
+  // kullanıcının istediği asıl işlemdir. Bu ikinci yazım yalnızca ikincil bir
+  // tutarlılık/bildirim adımıdır (deleteJobWithOffers'taki AYNI gerekçe);
+  // başarısız olursa gerçek hata konsola loglanır ve ilan kapatma sonucu yine
+  // de başarı olarak döner.
+  const now = new Date().toISOString();
+  if (
+    !writeAllOffers(
+      all.map((offer) =>
+        offer.jobId === jobId && offer.status === "pending"
+          ? { ...offer, status: "rejected" as const, updatedAt: now }
+          : offer,
+      ),
+    )
+  ) {
+    console.error("closeJobListing: ilan kapatıldı ancak bekleyen tekliflerin durumu güncellenemedi.");
+  }
   return { ok: true };
 }
 
@@ -903,7 +1112,9 @@ export function requestCompletion(session: Session | null, offerId: string): Req
     completionRequestedAt: now,
     updatedAt: now,
   };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -946,7 +1157,9 @@ export function confirmCompletion(session: Session | null, offerId: string): Con
   }
 
   const updated: Offer = { ...offer, status: "completed", updatedAt: new Date().toISOString() };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -1002,7 +1215,9 @@ export function disputeCompletion(
     completionDisputeNote: trimmedNote,
     updatedAt: new Date().toISOString(),
   };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 
@@ -1043,7 +1258,9 @@ export function resolveCompletionDispute(
   }
 
   const updated: Offer = { ...offer, status: resolution, updatedAt: new Date().toISOString() };
-  writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)));
+  if (!writeAllOffers(all.map((item) => (item.id === offerId ? updated : item)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, offer: updated };
 }
 

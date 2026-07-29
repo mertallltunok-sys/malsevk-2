@@ -96,7 +96,11 @@ const heroCopy = {
 
 export function HeroSection() {
   const session = useSession();
-  const audience = session?.role ?? "visitor";
+  // "admin" bu pazarlama bölümünün hedef kitlesi değildir (bkz.
+  // heroCopy/heroFeatures'ın yalnızca visitor/hizmet-alan/hizmet-veren
+  // içermesi) — admin oturumu "visitor" içeriğiyle aynı, jenerik hâle döner.
+  const audience =
+    session?.role === "hizmet-alan" || session?.role === "hizmet-veren" ? session.role : "visitor";
   const copy = heroCopy[audience];
 
   return (
@@ -106,7 +110,7 @@ export function HeroSection() {
           <span className="inline-flex items-center rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted-foreground">
             Türkiye&apos;nin lojistik hizmet platformu
           </span>
-          <h1 className="mt-5 max-w-xl text-4xl font-semibold leading-tight tracking-tight text-foreground sm:text-5xl">
+          <h1 className="mt-5 max-w-xl text-4xl font-bold leading-tight tracking-heading text-foreground sm:text-5xl">
             {copy.title}
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
@@ -154,7 +158,7 @@ export function HeroSection() {
                     <feature.icon className="h-5 w-5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0">
-                    <p className="text-base font-semibold text-foreground">
+                    <p className="text-base font-bold tracking-heading leading-tight text-foreground">
                       {feature.title}
                     </p>
                     <p className="mt-1 text-sm leading-relaxed text-muted-foreground">

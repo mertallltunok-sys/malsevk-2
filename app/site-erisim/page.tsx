@@ -26,7 +26,7 @@ export default async function SiteErisimPage({
     return (
       <section className="bg-background">
         <div className="mx-auto max-w-md px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Site Erişimi</h1>
+          <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground">Site Erişimi</h1>
           <div className="mt-8 rounded-card border border-border bg-surface p-6 text-sm text-muted-foreground sm:p-8">
             Geliştirme modunda (<code>npm run dev</code>) bu koruma devre dışıdır — doğrudan uygulamaya devam
             edebilirsiniz.
@@ -43,7 +43,7 @@ export default async function SiteErisimPage({
   return (
     <section className="bg-background">
       <div className="mx-auto max-w-md px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Site Erişimi</h1>
+        <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground">Site Erişimi</h1>
         <p className="mt-3 text-base leading-relaxed text-muted-foreground">
           Bu, geçici bir geliştirme dönemi korumasıdır. Devam etmek için erişim şifresini girin.
         </p>

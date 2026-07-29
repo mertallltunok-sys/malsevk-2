@@ -21,10 +21,9 @@ export type ServiceCategoryGroup = {
  * `jobs.ts#SERVICE_CATEGORIES` (8 elemanlı, düz, eski liste) bu dosyanın
  * YERİNE GEÇMEZ — yalnızca aşağıdaki `LEGACY_CATEGORY_TO_SERVICE_IDS`
  * eşlemesi üzerinden BURAYA bağlanır (bkz. aşağıdaki migrasyon bölümü).
- * Ana sayfadaki `services-section.tsx`in kendi (bu dosyadan bağımsız,
- * ikon/açıklama içeren) tanıtım listesi bu görevin kapsamı dışında
- * bırakıldı — o saf pazarlama içeriğidir, ne Job.category'yi ne
- * ProviderProfile'ı okur/yazar.
+ * Ana sayfadaki `services-section.tsx`in rol bazlı tanıtım/hızlı-erişim
+ * bölümü de (bkz. `getAllServiceCategories` altında) BURADAN beslenir —
+ * elle yazılmış ayrı bir hizmet listesi tutmaz.
  */
 export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
   {
@@ -99,7 +98,20 @@ export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
     label: "Proje Yükü Hizmetleri",
     categories: [{ id: "proje-yuku", label: "Proje Yük" }],
   },
+  {
+    id: "nakliye-hizmetleri",
+    label: "Nakliye Hizmetleri",
+    categories: [{ id: "nakliye", label: "Nakliye" }],
+  },
 ];
+
+/**
+ * Nakliye hizmet kategorisinin id'si — job-visibility.ts'teki Nakliye'ye özel
+ * keşif izolasyonu kuralının (bkz. o dosyanın dokümantasyonu) tek referans
+ * noktası. Diğer hiçbir dosya "nakliye" değerini elle yazmaz (magic string
+ * yasak) — her zaman bu sabit üzerinden içe aktarılır.
+ */
+export const NAKLIYE_SERVICE_CATEGORY_ID = "nakliye";
 
 const VALID_SERVICE_CATEGORY_IDS = new Set(
   SERVICE_CATEGORY_GROUPS.flatMap((group) => group.categories.map((category) => category.id)),
@@ -116,6 +128,54 @@ export function getServiceCategoryLabel(id: string): string | undefined {
     if (found) return found.label;
   }
   return undefined;
+}
+
+export type ServiceCategoryWithGroup = ServiceCategory & { groupId: string; groupLabel: string };
+
+/**
+ * `SERVICE_CATEGORY_GROUPS`taki TÜM kategorileri tek, düz bir listede döner —
+ * ana sayfadaki `services-section.tsx`in rol bazlı hizmet tanıtım/hızlı-erişim
+ * bölümü BU fonksiyon üzerinden beslenir, kendi elle yazılmış bir listeyi
+ * tutmaz. Bir kategori bu katalogdan kaldırılırsa (ya da yenisi eklenirse)
+ * o bölüm bir sonraki render'da otomatik günceller — ayrıca bir "aktif/pasif"
+ * bayrağı yoktur, katalogdaki varlığın kendisi "aktif" demektir. `id` zaten
+ * grup çapında benzersizdir (bkz. `VALID_SERVICE_CATEGORY_IDS`) ama aynı
+ * hizmetin iki kez listelenmesi ihtimaline karşı burada da bir `Set` ile
+ * güvenceye alınır.
+ */
+export function getAllServiceCategories(): ServiceCategoryWithGroup[] {
+  const seen = new Set<string>();
+  const result: ServiceCategoryWithGroup[] = [];
+  for (const group of SERVICE_CATEGORY_GROUPS) {
+    for (const category of group.categories) {
+      if (seen.has(category.id)) continue;
+      seen.add(category.id);
+      result.push({ ...category, groupId: group.id, groupLabel: group.label });
+    }
+  }
+  return result;
+}
+
+/**
+ * Her katalog id'sinin `SERVICE_CATEGORY_GROUPS`taki (grup sırası, sonra grup
+ * içi sıra) sabit konumu — bir kez hesaplanır, modül seviyesinde önbelleğe
+ * alınır. Çoklu Hizmet Operasyonu listeleme özetinin (bkz.
+ * job-listing-row.ts#OperationListingItem.services) hizmetleri "rastgele
+ * sıralanmayacak, mevcut Service Catalog sırasına göre gösterilecek"
+ * gereksinimi için TEK doğruluk kaynağıdır.
+ */
+const SERVICE_CATEGORY_ORDER_INDEX: ReadonlyMap<string, number> = new Map(
+  SERVICE_CATEGORY_GROUPS.flatMap((group) => group.categories).map((category, index) => [category.id, index]),
+);
+
+/**
+ * Bir kategori id'sinin katalogdaki sabit sırasındaki konumunu döner —
+ * bilinmeyen/eski (legacy, ham Türkçe metin) bir değer için katalogdaki HİÇBİR
+ * konumla çakışmayacak güvenli bir sonsuz-benzeri değer döner (listenin en
+ * sonuna düşer), asla hata fırlatmaz veya sahte bir sıra uydurmaz.
+ */
+export function getServiceCategoryOrderIndex(id: string): number {
+  return SERVICE_CATEGORY_ORDER_INDEX.get(id) ?? Number.MAX_SAFE_INTEGER;
 }
 
 // ============================================================

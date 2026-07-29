@@ -4,6 +4,8 @@ import {
   getJobRequestFilter,
   isOfferVisibleInNormalLists,
 } from "./job-requests";
+import { isExpiredListingAwaitingAction, isJobListingExpired } from "./job-publish-window";
+import { isJobManuallyClosed } from "./job-closure";
 import { isJobOpenForOffers } from "./jobs";
 import type { Job, Offer, OfferStatus, Session } from "./types";
 
@@ -12,9 +14,11 @@ import type { Job, Offer, OfferStatus, Session } from "./types";
  * metnine tırnakla gömülmez (başlığın kendisi zaten bir kesme işareti
  * içerebiliyor, ör. "40'lık"; iç içe tırnak karışıklığı olmasın diye
  * başlık ile geri kalan cümle ayrı alanlarda tutulur).
- * `status`/`dateIso`, yalnızca gerçekten mevcutsa doldurulur (Job tipinde
- * oluşturulma tarihi yok, bu yüzden ilan oluşturma hareketlerinde
- * `dateIso` bilinçli olarak boş bırakılır — sahte bir tarih üretilmez).
+ * `status`/`dateIso`, yalnızca gerçekten mevcutsa doldurulur — ilan oluşturma
+ * hareketlerinde (bkz. jobActivity, aşağıda) İlan Yayın Süresi Yönetimi'nden
+ * ÖNCE oluşturulmuş ilanlarda `Job.createdAt` hâlâ yok, bu yüzden `dateIso`
+ * o kayıtlar için bilinçli olarak boş kalır (sahte bir tarih ASLA üretilmez);
+ * bu alandan SONRA oluşturulan ilanlarda artık gerçek tarihiyle doldurulur.
  */
 export type PanelActivityItem = {
   id: string;
@@ -29,6 +33,14 @@ export type HizmetAlanPanelSummary = {
   incomingOfferCount: number;
   inProgressCount: number;
   completedCount: number;
+  /**
+   * İlan Yayın Süresi Yönetimi: 14 günlük yayın süresi dolmuş VE henüz
+   * yeniden yayınlanmamış (bkz. job-publish-window.ts#
+   * isExpiredListingAwaitingAction, tek doğruluk kaynağı) kendi ilanlarının
+   * sayısı. `activeRequestCount`ten AYRI, birbirini dışlayan bir kovadır —
+   * bir ilan aynı anda ikisine birden sayılamaz (bkz. aşağıdaki döngü).
+   */
+  expiredListingCount: number;
   recentActivity: PanelActivityItem[];
 };
 
@@ -74,10 +86,32 @@ export function getHizmetAlanPanelSummary(
   let activeRequestCount = 0;
   let inProgressCount = 0;
   let completedCount = 0;
+  let expiredListingCount = 0;
   for (const job of myJobs) {
     const filter = getJobRequestFilter(job, offers);
-    if (filter === "aktif") activeRequestCount++;
-    else if (filter === "devam-eden") inProgressCount++;
+    if (filter === "aktif") {
+      // İlan Kapatma: manuel olarak kapatılmış (bkz. job-closure.ts) bir ilan
+      // da "Aktif Hizmet Talepleri" sayısına dahil edilmez — süresi dolmuş
+      // ilanlarla AYNI ilke, yalnızca kendi (kendi sekmesi olan, "Kapatılan
+      // İlanlar") ayrı bir sayaç TUTULMAZ; bu ilan yalnızca üç kovadan
+      // (aktif/devam-eden/tamamlandi) hiçbirine dahil edilmeyerek dışlanır.
+      if (isJobManuallyClosed(job)) {
+        continue;
+      }
+      // İlan Yayın Süresi Yönetimi: "aktif" kovası artık yalnızca `getJobRequestFilter`e
+      // değil, AYRICA 14 günlük yayın süresinin dolmamış olmasına da bağlıdır
+      // (bkz. job-publish-window.ts#isJobListingExpired, tek doğruluk kaynağı) —
+      // süresi dolmuş bir ilan "Aktif Hizmet Talepleri" sayısına ASLA dahil
+      // edilmez. `isExpiredListingAwaitingAction` (daha dar — zaten yeniden
+      // yayınlanmışları hariç tutar) yalnızca bu YENİ sayaç için kullanılır;
+      // zaten yeniden yayınlanmış eski bir kayıt ne "aktif" ne de "aksiyon
+      // bekleyen süresi dolmuş" sayılır (salt geçmiş kaydıdır).
+      if (isJobListingExpired(job, offers)) {
+        if (isExpiredListingAwaitingAction(job, offers)) expiredListingCount++;
+      } else {
+        activeRequestCount++;
+      }
+    } else if (filter === "devam-eden") inProgressCount++;
     else if (filter === "tamamlandi") completedCount++;
   }
 
@@ -101,17 +135,19 @@ export function getHizmetAlanPanelSummary(
       dateIso: offer.createdAt,
     }));
 
-  // Yalnızca tekliflerin gerçek bir oluşturulma zaman damgası (createdAt)
-  // var; Job tipinde henüz bir oluşturulma tarihi alanı yok (bkz. types.ts).
-  // Bu yüzden iki kaynak birebir kronolojik olarak harmanlanamıyor: önce
-  // kesin olarak en yeni olduğu bilinen teklif hareketleri, ardından (yer
-  // kalırsa) en yeni ilan oluşturma hareketleri (mevcut kayıt sırasına
-  // göre — useAllJobs() zaten kullanıcı ilanlarını en yeni önde döner)
-  // gösterilir.
+  // Aynı gerekçeyle (İlan Yayın Süresi Yönetimi'nden önce oluşturulmuş
+  // ilanlarda `Job.createdAt` yok) iki kaynak HÂLÂ birebir kronolojik olarak
+  // harmanlanmıyor: önce kesin olarak en yeni olduğu bilinen teklif
+  // hareketleri, ardından (yer kalırsa) en yeni ilan oluşturma hareketleri
+  // (mevcut kayıt sırasına göre — useAllJobs() zaten kullanıcı ilanlarını en
+  // yeni önde döner) gösterilir; yalnızca `dateIso` artık (varsa) gerçek
+  // `job.createdAt`i taşıdığı için PanelActivityList bu satırlarda da bir
+  // tarih gösterebiliyor.
   const jobActivity: PanelActivityItem[] = myJobs.map((job) => ({
     id: `job-${job.id}`,
     title: job.title,
     suffix: "talebiniz oluşturuldu.",
+    dateIso: job.createdAt,
   }));
 
   const recentActivity = [...offerActivity, ...jobActivity].slice(0, MAX_RECENT_ACTIVITY);
@@ -121,6 +157,7 @@ export function getHizmetAlanPanelSummary(
     incomingOfferCount: incomingOffers.length,
     inProgressCount,
     completedCount,
+    expiredListingCount,
     recentActivity,
   };
 }

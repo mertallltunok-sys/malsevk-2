@@ -46,7 +46,7 @@ export function RoleCardsSection() {
         <div className="max-w-2xl">
           <h2
             id="roller-baslik"
-            className="text-2xl font-semibold text-foreground sm:text-3xl"
+            className="text-2xl font-bold tracking-heading leading-tight text-foreground sm:text-3xl"
           >
             Size uygun başlangıcı seçin
           </h2>
@@ -66,7 +66,7 @@ export function RoleCardsSection() {
                 <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent-soft text-accent">
                   <role.icon className="h-5 w-5" aria-hidden="true" />
                 </span>
-                <h3 className="mt-5 text-xl font-semibold text-foreground">
+                <h3 className="mt-5 text-xl font-bold tracking-heading leading-tight text-foreground">
                   {role.title}
                 </h3>
                 <p className="mt-3 text-base leading-relaxed text-muted-foreground">

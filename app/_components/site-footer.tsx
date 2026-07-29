@@ -1,5 +1,10 @@
+"use client";
+
 import { Anchor } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import { getAllLegalDocuments, type LegalDocumentId } from "../_lib/legal-documents";
+import { LegalDocumentModal } from "./legal-document-modal";
 
 const platformLinks = [
   { href: "/", label: "Ana Sayfa" },
@@ -10,14 +15,6 @@ const platformLinks = [
 const accountLinks = [
   { href: "/giris-yap", label: "Giriş Yap" },
   { href: "/giris-yap?mode=kayit", label: "Kayıt Ol" },
-];
-
-// Bu sayfalar henüz oluşturulmadı; tıklanamaz "Yakında" etiketiyle
-// gösterilir ki kullanıcı 404 veren bir bağlantıya yönlendirilmesin.
-const legalLinks = [
-  { label: "Gizlilik Politikası" },
-  { label: "Kullanım Koşulları" },
-  { label: "KVKK Aydınlatma Metni" },
 ];
 
 const footerLinkClass =
@@ -32,7 +29,7 @@ function FooterLinkList({
 }) {
   return (
     <nav aria-label={heading} className="flex flex-col gap-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-foreground/55">
+      <h3 className="text-xs font-bold uppercase tracking-wide text-primary-foreground/55">
         {heading}
       </h3>
       <ul className="flex flex-col gap-2">
@@ -48,39 +45,22 @@ function FooterLinkList({
   );
 }
 
-function FooterComingSoonList({
-  heading,
-  items,
-}: {
-  heading: string;
-  items: { label: string }[];
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-foreground/55">
-        {heading}
-      </h3>
-      <ul className="flex flex-col gap-2">
-        {items.map((item) => (
-          <li key={item.label}>
-            <span
-              aria-disabled="true"
-              className="flex w-fit items-center gap-2 text-sm text-primary-foreground/50"
-            >
-              {item.label}
-              <span className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-                Yakında
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
+/**
+ * "Yasal" bağlantıları — artık "Yakında" rozetiyle pasif değil, GERÇEKTEN
+ * tıklanabilir. Her bağlantının `href`i o belgenin bağımsız sayfasına
+ * (bkz. legal-documents.ts#routePath) işaret eder — bu, sağ tık/orta
+ * tık/yeni sekme/klavye ile Ctrl+Enter gibi tüm "varsayılan gezinme"
+ * senaryolarının GERÇEKTEN çalışmasını sağlar (boş/kırık bağlantı yok).
+ * Sıradan bir sol tıkta ise `onClick` `preventDefault()` çağırır ve sayfaya
+ * gitmek yerine `legal-document-modal.tsx`yi açar — bkz. görev gereksinimi
+ * ("kullanıcı yeni sayfaya gitmesin"). Değiştirici tuşla (Ctrl/Cmd/Shift/Alt)
+ * veya orta tıkla yapılan tıklamalar KASITLI olarak engellenmez — tarayıcının
+ * "yeni sekmede aç" gibi standart davranışları bu sayede bozulmaz.
+ */
 export function SiteFooter() {
   const year = new Date().getFullYear();
+  const [openDocumentId, setOpenDocumentId] = useState<LegalDocumentId | null>(null);
+  const legalDocuments = getAllLegalDocuments();
 
   return (
     <footer className="bg-primary text-primary-foreground">
@@ -100,7 +80,34 @@ export function SiteFooter() {
           </div>
           <FooterLinkList heading="Platform" links={platformLinks} />
           <FooterLinkList heading="Hesap" links={accountLinks} />
-          <FooterComingSoonList heading="Yasal" items={legalLinks} />
+          <nav aria-label="Yasal" className="flex flex-col gap-3">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-primary-foreground/55">
+              Yasal
+            </h3>
+            <ul className="flex flex-col gap-2">
+              {legalDocuments.map((document) => (
+                <li key={document.id}>
+                  <Link
+                    href={document.routePath}
+                    className={footerLinkClass}
+                    onClick={(event) => {
+                      const isPlainLeftClick =
+                        event.button === 0 &&
+                        !event.metaKey &&
+                        !event.ctrlKey &&
+                        !event.shiftKey &&
+                        !event.altKey;
+                      if (!isPlainLeftClick) return;
+                      event.preventDefault();
+                      setOpenDocumentId(document.id);
+                    }}
+                  >
+                    {document.title}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
         <div className="mt-12 border-t border-white/10 pt-6">
           <p className="text-xs text-primary-foreground/60">
@@ -108,6 +115,10 @@ export function SiteFooter() {
           </p>
         </div>
       </div>
+
+      {openDocumentId && (
+        <LegalDocumentModal documentId={openDocumentId} mode="readonly" onClose={() => setOpenDocumentId(null)} />
+      )}
     </footer>
   );
 }

@@ -6,6 +6,7 @@ import {
   getOperationStatusBucketLabel,
   PUBLIC_OPERATION_STATUS_BUCKET_ORDER,
 } from "../_lib/job-requests";
+import { useFilterVisibleJobs } from "../_lib/job-visibility";
 import { getOperationServiceCardStatus } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useJobsForOperation } from "../_lib/use-jobs";
@@ -41,7 +42,14 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
  *
  * Özet sayıları (Toplam Hizmet/Teklife Açık/Devam Ediyor/.../İlerleme %) hâlâ
  * `getPublicOperationStatusSummary`den (GLOBAL/job-geneli, viewer-scoping yok)
- * gelir — bu görev bu aggregate hesaplamayı DEĞİŞTİRMEDİ.
+ * gelir — bu görev bu aggregate hesaplamayı DEĞİŞTİRMEDİ. TEK istisna: Nakliye
+ * izolasyonu (bkz. job-visibility.ts) — `operationJobs` bu fonksiyona
+ * ulaşmadan ÖNCE `useFilterVisibleJobs` (REAKTİF, bkz. o dosyanın
+ * dokümantasyonu) ile süzülür, bu yüzden Nakliye'ye kilitlenmiş bir Hizmet
+ * Veren için "GLOBAL" olan şey zaten yalnızca kendi görebildiği (Nakliye)
+ * hizmet(ler)dir — gizli kardeşlerin varlığı/sayısı özet sayılarına da satır
+ * listesine de HİÇ sızmaz. Diğer tüm viewer'lar için bu hook girdiyi
+ * değiştirmeden döner, davranış birebir aynı kalır.
  *
  * Hizmet listesindeki HER SATIR (hizmet türü + ilan başlığı + TEK durum/
  * aksiyon alanı) tek ortak doğruluk kaynağından, `offers.ts#
@@ -69,7 +77,8 @@ export function OperationStatusCard({
   offers: Offer[];
   session: Session | null;
 }) {
-  const operationJobs = useJobsForOperation(currentJob.operationId);
+  const allOperationJobs = useJobsForOperation(currentJob.operationId);
+  const operationJobs = useFilterVisibleJobs(session, allOperationJobs);
 
   if (!currentJob.operationId || operationJobs.length < 2) return null;
 
@@ -77,7 +86,7 @@ export function OperationStatusCard({
 
   return (
     <div className="rounded-card border border-border bg-surface p-6">
-      <h2 className="text-lg font-semibold text-foreground">Operasyon Durumu</h2>
+      <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Operasyon Durumu</h2>
 
       <div className="mt-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">

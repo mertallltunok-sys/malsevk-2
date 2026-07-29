@@ -8,7 +8,7 @@ export function ProfileInfoCard({ profile }: { profile: ProfileInfo }) {
           {getInitials(profile.name)}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-lg font-semibold text-foreground">{profile.name}</p>
+          <p className="truncate text-lg font-bold tracking-heading leading-tight text-foreground">{profile.name}</p>
           <p className="text-sm text-muted-foreground">{getUserRoleLabel(profile.role)}</p>
         </div>
       </div>

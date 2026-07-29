@@ -20,7 +20,7 @@ function CountsTable({ title, counts }: { title: string; counts: DemoDataCounts 
 
   return (
     <div className="rounded-card border border-border bg-surface p-6">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      <h2 className="text-sm font-bold tracking-heading leading-tight text-foreground">{title}</h2>
       <div className="mt-4 overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
@@ -90,7 +90,7 @@ export function DemoDataResetPanel() {
 
       {plan && (
         <div className="rounded-card border border-border bg-surface p-6">
-          <h2 className="text-sm font-semibold text-foreground">Tespit edilen demo hesaplar</h2>
+          <h2 className="text-sm font-bold tracking-heading leading-tight text-foreground">Tespit edilen demo hesaplar</h2>
           {plan.demoUserEmails.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
               Henüz hiçbir demo hesap oluşturulmamış (bu ortamda ilk kez giriş yapılmamış olabilir).
@@ -104,7 +104,7 @@ export function DemoDataResetPanel() {
             </ul>
           )}
 
-          <h3 className="mt-4 text-sm font-semibold text-foreground">Silinecek kayıtlar (dry-run)</h3>
+          <h3 className="mt-4 text-sm font-bold tracking-heading leading-tight text-foreground">Silinecek kayıtlar (dry-run)</h3>
           <ul className="mt-2 flex flex-col gap-1 text-sm text-muted-foreground">
             <li>{plan.jobIdsToRemove.length} ilan</li>
             <li>{plan.offerIdsToRemove.length} teklif</li>

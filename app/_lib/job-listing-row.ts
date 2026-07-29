@@ -2,11 +2,12 @@ import { getJobsByOperationId } from "./job-store";
 import { getJobLocationSummary, type JobLocationSummary } from "./job-location";
 import {
   getJobAvailabilityForProvider,
+  getOperationStatusBucket,
   getOperationStatusSummary,
   isOfferVisibleInNormalLists,
   type ProviderClosedReason,
 } from "./job-requests";
-import { getCategoryDisplayLabel } from "./service-catalog";
+import { getCategoryDisplayLabel, getServiceCategoryOrderIndex } from "./service-catalog";
 import type { Job, JobPhoto, Offer } from "./types";
 
 export type JobListingRow = {
@@ -54,6 +55,31 @@ export function buildJobListingRows(jobs: Job[], offers: Offer[], providerId: st
   });
 }
 
+/**
+ * Bir operasyon satırının/kartının "Operasyon · N Hizmet" rozetinin hemen
+ * altında gösterilen, TEK bir hizmetin kompakt özeti — hizmet adını ve
+ * yalnızca "tamamlandı mı" ikili durumunu taşır. Ayrıntılı durum (Teklife
+ * Açık/İşe Başlandı/İtiraz Sürecinde vb.) BİLEREK BURADA YOKTUR: bu liste
+ * yalnızca "bu operasyonda hangi hizmetler var ve hangileri bitti" sorusuna
+ * özet bir cevap verir, ayrıntılı durumlar ilan detay sayfasında
+ * (operation-status-card.tsx) kalır — iki ekran arasında bilgiyi tekrar
+ * etmemek ve bu listeyi sade/kurumsal tutmak için kasıtlı bir tercih.
+ */
+export type OperationServiceSummary = {
+  jobId: string;
+  categoryLabel: string;
+  /**
+   * `job-requests.ts#getOperationStatusBucket(job, offers) === "tamamlandi"`nin
+   * AYNEN kullanımı — bu hizmetin gerçek Job/Offer durumundan türetilen TEK
+   * doğruluk kaynağı (ilerleme yüzdesi/ilan başlığı/operationId'den ASLA
+   * tahmin edilmez). Global bir gerçektir, izleyen Hizmet Veren'e göre
+   * DEĞİŞMEZ — `getOperationServiceCardStatus` (offers.ts, ilan detay
+   * sayfasındaki izleyiciye-özel "Teklif Ver" durumu) ile KARIŞTIRILMAMALI,
+   * bu yalnızca bir hizmetin tamamlanıp tamamlanmadığını söyler.
+   */
+  isCompleted: boolean;
+};
+
 /** Aynı operationId'ye bağlı 2+ ilanı tek "operasyon" satırında temsil eder — bkz. groupJobListingRowsByOperation. */
 export type OperationListingItem = {
   kind: "operation";
@@ -67,6 +93,18 @@ export type OperationListingItem = {
   progressPercent: number;
   /** Operasyonun TÜM hizmetlerinin kendi visibleOfferCount'larının toplamı. */
   visibleOfferCount: number;
+  /**
+   * Operasyondaki HER hizmetin (filtreden bağımsız — operasyonun tamamı
+   * üzerinden, `totalCount`/`progressPercent` ile AYNI ilke) kompakt özeti —
+   * `service-catalog.ts#getServiceCategoryOrderIndex`e göre sabit sırayla
+   * (rastgele DEĞİL). Her hizmet yalnızca bir kez görünür — bu, ayrı bir
+   * dedup adımı GEREKTİRMEZ, çünkü `job-store.ts#createJobsForOperation` bir
+   * operasyon içinde aynı kategorinin iki kez seçilmesini zaten veri
+   * katmanında reddeder (bkz. "Aynı hizmet birden fazla kez seçilemez"
+   * kontrolü) — bu dizide her zaman en fazla operasyonun kendi üye sayısı
+   * kadar (`totalCount`) eleman bulunur, hepsi farklı kategoriden.
+   */
+  services: OperationServiceSummary[];
 };
 
 export type JobListingDisplayItem = { kind: "single"; row: JobListingRow } | OperationListingItem;
@@ -167,8 +205,24 @@ function buildOperationListingItem(
   );
   const visibleOfferCount = sortedGroupRows.reduce((sum, groupRow) => sum + groupRow.visibleOfferCount, 0);
 
+  // Hizmet Türü rozetinin hemen altındaki kompakt özet — service-catalog.ts
+  // sırasına göre (creation/primary sırasından BAĞIMSIZ, ayrı bir sıralama).
+  // Ekstra bir sorgu/okuma YOK: yalnızca zaten elde bulunan `job` üzerinde
+  // saf hesaplama (bkz. OperationServiceSummary dokümantasyonu — durum
+  // BİLEREK burada hesaplanmaz/taşınmaz).
+  const services: OperationServiceSummary[] = sortedGroupRows
+    .map((groupRow) => ({
+      jobId: groupRow.job.id,
+      categoryLabel: groupRow.categoryLabel,
+      isCompleted: getOperationStatusBucket(groupRow.job, offers) === "tamamlandi",
+      orderIndex: getServiceCategoryOrderIndex(groupRow.job.category),
+    }))
+    .sort((a, b) => a.orderIndex - b.orderIndex)
+    .map(({ jobId, categoryLabel, isCompleted }) => ({ jobId, categoryLabel, isCompleted }));
+
   return {
     kind: "operation",
+    services,
     operationId,
     primaryRow: sortedGroupRows[0],
     totalCount: summary.total,
@@ -176,4 +230,49 @@ function buildOperationListingItem(
     progressPercent: summary.progressPercent,
     visibleOfferCount,
   };
+}
+
+/**
+ * "Aktif İlanlar" tablosunun/kart listesinin "Hizmet Türü" ROZETİNİN (küçük
+ * mavi hap — `bg-accent-soft`/`text-accent`) metnini üretir — HER RENDER'DA
+ * yeniden hesaplanır. `job.title` (kullanıcının ilan oluştururken kendi
+ * yazdığı serbest metin, "İlan Başlığı" sütunu/alanı) BU FONKSİYONDA HİÇ
+ * KULLANILMAZ ve kesinlikle MUTASYONA UĞRAMAZ — "İlan Başlığı" alanı bu
+ * ekranda da (job-listing-table.tsx/job-listing-cards.tsx) diğer TÜM
+ * ekranlarda olduğu gibi kullanıcının kendi yazdığı metni, kendi mevcut
+ * font/boyut/sırasıyla göstermeye devam eder; DEĞİŞEN TEK ŞEY rozetin
+ * METNİDİR — rozetin kendi `className`i (renk/boyut/padding/hizalama)
+ * çağıran taraf (job-listing-table.tsx/job-listing-cards.tsx) içinde AYNEN
+ * kalır, bu fonksiyon yalnızca içindeki METNİ üretir. job-listing-table.tsx
+ * (masaüstü) ve job-listing-cards.tsx (mobil) TARAFINDAN PAYLAŞILAN TEK
+ * fonksiyon, aynı format iki yerde ayrı ayrı yazılmaz.
+ *
+ * Tekil ilan: `"{kategori} Hizmeti Arıyor"` — kategori adı `row.categoryLabel`
+ * üzerinden (zaten `service-catalog.ts#getCategoryDisplayLabel`in AYNEN
+ * kullanımı, bkz. buildJobListingRows) gelir; hiçbir hizmet adı bu fonksiyon
+ * İÇİNDE hardcode edilmez. Önceki rozet metni yalnızca `{kategori}` idi (ör.
+ * "Lashing") — bu format onun YERİNE geçer, eski hâli hiçbir yerde kalmaz.
+ *
+ * Operasyon ilanı: `"Operasyon • {kalan} Hizmet Arıyor"` — ayraç "•" (görev
+ * gereksiniminin SON/geçerli talimatındaki BİREBİR karakter). `kalan =
+ * totalCount - completedCount`, ikisi de `job-requests.ts#getOperationStatusSummary`
+ * üzerinden (o da `getOperationStatusBucket`, yani gerçek job/offer durumu
+ * üzerinden) türetilir; İLERLEME YÜZDESİNDEN, İLAN BAŞLIĞINDAN ya da yalnızca
+ * `operationId`den ASLA tahmin edilmez. Tamamlanan hizmetler bu sayıya HİÇ
+ * dahil edilmez (yalnızca henüz tamamlanmamışlar sayılır) — operasyondaki
+ * TÜM hizmetler tamamlandığında `kalan` 0'a düşer, ama bu durumda operasyon
+ * zaten `job-completion.ts#isJobFullyCompletedForListing` tarafından
+ * `activeJobs`tan tamamen çıkarılmış olur (bkz. provider-job-listing.tsx),
+ * yani bu fonksiyon o durumda hiç render edilmez — "0 Hizmet Arıyor" gibi
+ * bir metin asla görünmez. Önceki rozet metni toplam sayıyı gösteriyordu
+ * (ör. "Operasyon · 5 Hizmet", statik/hiç değişmeyen, "·" ayraçlı) — bu
+ * format onun YERİNE geçer: sayı artık KALAN (dinamik), ayraç "•"ya döner,
+ * sonuna " Arıyor" eklenir.
+ */
+export function getJobListingCategoryBadgeLabel(item: JobListingDisplayItem): string {
+  if (item.kind === "operation") {
+    const remainingCount = item.totalCount - item.completedCount;
+    return `Operasyon • ${remainingCount} Hizmet Arıyor`;
+  }
+  return `${item.row.categoryLabel} Hizmeti Arıyor`;
 }

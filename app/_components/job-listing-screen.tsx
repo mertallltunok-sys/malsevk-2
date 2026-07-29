@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSession } from "../_lib/use-session";
 import { GuestAccessCard } from "./guest-access-card";
 import { JobList } from "./job-list";
@@ -40,9 +41,27 @@ export function JobListingScreen() {
             ve header ile filtre arasındaki büyük boşluk tamamen kaldırıldı —
             kompakt filtre araç çubuğu header'ın hemen altında başlar, kullanıcı
             sayfayı açar açmaz ilan kartlarını görsün diye (bkz. provider-job-listing.tsx).
-            Diğer sayfaların py-16 kuralı değişmedi. */}
-        <div className="mx-auto max-w-7xl px-4 pt-4 pb-16 sm:px-6 lg:px-8">
-          <ProviderJobListing session={session} />
+            Diğer sayfaların py-16 kuralı değişmedi. `2xl:max-w-[96rem]`: yalnızca
+            çok geniş ekranlarda (≥1536px) kapsayıcı kontrollü biçimde biraz
+            genişler (1280px -> 1536px) — masaüstü/dizüstü (1024-1280px) genişliği
+            (max-w-7xl) DEĞİŞMEDEN kalır, bu yüzden tablonun sütun hizası orada
+            etkilenmez; genişleyen alan yalnızca tablo/kart listesine gider. */}
+        <div className="mx-auto max-w-7xl px-4 pt-4 pb-16 sm:px-6 lg:px-8 2xl:max-w-[96rem]">
+          {/* ProviderJobListing, ana sayfadaki hizmet kartlarından gelen
+              `?kategori=` başlangıç filtresini okumak için useSearchParams
+              kullanır — bu, statik üretimde bu alt ağacın Suspense sınırına
+              kadar istemci tarafında render edilmesini gerektirir (bkz.
+              job-requests-panel.tsx/incoming-offers-panel.tsx'teki aynı desen). */}
+          <Suspense
+            fallback={
+              <div
+                aria-hidden="true"
+                className="h-64 animate-pulse rounded-card border border-border bg-surface"
+              />
+            }
+          >
+            <ProviderJobListing session={session} />
+          </Suspense>
         </div>
       </section>
     );
@@ -52,7 +71,7 @@ export function JobListingScreen() {
     <section className="bg-background">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
         <div className="max-w-2xl">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+          <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
             İş İlanları
           </h1>
           <p className="mt-3 text-base leading-relaxed text-muted-foreground">

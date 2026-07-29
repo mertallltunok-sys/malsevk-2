@@ -14,8 +14,6 @@ import type { DisagreementReason, Offer, Session } from "../_lib/types";
 import { CompletionCountdown } from "./completion-countdown";
 import { DialogShell } from "./dialog-shell";
 
-const START_WORK_CONFIRM_TEXT =
-  "Bu işin başladığını onaylıyor musunuz? Bu işlemden sonra ilan yeniden teklif alamaz.";
 const AGREEMENT_FAILED_CONFIRM_TEXT =
   "Anlaşma sağlanamadığında bu ilan yeniden yayına alınacaktır. Önceki kabul edilen teklif kapanacak ve iletişim bilgileri tekrar gizlenecektir. Devam etmek istiyor musunuz?";
 const CONFIRM_COMPLETION_TEXT =
@@ -36,10 +34,13 @@ function StartWorkDialog({
 }) {
   return (
     <DialogShell labelledBy="isebaslandi-baslik" onClose={onCancel}>
-      <h2 id="isebaslandi-baslik" className="text-lg font-semibold text-foreground">
-        İşe Başlandı
+      <h2 id="isebaslandi-baslik" className="text-lg font-bold tracking-heading leading-tight text-foreground">
+        İşi Başlat
       </h2>
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{START_WORK_CONFIRM_TEXT}</p>
+      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+        <strong>Bu butonu yalnızca sahada fiili olarak operasyon başladıysa kullanın.</strong> Onayınızdan sonra{" "}
+        <strong>ilan yeni teklif alamaz</strong> ve süreç <strong>Devam Eden İşler</strong> bölümüne taşınır.
+      </p>
       {error && (
         <p role="alert" className="mt-3 text-sm text-danger">
           {error}
@@ -59,7 +60,7 @@ function StartWorkDialog({
           disabled={submitting}
           className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {submitting ? "İşleniyor..." : "Evet, İşe Başlandı"}
+          {submitting ? "İşleniyor..." : "Evet, İşi Başlat"}
         </button>
       </div>
     </DialogShell>
@@ -87,7 +88,7 @@ function AgreementFailedDialog({
 }) {
   return (
     <DialogShell labelledBy="anlasma-saglanamadi-baslik" onClose={onCancel}>
-      <h2 id="anlasma-saglanamadi-baslik" className="text-lg font-semibold text-foreground">
+      <h2 id="anlasma-saglanamadi-baslik" className="text-lg font-bold tracking-heading leading-tight text-foreground">
         Anlaşma Sağlanamadı
       </h2>
 
@@ -190,7 +191,7 @@ function SimpleConfirmDialog({
 }) {
   return (
     <DialogShell labelledBy={labelledBy} onClose={onCancel}>
-      <h2 id={labelledBy} className="text-lg font-semibold text-foreground">
+      <h2 id={labelledBy} className="text-lg font-bold tracking-heading leading-tight text-foreground">
         {title}
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{message}</p>
@@ -241,7 +242,7 @@ function DisputeCompletionDialog({
 }) {
   return (
     <DialogShell labelledBy="itiraz-et-baslik" onClose={onCancel}>
-      <h2 id="itiraz-et-baslik" className="text-lg font-semibold text-foreground">
+      <h2 id="itiraz-et-baslik" className="text-lg font-bold tracking-heading leading-tight text-foreground">
         İtiraz Et
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
@@ -420,7 +421,7 @@ export function OfferOutcomePanel({
   if (offer.status === "accepted") {
     return (
       <div className="mt-4 rounded-card border border-border bg-background p-4">
-        <p className="text-sm font-semibold text-foreground">Görüşme Sonucu</p>
+        <p className="text-sm font-bold tracking-heading leading-tight text-foreground">Görüşme Sonucu</p>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
           İletişim bilgileriniz karşı tarafla paylaşılmıştır. Görüşme sonucuna göre işlemin
           durumunu seçin.
@@ -470,7 +471,7 @@ export function OfferOutcomePanel({
   if (offer.status === "completion_requested") {
     return (
       <div className="mt-4 rounded-card border border-border bg-background p-4">
-        <p className="text-sm font-semibold text-foreground">Tamamlandı Onayı Bekleniyor</p>
+        <p className="text-sm font-bold tracking-heading leading-tight text-foreground">Tamamlandı Onayı Bekleniyor</p>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
           Hizmet Veren işin tamamlandığını bildirdi. Kontrol edip onaylayın ya da bir sorun varsa
           itiraz edin.
@@ -527,7 +528,7 @@ export function OfferOutcomePanel({
   if (offer.status === "completion_disputed") {
     return (
       <div className="mt-4 rounded-card border border-border bg-background p-4">
-        <p className="text-sm font-semibold text-foreground">İtiraz Edildi</p>
+        <p className="text-sm font-bold tracking-heading leading-tight text-foreground">İtiraz Edildi</p>
         <p className="mt-1 break-words text-sm leading-relaxed text-muted-foreground">
           Bu iş için itiraz ettiniz
           {offer.completionDisputeNote ? `: "${offer.completionDisputeNote}"` : "."} Sonucu

@@ -1,9 +1,10 @@
-import { CalendarDays, MapPin } from "lucide-react";
+import { CalendarDays, CheckCircle2, MapPin } from "lucide-react";
 import Link from "next/link";
 import { getProviderClosedReasonLabel } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
-import type { JobListingDisplayItem } from "../_lib/job-listing-row";
+import { getJobListingCategoryBadgeLabel, type JobListingDisplayItem } from "../_lib/job-listing-row";
 import { JobThumbnail } from "./job-thumbnail";
+import { OperationServiceTags } from "./operation-service-tags";
 
 /**
  * Mobil/tablet (<1024px) görünümü — tablo YOK, responsive kart yığını.
@@ -14,10 +15,30 @@ import { JobThumbnail } from "./job-thumbnail";
  *
  * Çoklu Hizmet Operasyonu — Aşama 5: her `item` ya tek bir ilan (`kind:
  * "single"`, markup BİREBİR eskisiyle aynı) ya da 2+ ilanı temsil eden bir
- * operasyon özeti (`kind: "operation"`, bkz. job-listing-row.ts) — kategori
- * rozetinin yerini "Operasyon · N Hizmet" alır, teklif sayısı satırının
- * altına ilerleme yüzdesi eklenir, geri kalan kart markup'ı (thumbnail,
- * başlık, konum, tarih, İlanı İncele butonu) değişmeden paylaşılır.
+ * operasyon özeti (`kind: "operation"`, bkz. job-listing-row.ts). Rozetin
+ * (kategori/operasyon hap'ı) metni artık job-listing-row.ts#
+ * getJobListingCategoryBadgeLabel'ın hesapladığı "Operasyon • {kalan} Hizmet
+ * Arıyor" (operasyon) / "{Kategori} Hizmeti Arıyor" (tekil) biçimindedir —
+ * rozetin kendi görünümü (mavi `text-accent` yazı, `bg-accent-soft` dolgu,
+ * boyut/padding/hizalama) HİÇ DEĞİŞMEDİ, yalnızca İÇİNDEKİ METİN değişti.
+ * "İlan Başlığı" (job title Link'i, aşağıda) HİÇ DOKUNULMADI — kullanıcının
+ * kendi yazdığı `job.title`i, eski font/boyut/sırasıyla göstermeye AYNEN
+ * devam eder. Teklif sayısı satırının altına ilerleme yüzdesi eklenir,
+ * rozetin HEMEN ALTINA (başlıktan ÖNCE) `OperationServiceTags` ile
+ * operasyondaki HER hizmet adı (hiçbiri gizlenmeden, "·" ayracıyla saran bir
+ * `flex flex-wrap` satırında) tıklanamaz şekilde eklenir — her hizmetin
+ * gerçek tamamlanma durumu (bkz. o bileşenin dokümantasyonu) gösterilir,
+ * ayrıntılı durum yine gösterilmez; geri kalan kart markup'ı (thumbnail,
+ * konum, tarih, İlanı İncele butonu) değişmeden paylaşılır. Kart alanı sırası
+ * (1. görsel+operasyon rozeti, 2. hizmet adları+tamamlanma durumu, 3. ilan
+ * başlığı, 4. firma/bölge/konum, 5. iş tarihi+teklif sayısı, 6. İlanı İncele
+ * butonu) değişmedi. Operasyondaki TÜM hizmetler tamamlandığında teklif
+ * sayısı satırının altındaki ilerleme yüzdesi yerine sade bir "Operasyon
+ * Tamamlandı" etiketi gösterilir (bkz. job-listing-table.tsx'teki AYNI mantık
+ * — pratikte artık hiç tetiklenmiyor, bkz. o dosyadaki AYNI not: tam
+ * tamamlanmış bir operasyon zaten activeJobs aşamasında listeden tamamen
+ * düşüyor). Tekil ilan kartları bu değişikliklerin hiçbirinden (rozet metni
+ * hariç) etkilenmez.
  */
 export function JobListingCards({
   items,
@@ -46,12 +67,13 @@ export function JobListingCards({
               />
               <div className="min-w-0 flex-1">
                 <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-                  {item.kind === "operation" ? `Operasyon · ${item.totalCount} Hizmet` : row.categoryLabel}
+                  {getJobListingCategoryBadgeLabel(item)}
                 </span>
+                {item.kind === "operation" && <OperationServiceTags services={item.services} />}
                 <Link
                   href={`/ilanlar/${job.id}`}
                   onClick={() => onJobClick(job.id)}
-                  className="mt-1.5 block break-words text-sm font-semibold leading-snug text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                  className="mt-1.5 block break-words text-sm font-bold italic tracking-heading leading-snug text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
                 >
                   {job.title}
                 </Link>
@@ -79,7 +101,15 @@ export function JobListingCards({
                 {formatJobDate(job.workDate)}
               </span>
               <span>{item.kind === "operation" ? item.visibleOfferCount : row.visibleOfferCount} teklif</span>
-              {item.kind === "operation" && <span>Operasyon İlerlemesi: %{item.progressPercent}</span>}
+              {item.kind === "operation" &&
+                (item.completedCount === item.totalCount ? (
+                  <span className="flex items-center gap-1 font-medium text-muted-foreground">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Operasyon Tamamlandı
+                  </span>
+                ) : (
+                  <span>Operasyon İlerlemesi: %{item.progressPercent}</span>
+                ))}
             </div>
 
             {item.kind === "single" && !row.availability.open && row.availability.closedReason && (

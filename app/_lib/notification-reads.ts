@@ -52,11 +52,25 @@ function readIdsSnapshot(userId: string): string[] {
   return parsed;
 }
 
-function writeIds(userId: string, ids: string[]): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(storageKey(userId), JSON.stringify(ids));
+/**
+ * ÖNCEDEN bu fonksiyon `setItem`i try/catch OLMADAN çağırıyordu — bir
+ * exception (kota dolu, gizli sekme vb.) markNotificationRead'i çağıran
+ * onClick handler'ından KONTROLSÜZ biçimde yukarı fırlıyordu. Artık hata
+ * burada yakalanır, loglanır ve önbellek/notify HİÇ tetiklenmez — böylece
+ * yazma başarısız olduğunda bildirim gerçekte "okunmamış" kalır, arayüz
+ * kalıcı bir başarı varsaymaz (bkz. CLAUDE.md B1 düzeltmesi).
+ */
+function writeIds(userId: string, ids: string[]): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    window.localStorage.setItem(storageKey(userId), JSON.stringify(ids));
+  } catch (error) {
+    console.error(`localStorage yazma hatası (${storageKey(userId)}):`, error);
+    return false;
+  }
   cachedKey = null;
   for (const listener of listeners) listener();
+  return true;
 }
 
 export function getReadNotificationIds(userId: string): string[] {

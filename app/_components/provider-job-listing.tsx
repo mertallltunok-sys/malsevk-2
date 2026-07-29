@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
   buildCategoryOptions,
@@ -15,9 +16,14 @@ import {
   matchesProvinceFilter,
   type JobListingFilterState,
 } from "../_lib/job-listing-filters";
+import { isJobFullyCompletedForListing } from "../_lib/job-completion";
 import { buildJobListingRows, groupJobListingRowsByOperation } from "../_lib/job-listing-row";
+import { isJobListingExpired } from "../_lib/job-publish-window";
+import { isJobManuallyClosed } from "../_lib/job-closure";
+import { useFilterVisibleJobs } from "../_lib/job-visibility";
 import { useMediaQuery } from "../_lib/use-media-query";
 import { recordJobViewed } from "../_lib/recently-viewed-jobs";
+import { isServiceCategoryId } from "../_lib/service-catalog";
 import type { Session } from "../_lib/types";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
@@ -48,10 +54,62 @@ export function ProviderJobListing({ session }: { session: Session }) {
   // yaratmaz.
   const isDesktop = useMediaQuery("(min-width: 1024px)");
 
-  const [filters, setFilters] = useState<JobListingFilterState>(DEFAULT_JOB_LISTING_FILTERS);
+  // Ana sayfadaki rol bazlı hizmet bölümü (services-section.tsx) bir
+  // Hizmet Veren kartına tıklandığında buraya `?kategori=<serviceId>` ile
+  // yönlendirir — filtre ismiyle DEĞİL, service-catalog.ts'in merkezi id
+  // uzayıyla eşleşir (aynı id `matchesJobCategory`/`buildCategoryOptions`
+  // tarafından zaten kullanılıyor). Yalnızca İLK render'da okunur: bu sayfa
+  // her navigasyonda yeniden mount olduğundan (ayrı bir route), geri/ileri
+  // gezinme her zaman URL'deki güncel kategoriyle doğru başlangıç filtresini
+  // üretir — kullanıcı sonradan filtreyi değiştirir/temizlerse bu yalnızca
+  // `filters` state'inde kalır, URL'e geri yazılmaz (mevcut davranış).
+  const searchParams = useSearchParams();
+  const [filters, setFilters] = useState<JobListingFilterState>(() => {
+    const categoryParam = searchParams.get("kategori");
+    return {
+      ...DEFAULT_JOB_LISTING_FILTERS,
+      category: categoryParam && isServiceCategoryId(categoryParam) ? categoryParam : "",
+    };
+  });
   const [page, setPage] = useState(1);
 
-  const activeJobs = useMemo(() => jobs.filter((job) => job.status === "yayinda"), [jobs]);
+  // Nakliye izolasyonu (bkz. job-visibility.ts): görünürlük filtresi EN
+  // ERKEN noktada, henüz durum/süre filtrelerinden bile ÖNCE uygulanır — bu
+  // sayede aşağıdaki operasyon gruplama toplamları (job-listing-row.ts) dahil
+  // her hesaplama, bu oturum için zaten "yalnızca görünür ilanlar"dan oluşan
+  // bir dünya üzerinde çalışır; ayrı bir "gizli kardeş" özel durumu gerekmez.
+  // `useFilterVisibleJobs` (reaktif hook, bkz. o dosyanın dokümantasyonu)
+  // kullanılır — provider-services.ts değiştiğinde bu ekran sayfa
+  // yenilenmeden otomatik güncellenir.
+  const visibleJobs = useFilterVisibleJobs(session, jobs);
+
+  // İlan Yayın Süresi Yönetimi: 14 günlük yayın süresi dolmuş bir ilan
+  // (bkz. job-publish-window.ts, tek doğruluk kaynağı) Hizmet Veren'in
+  // aktif ilan listesinde/aramasında/keşif sonuçlarında ARTIK görünmez —
+  // sabit örnek ilanlar (jobs.ts, requesterId: null) `createdAt`e hiç sahip
+  // olmadığından bu kuraldan otomatik ve güvenle muaf kalır, ayrı bir
+  // istisna kodu gerekmez. İlan Kapatma: Hizmet Alan tarafından manuel
+  // olarak kapatılmış (bkz. job-closure.ts) bir ilan da AYNI şekilde bu
+  // listeden düşer — sabit örnek ilanlar `closedAt`e de hiç sahip
+  // olamayacağından burada da otomatik muaftır. Tamamlanma: bir tekil ilanın
+  // KENDİ, ya da bir operasyona bağlı ilansa operasyonun TÜM kardeşlerinin,
+  // gerçek Offer/Job durumu "tamamlandi" olduğunda (bkz. job-completion.ts#
+  // isJobFullyCompletedForListing, TEK doğruluk kaynağı) o ilan da AYNI
+  // şekilde bu listeden düşer — ilan/teklif verisi SİLİNMEZ, yalnızca bu
+  // keşif beslemesinden çıkar; "Tamamlandı"/geçmiş sekmeleri (job-requests-
+  // panel.tsx, my-offers-panel.tsx) ve operation-status-card.tsx bu
+  // fonksiyonu HİÇ kullanmaz, kendi yollarından görünmeye devam eder.
+  const activeJobs = useMemo(
+    () =>
+      visibleJobs.filter(
+        (job) =>
+          job.status === "yayinda" &&
+          !isJobListingExpired(job, offers) &&
+          !isJobManuallyClosed(job) &&
+          !isJobFullyCompletedForListing(job, offers),
+      ),
+    [visibleJobs, offers],
+  );
 
   const rows = useMemo(
     () => buildJobListingRows(activeJobs, offers, session.id),

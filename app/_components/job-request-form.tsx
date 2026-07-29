@@ -544,7 +544,7 @@ export function JobRequestForm() {
       <PageCardShell title={PAGE_TITLE} description={PAGE_DESCRIPTION}>
         <div className="flex flex-col gap-6">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight text-foreground">Operasyon Özeti</h2>
+            <h2 className="text-xl font-bold tracking-heading leading-tight text-foreground">Operasyon Özeti</h2>
             <p className="mt-2 text-sm text-muted-foreground">Toplam oluşturulacak ilan:</p>
             <p className="mt-1 text-lg font-semibold text-foreground">{summaryLabel}</p>
           </div>
@@ -575,7 +575,7 @@ export function JobRequestForm() {
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {index === 0 ? "Ana Hizmet" : "Ek Hizmet"}
                   </span>
-                  <h3 className="mt-1 text-base font-semibold text-foreground">{service.title}</h3>
+                  <h3 className="mt-1 text-base font-bold tracking-heading leading-tight text-foreground">{service.title}</h3>
                   <dl className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div>
                       <dt className="text-xs font-medium text-muted-foreground">Hizmet Türü</dt>
@@ -613,7 +613,7 @@ export function JobRequestForm() {
 
           {operationDetails.trim().length > 0 && (
             <div className="rounded-md border border-border bg-surface p-4">
-              <h3 className="text-sm font-semibold text-foreground">Ortak Operasyon Bilgileri</h3>
+              <h3 className="text-sm font-bold tracking-heading leading-tight text-foreground">Ortak Operasyon Bilgileri</h3>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{operationDetails}</p>
             </div>
           )}
