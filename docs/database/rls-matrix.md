@@ -12,7 +12,7 @@ Legend: **own** = yalnız çağıranın taraf olduğu satırlar; **visible** = j
 
 | Tablo | anon | authenticated (SELECT) | authenticated (INSERT/UPDATE/DELETE) | admin |
 |---|---|---|---|---|
-| `profiles` | — | own | UPDATE own, yalnız self-service kolonlar (`full_name`/`phone`/`company_name`/`company_type`/`province`/`district` — `role`/`account_status`/`onboarding_completed` DEĞİL) | SELECT all |
+| `profiles` | — | own | UPDATE own, yalnız self-service kolonlar (`full_name`/`phone`/`company_name`/`company_type`/`province`/`district` — `role`/`account_status`/`onboarding_completed` DEĞİL); `role`/`onboarding_completed` yalnız RPC only: `complete_registration(...)` (0022 — auth.uid() ile kilitli, `role` zaten NULL değilse reddeder (`ML101`), `role='admin'`'i reddeder (`ML100`)); satırın kendisi INSERT yoluyla değil `auth.users AFTER INSERT` trigger'ı (`handle_new_auth_user()`, 0022, SECURITY DEFINER, PUBLIC/anon/authenticated'den EXECUTE tamamen geri alınmış) ile açılır | SELECT all |
 | `provider_profiles` | — | own | UPDATE own, self-service kolonlar (`verification_status` DEĞİL) | SELECT all |
 | `provider_services` | — | own | RPC only (`set_provider_service_categories`) | SELECT all |
 | `service_categories` | SELECT all | SELECT all | — | SELECT all |
@@ -37,6 +37,8 @@ Legend: **own** = yalnız çağıranın taraf olduğu satırlar; **visible** = j
 | `offer_status_history` | SELECT (kendi teklifleri) | SELECT (kendi ilanlarının teklifleri) | — | SELECT all |
 
 **GÜVENLİK NOTU**: `offers` tablosu ayrıca `offers_one_settled_per_job` partial unique index'ine sahiptir (`0005_offers_and_status_history.sql`) — bir job_id için en fazla bir "settled" (accepted..completed) satır, RLS'nin dışında, DB seviyesinde garanti edilir.
+
+**RUNTIME NOTU (0022)**: `accept_offer`/`reject_offer`/`start_work`/`record_agreement_failure`/`confirm_completion`/`dispute_completion`/`resolve_completion_dispute`/`submit_rating`'in yukarıdaki yetki modeli/RLS bağımlılığı DEĞİŞMEDİ — bu 8 fonksiyonun hepsinde yalnızca bir çalışma-zamanı hatası (gerçek hosted testte bulundu, `22P02`) düzeltildi, hiçbir yetki/sahiplik kontrolü değişmedi. Bkz. [rpc-reference.md](rpc-reference.md).
 
 ## Puanlamalar, belgeler, onaylar
 

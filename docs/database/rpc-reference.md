@@ -2,7 +2,7 @@
 
 Tam parametre listeleri, transaction/kilit notları ve yan-etki detayları her fonksiyonun kendi migration dosyasındaki yorumunda yaşar — bu doküman konsolide bir indeks + tam hata-kodu tablosudur. Her fonksiyon `SECURITY DEFINER`, sabit `search_path` ile ([rls-matrix.md](rls-matrix.md)'nin kapanış notuna bakın).
 
-**Faz yapısı**: bu dokümandaki HER fonksiyon Faz 1'dedir (`supabase/migrations/0007`, `0008`, `0012`–`0016`, `0018`, `0021`), gerçek ilk göçte çalışır — ve artık tamamen yerel, izole bir Docker + Supabase CLI ortamına karşı gerçek bir `supabase db reset` ile de doğrulanmıştır (bkz. [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md)'in "Yerel Migration Dry-Run Sonucu" bölümü — hiçbir uzak/hosted Supabase projesine hâlâ bağlanılmadı). Faz 2'nin admin/abonelik RPC'leri (`grant_admin_role`, `revoke_admin_role`, `verify_provider`, `assign_subscription_plan`, `cancel_subscription`, `grant_user_limit_override`, `update_subscription_plan_limit`) `docs/database/future-migrations/phase2/0004_rpc_admin_and_subscription_functions.sql`'dedir — bkz. [admin-permissions.md](admin-permissions.md).
+**Faz yapısı**: bu dokümandaki HER fonksiyon Faz 1'dedir (`supabase/migrations/0007`, `0008`, `0012`–`0016`, `0018`, `0021`, `0022`), gerçek ilk göçte çalışır — yerel, izole bir Docker + Supabase CLI ortamına karşı VE gerçek, hosted bir development Supabase projesine karşı ikisinde de gerçek çağrılarla canlı doğrulanmıştır (bkz. [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md)'in "Yerel Migration Dry-Run Sonucu" VE "0022" bölümleri). Faz 2'nin admin/abonelik RPC'leri (`grant_admin_role`, `revoke_admin_role`, `verify_provider`, `assign_subscription_plan`, `cancel_subscription`, `grant_user_limit_override`, `update_subscription_plan_limit`) `docs/database/future-migrations/phase2/0004_rpc_admin_and_subscription_functions.sql`'dedir — bkz. [admin-permissions.md](admin-permissions.md).
 
 ## Belge & yasal onay fonksiyonları (`0007_provider_documents_and_consents.sql`, `0008_legal_consents.sql`)
 
@@ -12,6 +12,17 @@ Tam parametre listeleri, transaction/kilit notları ve yan-etki detayları her f
 |---|---|---|---|
 | `record_provider_document_consent(statement_id, statement_version)` | `authenticated` | Evet (`ON CONFLICT DO NOTHING`, `provider_document_consents_no_duplicate` kısıtı üzerinden) | `provider_id` her zaman sunucu tarafında `auth.uid()` — parametre olarak alınmaz, başka bir kullanıcı adına kayıt oluşturulamaz |
 | `record_legal_consent(document_id, version)` | `authenticated` VE `anon` (misafir kabulü desteklenir) | Evet (`ON CONFLICT DO NOTHING`, `legal_consents_one_per_user_document_version` kısıtı üzerinden — bu kısıt da yerel dry-run'da eklendi, önceden hiç yoktu) | `user_id` her zaman sunucu tarafında `auth.uid()` (misafir için `NULL` = anonim kabul) |
+
+## Kayıt tamamlama fonksiyonu (`0022_fix_profile_bootstrap_and_offer_lifecycle.sql`)
+
+**Hosted canlı testte EKLENDİ (KRİTİK)** — gerçek bir `auth.users` kaydından sonra `public.profiles`'ta hiç satır oluşmadığı, ne `authenticated`'in ne de eski `service_role`'ün bunu client'tan doğrudan yazabildiği (INSERT grant'i yok) canlı doğrulandı; önceki 0001-0021 setinde ne bir `auth.users` trigger'ı ne de bir "kayıt tamamlama" RPC'si vardı.
+
+| Fonksiyon | Yetki | Idempotent mi | Anahtar yan etkiler |
+|---|---|---|---|
+| `handle_new_auth_user()` (trigger fonksiyonu) | dahili (`auth.users AFTER INSERT` tarafından otomatik tetiklenir; PUBLIC/anon/authenticated'den EXECUTE tamamen geri alınmış, zaten `returns trigger` olduğu için PostgREST bunu asla bir RPC ucu olarak göstermez) | Evet (`ON CONFLICT (id) DO NOTHING`) | Yalnızca minimal (`id`-only) bir `profiles` satırı açar — `role` NULL kalır ("kayıt henüz tamamlanmadı" durumu, 0003'ün kendi belgelediği ama hiç uygulanmayan tasarım). E-posta buraya kopyalanmaz — `profiles`'ın email sütunu yok |
+| `complete_registration(role, full_name, phone, company_name, company_type, province, district)` | `authenticated` | Hayır (2. çağrı `role` zaten NULL değilse `ML101` ile reddedilir — tek seferlik tamamlama, kaynak uygulamada da self-servis rol değişikliği yok) | `users.ts#registerUser`'ın (RegisterInput) gerçek karşılığı — 7 alanı her zaman `auth.uid()` ile kilitli kendi satırına yazar (`user_id` parametre olarak ASLA alınmaz), `onboarding_completed=true` yapar. `role` yalnızca `hizmet-alan`/`hizmet-veren` kabul eder — `admin` (veya başka bir değer) `ML100` ile reddedilir (admin kaynak uygulamada da hiçbir kayıt formunda seçilebilir değil, yalnız dev-seed ile oluşur). Eksik zorunlu alan (`register-form-validation.ts` ile birebir: full_name/phone/company_name/province/district) `ML102`; `profiles` satırı hiç bulunamazsa (normalde olmamalı — savunma amaçlı) `ML103`. `company_type`/`phone` formatı kendi tablo `CHECK` kısıtlarına bırakılır (create_offer'ın `currency`'i CHECK'e bırakmasıyla aynı desen) |
+
+`provider_services`/`provider_documents`/consent tabloları için zaten ayrı, çalışan RPC'ler var (`set_provider_service_categories`, `record_provider_document_consent`, `record_legal_consent`) — `complete_registration` bunları tekrarlamaz, yalnızca kaynağın `registerUser()`'ının karşılığı olan `profiles` alanlarını üstlenir.
 
 ## Job & operation fonksiyonları (`0014_rpc_job_functions.sql`)
 
@@ -27,21 +38,23 @@ Tam parametre listeleri, transaction/kilit notları ve yan-etki detayları her f
 | `delete_job_photo(job_id, photo_id)` | ilan sahibi | Hayır (2. çağrı `MLK59` hatası verir) | Soft-delete + yoğun yeniden-sıralama |
 | `set_provider_service_categories(category_ids)` | `hizmet-veren` | Evet (tam değiştirme) | — |
 
-## Offer fonksiyonları (`0015_rpc_offer_functions.sql`)
+## Offer fonksiyonları (`0015_rpc_offer_functions.sql`, runtime düzeltmesi: `0022`)
+
+**RUNTIME DÜZELTMESİ (0022, hosted canlı testte bulundu, KRİTİK)**: aşağıdaki ★ işaretli 8 fonksiyonun hepsi, `accept_offer`'ın kendi ilk SELECT'inde `select o into v_offer from public.offers o where o.id = p_offer_id;` (çıplak tablo takma adı — `o.*` DEĞİL) kalıbını taşıyordu. Bu, hosted Postgres'te `v_offer`'ın alanlarının (ör. `v_offer.job_id`) sonraki kullanımında gerçek bir `22P02 invalid input syntax for type uuid` çalışma-zamanı hatasına yol açıyordu — yerel dry-run bunu YAKALAMAMIŞTI (yalnızca fonksiyonların hatasız OLUŞTUĞUNU doğrulamıştı, ÇAĞRILDIĞINDA doğru çalıştığını değil). `0022`, ilk SELECT'i dosyanın kendi kanıtlanmış deseniyle (`withdraw_offer`/`request_completion`'ın zaten kullandığı `select * into v_offer from public.offers where id = ...`) değiştirir — hata kodları/iş kuralları/concurrency deseni (gerçek atomiklik hâlâ `offers_one_settled_per_job` unique index + `UPDATE ... WHERE status = 'pending'` CAS'idir, BURADA DOKUNULMADI) hiçbiri değişmedi. Hem yerel Docker'da (8/8 fonksiyon, tam yaşam döngüsü zincirleri) hem gerçek hosted development projesinde (aynı 8/8) uçtan uca yeniden doğrulandı.
 
 | Fonksiyon | Yetki | Idempotent mi | Anahtar yan etkiler |
 |---|---|---|---|
 | `create_offer(job_id, amount, currency, description, estimated_duration?)` | `hizmet-veren` | Hayır (unique index'e takılarak engellenir) | Provider'a advisory lock; kapasite+cooldown kontrolleri; GÜNLÜK KOTA YOK (bkz. altta). `estimated_duration` **yerel dry-run'da yeniden tasarlandı**: `text not null`den nullable `integer`e (1-60) — yalnız Nakliye kategorisinde zorunlu (`MLK66`), diğer kategorilerde her zaman `NULL` yazılır (SUPABASE-MIGRATION-VALIDATION.md §20 madde 2, KRİTİK) |
-| `accept_offer(offer_id)` | ilan sahibi | Hayır (2. çağrı `MLK68`) | GÜVENLİK DÜZELTMESİ: `offers_one_settled_per_job` unique_violation'ını yakalayıp `MLK67`'ye çevirir |
-| `reject_offer(offer_id)` | ilan sahibi | Hayır | |
-| `withdraw_offer(offer_id)` | teklifin sağlayıcısı | Hayır | |
-| `start_work(offer_id)` | ilan sahibi | Hayır | |
-| `record_agreement_failure(offer_id, reason, note?)` | ilan sahibi | Hayır | Her iki tarafa da bildirim |
-| `request_completion(offer_id)` | teklifin sağlayıcısı | Hayır | |
-| `confirm_completion(offer_id)` | ilan sahibi, ≠ tamamlanma talebini başlatan | Hayır | |
-| `dispute_completion(offer_id, note)` | ilan sahibi, ≠ tamamlanma talebini başlatan | Hayır | |
-| `resolve_completion_dispute(offer_id, resolution)` | ilan sahibi | Hayır | GÜVENLİK/TUTARLILIK DÜZELTMESİ: geçersiz `resolution` artık `MLK78` (eski `MLK71`, 0016'daki `review_provider_document`'ın kodu ile ÇAKIŞIYORDU) |
-| `submit_rating(offer_id, stars, comment?)` | `hizmet-alan`, ilan sahibi | Hayır (unique kısıt engeller) | |
+| ★ `accept_offer(offer_id)` | ilan sahibi | Hayır (2. çağrı `MLK68`) | GÜVENLİK DÜZELTMESİ (0015): `offers_one_settled_per_job` unique_violation'ını yakalayıp `MLK67`'ye çevirir. RUNTIME DÜZELTMESİ (0022): yukarı bkz. |
+| ★ `reject_offer(offer_id)` | ilan sahibi | Hayır | RUNTIME DÜZELTMESİ (0022) |
+| `withdraw_offer(offer_id)` | teklifin sağlayıcısı | Hayır | Bu desende HİÇ değildi — dokunulmadı |
+| ★ `start_work(offer_id)` | ilan sahibi | Hayır | RUNTIME DÜZELTMESİ (0022) |
+| ★ `record_agreement_failure(offer_id, reason, note?)` | ilan sahibi | Hayır | Her iki tarafa da bildirim. RUNTIME DÜZELTMESİ (0022) |
+| `request_completion(offer_id)` | teklifin sağlayıcısı | Hayır | Bu desende HİÇ değildi — dokunulmadı |
+| ★ `confirm_completion(offer_id)` | ilan sahibi, ≠ tamamlanma talebini başlatan | Hayır | Bu, önceki CREATE-zamanı 42601 hatasının (0015 başlığı) ASIL fonksiyonuydu — o düzeltme OLUŞTURULABİLİR yaptı ama ÇAĞRILDIĞINDA hâlâ 22P02 veriyordu. RUNTIME DÜZELTMESİ (0022) |
+| ★ `dispute_completion(offer_id, note)` | ilan sahibi, ≠ tamamlanma talebini başlatan | Hayır | RUNTIME DÜZELTMESİ (0022) |
+| ★ `resolve_completion_dispute(offer_id, resolution)` | ilan sahibi | Hayır | GÜVENLİK/TUTARLILIK DÜZELTMESİ (0015): geçersiz `resolution` artık `MLK78` (eski `MLK71`, 0016'daki `review_provider_document`'ın kodu ile ÇAKIŞIYORDU). RUNTIME DÜZELTMESİ (0022) |
+| ★ `submit_rating(offer_id, stars, comment?)` | `hizmet-alan`, ilan sahibi | Hayır (unique kısıt engeller) | RUNTIME DÜZELTMESİ (0022) |
 
 **Faz 1'de günlük teklif kotası YOK**: doğrulanmış bugünkü uygulama davranışı (`app/_lib/offers.ts#createOffer`'da hiçbir günlük sayaç kontrolü yok) — Faz 2'nin abonelik sistemi devreye girdiğinde bu kontrol `create_offer()`'a geri eklenir (bkz. `docs/database/future-migrations/MANIFEST.md`).
 
@@ -111,3 +124,4 @@ Tam parametre listeleri, transaction/kilit notları ve yan-etki detayları her f
 | MLK93–94 | 0007 | **YENİ** (yerel dry-run) — `record_provider_document_consent`: oturumsuz çağrı / geçersiz `statement_id`/`statement_version` |
 | MLK95–98 | 0021 | **YENİ** (yerel dry-run) — `submit_contact_message`: eksik ad / geçersiz konu / mesaj uzunluğu (10-2000) / ne e-posta ne telefon verilmiş |
 | MLK99 | 0021 | **YENİ** (yerel dry-run) — `review_contact_message`: geçersiz `status` değeri |
+| ML100–103 | 0022 | **YENİ** (hosted canlı test) — farklı önek (`MLK` değil `ML`) BİLEREK: Postgres SQLSTATE'lerin TAM 5 karakter olması gerekir, `MLK100` 6 karakterdi ve PL/pgSQL'in kendisi bunu ilk denemede `42704 unrecognized exception condition`'a düşürdü — bu migration'ın kendi yerel dry-run'ı bunu buldu, düzeltti. `complete_registration`: ML100 geçersiz `role` (yalnız hizmet-alan/hizmet-veren, `admin` dahil başka her değer reddedilir) · ML101 kayıt zaten tamamlanmış (`role` NULL değil, tek seferlik tamamlama) · ML102 zorunlu alan eksik (full_name/phone/company_name/province/district) · ML103 profil satırı bulunamadı (savunma amaçlı, normalde oluşmamalı) |

@@ -1,6 +1,8 @@
 # MALSEVK — Schema Reference
 
-Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/migrations/0001`–`0021`; Faz 2/3 taslakları: `docs/database/future-migrations/`); bu doküman bir indeks + tasarlanırken ortaya çıkan her **Açık Karar**'ın tek toplandığı yerdir. Rehber ilkeler için [architecture.md](architecture.md)'ye bakın.
+Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/migrations/0001`–`0022`; Faz 2/3 taslakları: `docs/database/future-migrations/`); bu doküman bir indeks + tasarlanırken ortaya çıkan her **Açık Karar**'ın tek toplandığı yerdir. Rehber ilkeler için [architecture.md](architecture.md)'ye bakın.
+
+**`0022`** hiçbir tabloya yeni kolon/tablo eklemez — `profiles.role`/`onboarding_completed`'in zaten NULLABLE/`false`-varsayılan olan tasarımını (bkz. altta) ilk kez gerçekten ÇALIŞAN bir bootstrap mekanizmasıyla (bir `auth.users` trigger'ı + `complete_registration()` RPC'si) destekler; bkz. [rpc-reference.md](rpc-reference.md)'nin "Kayıt tamamlama fonksiyonu" bölümü.
 
 **Toplam tablo sayısı: 35** (önceki "38"/"34" sayıları YANLIŞ — `notification_states`'in birleştirilmesi 35'i 34'e indirmişti, `0021_contact_messages.sql`'in eklenmesi Faz 1'i 19 tabloya çıkarıp toplamı tekrar 35'e getirdi). Bu sayı, `supabase/migrations/`'daki `create table` ifadeleri tek tek sayılarak VE tamamen yerel, izole bir Supabase CLI ortamına karşı gerçek bir `supabase db reset` ile doğrulandı (bkz. [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md)'in "Yerel Migration Dry-Run Sonucu" bölümü) — statik bir tahmin değil.
 
@@ -11,7 +13,7 @@ Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/mi
 | Tablo | Migration | Kaynak eşlemesi | Not |
 |---|---|---|---|
 | `service_categories` | 0002 | `service-catalog.ts#SERVICE_CATEGORY_GROUPS` (kod, henüz depo değil) | Kod, ilk göçte hâlâ tek doğruluk kaynağı |
-| `profiles` | 0003 | `StoredUser` (passwordHash/email hariç) | `account_status` Faz 1'in suspend_user() ihtiyacı için gerekli |
+| `profiles` | 0003 (bootstrap: 0022) | `StoredUser` (passwordHash/email hariç) | `account_status` Faz 1'in suspend_user() ihtiyacı için gerekli. **Hosted canlı testte bulundu**: 0003'ün kendi "bir profiles satırı auth kullanıcısı oluşturulur oluşturulmaz otomatik açılır" iddiası hiç uygulanmamıştı — gerçek bir `auth.users` kaydından sonra `profiles` 0 satır kalıyordu. `0022`, `handle_new_auth_user()` (`auth.users AFTER INSERT` trigger'ı, yalnız minimal `id`-only satır açar, `role` NULL kalır) + `complete_registration()` (RPC, kayıt formunun gerçek 7 alanını `auth.uid()` ile kilitli tek seferlik yazar, `role='admin'`'i reddeder) ile bunu düzeltir |
 | `provider_profiles` | 0003 | `StoredUser.providerProfile` | Ayrı tablo — kaynağın iki-editör-yüzeyi ayrımı |
 | `provider_services` | 0003 | `StoredProviderService` | Zaten ilişkiseldi, doğrudan taşındı |
 | `operations` | 0004 | Kaynakta karşılığı yok (yalnız `Job.operationId`) | `total_service_count` YOK (bkz. Açık Karar #10 — kaldırıldı) |
