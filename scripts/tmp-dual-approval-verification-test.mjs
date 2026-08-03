@@ -73,6 +73,16 @@ const J2 = { id: "dual-approval-job-2", title: "Ikili Onay Test - Itiraz Edilen"
 
 async function main() {
   const browser = await chromium.launch();
+  try {
+    await run(browser);
+  } finally {
+    // Hata durumunda bile browser'ı kapat — aksi halde açık kalan
+    // Playwright browser bağlantısı Node process'ini süresiz canlı tutar.
+    await browser.close();
+  }
+}
+
+async function run(browser) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const consoleErrors = [];
@@ -121,7 +131,10 @@ async function main() {
 
   // ============ SENARYO: Hizmet Veren talep gönderir -> Hizmet Alan onaylar -> tamamlandı ============
   await loginAs(page, "mert@test.com", "Mert123!");
-  await page.goto(`${BASE_URL}/panel/tekliflerim`);
+  // J1 şu an "in_progress" — bu buton yalnızca "Devam Eden" sekmesinde
+  // görünür (bkz. my-offers-panel.tsx#getProviderOfferFilter); sorgu
+  // parametresiz varsayılan "Aktif" sekmesinde kart hiç render edilmez.
+  await page.goto(`${BASE_URL}/panel/tekliflerim?durum=devam-eden`);
   const j1OfferCard = page.locator("div.rounded-card").filter({ hasText: J1.title });
   await assert.doesNotReject(
     j1OfferCard.getByRole("button", { name: "Tamamlandı Olarak İşaretle", exact: true }).waitFor({ state: "visible", timeout: 10000 }),
@@ -208,7 +221,8 @@ async function main() {
 
   // İki hesapta da senkron mu (Mert tarafı, sayfa yenilemeden yeniden giriş)
   await loginAs(page, "mert@test.com", "Mert123!");
-  await page.goto(`${BASE_URL}/panel/tekliflerim`);
+  // J1 artık "completed" — "Tamamlanan" sekmesinde görünür.
+  await page.goto(`${BASE_URL}/panel/tekliflerim?durum=tamamlandi`);
   await assert.doesNotReject(
     page.locator("div.rounded-card").filter({ hasText: J1.title }).getByText("Tamamlandı", { exact: true }).waitFor({ state: "visible", timeout: 10000 }),
   );
@@ -217,7 +231,8 @@ async function main() {
 
   // ============ SENARYO: talep gönderilir -> karşı taraf itiraz eder -> tamamlanmaz ============
   await loginAs(page, "mert@test.com", "Mert123!");
-  await page.goto(`${BASE_URL}/panel/tekliflerim`);
+  // J2 şu an "in_progress" — "Devam Eden" sekmesinde görünür.
+  await page.goto(`${BASE_URL}/panel/tekliflerim?durum=devam-eden`);
   const j2OfferCard = page.locator("div.rounded-card").filter({ hasText: J2.title });
   await j2OfferCard.getByRole("button", { name: "Tamamlandı Olarak İşaretle", exact: true }).click();
   await page.getByRole("button", { name: "Evet, Tamamlandı Olarak İşaretle" }).click();
@@ -247,7 +262,9 @@ async function main() {
   await logout(page);
 
   await loginAs(page, "mert@test.com", "Mert123!");
-  await page.goto(`${BASE_URL}/panel/tekliflerim`);
+  // J2 artık "completion_disputed" — IN_PROGRESS_OFFER_STATUSES'a dahil
+  // olduğu için hâlâ "Devam Eden" sekmesinde görünür.
+  await page.goto(`${BASE_URL}/panel/tekliflerim?durum=devam-eden`);
   await assert.doesNotReject(
     page.locator("div.rounded-card").filter({ hasText: J2.title }).getByText(/İtiraz edildi/).waitFor({ state: "visible", timeout: 10000 }),
   );
@@ -298,7 +315,6 @@ async function main() {
     localStorage.setItem("malsevk.ratings.v1", JSON.stringify(ratings));
   }, jobIds);
 
-  await browser.close();
   console.log(`\n[dual-approval-verification-test] ${passed} test geçti.`);
 }
 

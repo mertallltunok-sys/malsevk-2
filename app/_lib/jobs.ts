@@ -165,16 +165,92 @@ export function formatJobDateRange(workDate: string, workEndDate?: string): stri
   return `${formatJobDate(workDate)} - ${formatJobDate(workEndDate)}`;
 }
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfDayTime(dateStr: string): number {
+  const date = new Date(dateStr);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
 /**
- * Yalnızca bilgilendirme amaçlı: çalışma tarihi bugünden önceyse true
- * döner. Hiçbir işlemi engellemez, hiçbir alanı değiştirmez — yalnızca
- * arayüzde küçük bir öneri notu göstermek için kullanılır. Karşılaştırma
- * gün bazındadır (saat bilgisi yok sayılır).
+ * İki "YYYY-MM-DD" tarihi arasındaki gün sayısını, İKİ UCU DA DAHİL ederek
+ * hesaplar (ör. 03.08.2026 - 11.08.2026 = 9 gün) — job-listing-filters.ts'in
+ * "saat bilgisini sıfırla, sabit bir gün-milisaniyesine böl, Math.round ile
+ * yuvarla" idiomuyla AYNI temel (bkz. o dosyadaki startOfDay), yalnızca +1
+ * ile bir tarih FARKI değil, uçların ikisini de sayan bir SÜRE üretir —
+ * Depolama Süresi ("kaç gün depolanacak") için kullanılır (bkz.
+ * job-detail-content.tsx), ama tarihe bağlı genel bir yardımcı olduğu için
+ * depolamaya özel bir isim taşımaz. Geçersiz/eksik bir tarih varsa (ör.
+ * `workEndDate` hiç yoksa, parse edilemiyorsa, ya da bitiş başlangıçtan
+ * önceyse) yanlış bir sayı UYDURMAK yerine `null` döner — çağıran taraf bu
+ * durumda süreyi hiç göstermemelidir.
+ */
+export function getInclusiveDayCount(startDate: string, endDate: string): number | null {
+  if (!startDate || !endDate) return null;
+  const startTime = startOfDayTime(startDate);
+  const endTime = startOfDayTime(endDate);
+  if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return null;
+  return Math.round((endTime - startTime) / ONE_DAY_MS) + 1;
+}
+
+/**
+ * "YYYY-MM-DD" (`<input type="date">`) metnini YEREL gece yarısına çeviren
+ * yardımcı — `new Date("YYYY-MM-DD")` yerine BİLEREK kullanılır: o biçim
+ * ECMAScript'te UTC gece yarısı olarak ayrıştırılır, negatif UTC ofsetli
+ * (ör. ABD) bir kullanıcı için günün ilerleyen saatlerinde YEREL takvimde
+ * bir gün GERİYE kayabilir (bkz. isJobDateInPast/getTodayLocalDateString'in
+ * aynı kaygısı). Yıl/ay/gün bileşenlerini elle ayrıştırıp `new Date(y, m-1, d)`
+ * (yerel zaman kurucusu) ile oluşturmak bu kaymayı tamamen ortadan kaldırır.
+ * Ayrıştırılamayan bir girdi için `null` döner (yanlış bir tarih uydurmaz).
+ */
+function parseLocalDateOnly(dateStr: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
+  if (!match) return null;
+  const [, yearStr, monthStr, dayStr] = match;
+  const date = new Date(Number(yearStr), Number(monthStr) - 1, Number(dayStr));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Kullanıcının YEREL takvim gününü "YYYY-MM-DD" biçiminde döner —
+ * `<input type="date">` alanlarının `min` değeri için kullanılır.
+ * `new Date().toISOString().slice(0, 10)` İLE KARIŞTIRILMAMALI: o çağrı
+ * yerel saati ÖNCE UTC'ye çevirir, bu yüzden negatif UTC ofsetli bir
+ * kullanıcı için günün ilerleyen saatlerinde YARININ tarihini döndürebilir
+ * (bkz. parseLocalDateOnly'nin aynı kaygısı) — bu fonksiyon `getFullYear`/
+ * `getMonth`/`getDate` ile doğrudan yerel bileşenleri okuyarak bu hatayı
+ * önler.
+ */
+export function getTodayLocalDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Çalışma tarihi bugünden (yerel takvim günü) önceyse true döner —
+ * hem bilgilendirme notları (ör. job-requests-panel.tsx'in "süresi geçmiş"
+ * ipucu) hem de artık gerçek bir gönderim engeli olarak (bkz.
+ * job-form-validation.ts#validateWorkDateRange, job-store.ts#republishJob)
+ * kullanılır. Karşılaştırma gün bazındadır (saat bilgisi yok sayılır) ve
+ * TAMAMEN yerel takvime göredir — bkz. parseLocalDateOnly'nin dokümanı.
+ * Ayrıştırılamayan bir girdi için `false` döner (güvenli yön: belirsiz bir
+ * tarihi asla "geçmiş" sayıp bir işlemi yanlışlıkla engellemez).
  */
 export function isJobDateInPast(workDate: string): boolean {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const jobDate = new Date(workDate);
+  const jobDate = parseLocalDateOnly(workDate);
+  if (!jobDate) return false;
   jobDate.setHours(0, 0, 0, 0);
   return jobDate.getTime() < today.getTime();
+}
+
+/** Gelen Teklifler ilan seçim kartlarında, aynı hizmet türündeki farklı ilanları ayırt etmek için kullanılan kısa "GG.AA" biçimi (bkz. incoming-offers-panel.tsx) — formatJobDate'in tam/uzun biçiminin AKSİNE kart genişliğine taşmadan sığar. */
+export function formatShortJobDate(isoDate: string): string {
+  const date = parseLocalDateOnly(isoDate) ?? new Date(isoDate);
+  return date.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" });
 }

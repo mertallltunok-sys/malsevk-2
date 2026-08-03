@@ -1,11 +1,16 @@
-import { parsePriceInput } from "./money";
+import { isValidCurrency, parsePriceInput } from "./money";
+import { MAX_COMMITTED_DAYS, MIN_COMMITTED_DAYS } from "./offers";
+import { isTransportationCategory } from "./product-catalog";
 import type { Currency } from "./types";
 
 export type OfferFormFields = {
   currency: Currency | "";
   amountInput: string;
   description: string;
-  estimatedDuration: string;
+  /** "Tamamlanması Taahhüt Edilen Gün" açılır listesinin seçili değeri — henüz seçilmemişse "" (bkz. currency alanının AYNI sentinel deseni). Yalnızca category Nakliye ise doğrulanır (bkz. aşağıdaki fonksiyon). */
+  estimatedDuration: number | "";
+  /** İlgili ilanın kategorisi — bu alanın YALNIZCA Nakliye'de zorunlu olduğunu belirlemek için (bkz. product-catalog.ts#isTransportationCategory). Başka hiçbir amaçla kullanılmaz. */
+  category: string;
 };
 
 export type OfferFormErrors = Partial<{
@@ -23,7 +28,7 @@ export type OfferFormValidation = {
 export function validateOfferForm(fields: OfferFormFields): OfferFormValidation {
   const errors: OfferFormErrors = {};
 
-  if (fields.currency !== "TRY" && fields.currency !== "USD") {
+  if (!isValidCurrency(fields.currency)) {
     errors.currency = "Para birimi seçiniz.";
   }
 
@@ -50,13 +55,16 @@ export function validateOfferForm(fields: OfferFormFields): OfferFormValidation 
     errors.description = "Teklif açıklaması en fazla 1.000 karakter olabilir.";
   }
 
-  const estimatedDuration = fields.estimatedDuration.trim();
-  if (estimatedDuration.length === 0) {
-    errors.estimatedDuration = "Tahmini hizmet süresini giriniz.";
-  } else if (estimatedDuration.length < 2) {
-    errors.estimatedDuration = "Tahmini hizmet süresi en az 2 karakter olmalıdır.";
-  } else if (estimatedDuration.length > 100) {
-    errors.estimatedDuration = "Tahmini hizmet süresi en fazla 100 karakter olabilir.";
+  if (isTransportationCategory(fields.category)) {
+    if (fields.estimatedDuration === "") {
+      errors.estimatedDuration = "Tamamlanması taahhüt edilen gün sayısını seçiniz.";
+    } else if (
+      !Number.isInteger(fields.estimatedDuration) ||
+      fields.estimatedDuration < MIN_COMMITTED_DAYS ||
+      fields.estimatedDuration > MAX_COMMITTED_DAYS
+    ) {
+      errors.estimatedDuration = `Geçerli bir gün sayısı seçiniz (${MIN_COMMITTED_DAYS}-${MAX_COMMITTED_DAYS}).`;
+    }
   }
 
   return { errors, amount };

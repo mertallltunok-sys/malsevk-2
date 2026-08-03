@@ -4,7 +4,14 @@ import { CalendarDays, CheckCircle2, MapPin } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { formatJobDate, formatJobDateRange, getJobStatusLabel, getJobStatusTone, isJobDateInPast } from "../_lib/jobs";
+import {
+  formatJobDate,
+  formatJobDateRange,
+  getJobStatusLabel,
+  getJobStatusTone,
+  getTodayLocalDateString,
+  isJobDateInPast,
+} from "../_lib/jobs";
 import { formatJobLocationLine } from "../_lib/job-location";
 import {
   getCompletedOfferForJob,
@@ -694,7 +701,11 @@ function RepublishJobDialog({
   const [workDate, setWorkDate] = useState("");
   const [workEndDate, setWorkEndDate] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
-  const todayIso = new Date().toISOString().slice(0, 10);
+  // KASITLI olarak `toISOString().slice(0, 10)` DEĞİL — o çağrı yerel saati
+  // ÖNCE UTC'ye çevirir, negatif UTC ofsetli bir kullanıcı için günün
+  // ilerleyen saatlerinde YARININ tarihini döndürebilir (bkz.
+  // jobs.ts#getTodayLocalDateString'in aynı kaygısı).
+  const todayIso = getTodayLocalDateString();
 
   useEffect(() => {
     dialogRef.current?.focus();

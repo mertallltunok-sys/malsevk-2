@@ -3,11 +3,13 @@
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { canSubmitOffersAsCustomsBroker } from "../_lib/customs-license";
 import { isJobClosedToNewOffers, isReofferCooldownStatus } from "../_lib/job-requests";
 import { isJobListingExpired } from "../_lib/job-publish-window";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
-import { getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
+import { formatCommittedDays, getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
+import { isTransportationCategory } from "../_lib/product-catalog";
 import { MAX_ACTIVE_JOBS, hasReachedActiveJobLimit } from "../_lib/provider-capacity";
 import { computeRemainingTime, getReofferEligibleAtIso } from "../_lib/time-remaining";
 import type { Job, Offer } from "../_lib/types";
@@ -23,17 +25,19 @@ const REOFFER_BLOCKED_MESSAGES: Record<"withdrawn" | "rejected" | "agreement_fai
     "Bu ilan için daha önce teklifiniz kabul edilmiş ancak anlaşma sağlanamamıştır.",
 };
 
-function OfferSummaryCard({ offer }: { offer: Offer }) {
+function OfferSummaryCard({ offer, job }: { offer: Offer; job: Job }) {
   return (
     <div className="rounded-card border border-border bg-background p-6">
       <p className="text-sm font-bold tracking-heading leading-tight text-foreground">
         {formatMoney(offer.amount, offer.currency)}
       </p>
       <dl className="mt-4 flex flex-col gap-2 text-sm text-muted-foreground">
-        <div className="flex justify-between gap-4">
-          <dt>Tahmini süre</dt>
-          <dd className="text-right text-foreground">{offer.estimatedDuration}</dd>
-        </div>
+        {isTransportationCategory(job.category) && (
+          <div className="flex justify-between gap-4">
+            <dt>Tamamlanması Taahhüt Edilen Gün</dt>
+            <dd className="text-right text-foreground">{formatCommittedDays(offer.estimatedDuration)}</dd>
+          </div>
+        )}
         <div className="flex justify-between gap-4">
           <dt>Teklif tarihi</dt>
           <dd className="text-right text-foreground">{formatJobDate(offer.createdAt)}</dd>
@@ -131,7 +135,7 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
         <p className="mb-4 text-sm font-medium text-foreground">
           Bu ilana daha önce teklif verdiniz.
         </p>
-        <OfferSummaryCard offer={currentOffer} />
+        <OfferSummaryCard offer={currentOffer} job={job} />
       </div>
     );
   }
@@ -202,6 +206,30 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
     );
   }
 
+  // Gümrük Müşavirliği'ne özel ek kapı (bkz. customs-license.ts) — bu
+  // Hizmet Veren Gümrük Müşavirliği seçili DEĞİLSE her zaman `true` döner,
+  // bu blok hiç render edilmez (diğer hiçbir hizmetin teklif formu bundan
+  // etkilenmez). Kapasite/süre dolumu/kapanma kontrolleriyle AYNI görsel
+  // engel deseni — asıl yetkilendirme her zaman olduğu gibi
+  // offers.ts#createOffer'da (arayüzden bağımsız) uygulanır, bu yalnızca
+  // onun bir YANSIMASIDIR.
+  if (!canSubmitOffersAsCustomsBroker(session.id)) {
+    return (
+      <div className="rounded-card border border-border bg-background p-6">
+        <p className="text-sm font-medium text-foreground">Gümrük Müşaviri İzin Belgeniz henüz onaylanmadı.</p>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          Belgeniz yönetici tarafından onaylandıktan sonra bu ilana teklif verebilirsiniz.
+        </p>
+      </div>
+    );
+  }
+
+  // Ürün Bilgileri BİLEREK burada gösterilmez — aynı bilgi zaten ilan detay
+  // sayfasının sol tarafındaki bağımsız "Ürün Bilgileri" kartında
+  // (job-detail-content.tsx) gösteriliyor; bu panel de o sayfanın sağ
+  // sütununda render edildiği için ikinci bir kart mükerrer gösterime yol
+  // açardı (bkz. görev tanımındaki "MEVCUT HATA"). Teklif Ver formunun
+  // kendisi değişmedi.
   return (
     <OfferForm
       job={job}

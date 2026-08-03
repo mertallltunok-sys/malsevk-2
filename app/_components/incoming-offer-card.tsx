@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Check, CheckCircle2, MapPin, ShieldCheck, Star, X } from "lucide-react";
+import { Building2, Check, CheckCircle2, MapPin, Package, ShieldCheck, Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getRevealedContactForOffer } from "../_lib/contact-access";
 import { formatJobLocationLine } from "../_lib/job-location";
@@ -11,7 +11,8 @@ import {
 } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
-import { getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_lib/offers";
+import { formatCommittedDays, getOfferStatusLabel, getOfferStatusTone, updateOfferStatus } from "../_lib/offers";
+import { formatJobProductInfoLine, isTransportationCategory } from "../_lib/product-catalog";
 import { getProviderProfileSummary } from "../_lib/provider-profile";
 import type { Job, Offer, Session, UserRole } from "../_lib/types";
 import { useAllOffers } from "../_lib/use-offers";
@@ -128,6 +129,12 @@ export function IncomingOfferCard({
                 {formatJobLocationLine(job)}
               </p>
             )}
+            {job && formatJobProductInfoLine(job) && (
+              <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                <Package className="h-3 w-3 shrink-0" aria-hidden="true" />
+                {formatJobProductInfoLine(job)}
+              </p>
+            )}
             {identityRevealed ? (
               <p className="mt-1 truncate text-sm font-bold tracking-heading leading-tight text-foreground">
                 {companyName}
@@ -138,46 +145,54 @@ export function IncomingOfferCard({
             ) : (
               <p className="mt-1 truncate text-sm font-bold tracking-heading leading-tight text-foreground">{anonymousLabel}</p>
             )}
-            {identityRevealed && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="flex shrink-0 items-center gap-1">
-                  <span className="flex" aria-hidden="true">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className="h-3 w-3 text-rating"
-                        fill={
-                          providerSummary.averageStars !== null && star <= Math.round(providerSummary.averageStars)
-                            ? "currentColor"
-                            : "transparent"
-                        }
-                        strokeWidth={1.75}
-                      />
-                    ))}
-                  </span>
-                  {providerSummary.averageStars !== null ? (
-                    <span>
-                      {providerSummary.averageStars.toFixed(1)} ({providerSummary.ratingCount})
-                    </span>
-                  ) : (
-                    <span>Henüz değerlendirme yok</span>
-                  )}
+            {/*
+              Yıldız puanı + tamamlanan iş sayısı BİLEREK `identityRevealed`den
+              BAĞIMSIZ — Hizmet Alan, teklifi kabul/reddetmeden ÖNCE hizmet
+              verenin performansını görebilmeli (bkz. görev tanımı). Bu ikisi
+              yalnızca `providerSummary`ye (offers.ts/ratings.ts'ten türetilen,
+              iptal/red/anlaşamama işleri hariç tutan TEK doğruluk kaynağı)
+              dayanır — isim/logo/telefon/e-posta İÇERMEZ. Bölgeler `<span>`'ı
+              ise coğrafi bilgi kimliğe yaklaşan bir sinyal olduğu için AYNEN
+              `identityRevealed` kapılı kalır.
+            */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="flex shrink-0 items-center gap-1">
+                <span className="flex" aria-hidden="true">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star
+                      key={star}
+                      className="h-3 w-3 text-rating"
+                      fill={
+                        providerSummary.averageStars !== null && star <= Math.round(providerSummary.averageStars)
+                          ? "currentColor"
+                          : "transparent"
+                      }
+                      strokeWidth={1.75}
+                    />
+                  ))}
                 </span>
-                <span className="flex shrink-0 items-center gap-1">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
-                  {providerSummary.completedJobCount} tamamlanan iş
-                </span>
-                {providerProfile && providerProfile.regions.length > 0 && (
-                  <span className="flex min-w-0 items-center gap-1">
-                    <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{providerProfile.regions.join(", ")}</span>
+                {providerSummary.averageStars !== null ? (
+                  <span>
+                    {providerSummary.averageStars.toFixed(1)} ({providerSummary.ratingCount})
                   </span>
+                ) : (
+                  <span>Henüz değerlendirme yok</span>
                 )}
-              </div>
-            )}
+              </span>
+              <span className="flex shrink-0 items-center gap-1">
+                <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+                {providerSummary.completedJobCount} tamamlanan iş
+              </span>
+              {identityRevealed && providerProfile && providerProfile.regions.length > 0 && (
+                <span className="flex min-w-0 items-center gap-1">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{providerProfile.regions.join(", ")}</span>
+                </span>
+              )}
+            </div>
             {!identityRevealed && offer.status === "pending" && (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Firma kimliği, teklifi kabul ettiğinizde görünür olacak.
+                Firma kimliği ve iletişim bilgileri, teklifi kabul ettiğinizde görünür olacak.
               </p>
             )}
           </div>
@@ -212,7 +227,9 @@ export function IncomingOfferCard({
         </p>
 
         <div className="mt-2 flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6">
-          <span>Tahmini süre: {offer.estimatedDuration}</span>
+          {job && isTransportationCategory(job.category) && (
+            <span>Tamamlanması Taahhüt Edilen Gün: {formatCommittedDays(offer.estimatedDuration)}</span>
+          )}
           <span>Teklif tarihi: {formatJobDate(offer.createdAt)}</span>
         </div>
 

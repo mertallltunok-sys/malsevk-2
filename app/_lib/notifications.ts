@@ -33,6 +33,17 @@ export type NotificationType =
   | "belge_reddedildi"
   | "belge_revizyon_istendi";
 
+/**
+ * "yeni_teklif" bildiriminin id şeması — TEK doğruluk kaynağı. Bu dosyanın
+ * kendi türetmesi (aşağıdaki newOfferNotifications) VE Gelen Teklifler
+ * ekranındaki ilan seçim kartının okunmamış-teklif rozeti (bkz.
+ * incoming-offers-panel.tsx) AYNI id'yi bu fonksiyon üzerinden hesaplar —
+ * biçim iki dosyada ayrı ayrı tekrarlanmaz.
+ */
+export function newOfferNotificationId(offerId: string): string {
+  return `offer-received-${offerId}`;
+}
+
 export type AppNotification = {
   id: string;
   notificationType: NotificationType;
@@ -139,7 +150,7 @@ export function getNotificationsForSession(
     const newOfferNotifications: AppNotification[] = offers
       .filter((offer) => myJobTitleById.has(offer.jobId) && isOfferVisibleInNormalLists(offer))
       .map((offer) => ({
-        id: `offer-received-${offer.id}`,
+        id: newOfferNotificationId(offer.id),
         notificationType: "yeni_teklif",
         message: `İlanınıza yeni teklif geldi: ${myJobTitleById.get(offer.jobId)}`,
         ilanId: offer.jobId,

@@ -18,6 +18,23 @@
 // görev `getPublicOperationStatusSummary`/`OperationStatusCard`'ın özet
 // ızgarasını DEĞİŞTİRMEDİ, yalnızca hizmet listesindeki satır durumlarını.
 //
+// EK (İKİNCİ KATMAN) SÜPERSEME NOTU — sonraki bir "operasyon kartlarının tek
+// karta konsolidasyonu" görevi bu dosyanın YUKARIDAKİ notunu da KISMEN
+// geçersiz kıldı: "Operasyondaki Hizmetler" başlığı (bu script'in `main()`
+// akışının EN BAŞINDA, satır 148 civarındaki yardımcı fonksiyon aracılığıyla
+// beklediği başlık) artık sayfanın HİÇBİR yerinde yok — operation-sibling-jobs-card.tsx
+// ve operation-service-offers-card.tsx SİLİNDİ, tek kalan kart artık yalnızca
+// "Operasyon Durumu" (bkz. operation-status-card.tsx). Bu yüzden yukarıdaki
+// "TEST 6 hâlâ GEÇER" iddiası artık PRATİKTE YANLIŞTIR — script TEST 6'ya hiç
+// ULAŞAMAZ, çünkü ondan önceki adımlar bu artık var olmayan başlığı `waitFor`
+// ile ararken timeout ile başarısız olur. TEST 6'nın KENDİ iddiası (global
+// özet kutucukları) kavramsal olarak hâlâ doğrudur ve GEÇERLİDİR — yalnızca bu
+// dosyadaki HALİYLE erişilemez durumdadır. Canlı, TÜM senaryoları (satır
+// durumları + özet kutucukları, tek "Operasyon Durumu" kartı üzerinden)
+// kapsayan doğrulanmış regresyon kapısı: tmp-operation-status-single-card-merge-test.mjs
+// (bkz. o dosyanın SENARYO 1/2/12 ve özet doğrulamaları). Bu script yine
+// BİLEREK değiştirilmedi — tarihsel kayıt olarak kalır.
+//
 // --- Aşağıdaki orijinal açıklama (satır rozetleri için artık kısmen geçersiz) ---
 // Aşama 5.2 — Operasyon Hizmet Durumlarının Tutarlılık Denetimi.
 //

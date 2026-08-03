@@ -1,6 +1,32 @@
+import { isJobManuallyClosed } from "./job-closure";
+import { isJobListingExpired } from "./job-publish-window";
 import { getOperationStatusBucket } from "./job-requests";
 import { getJobsByOperationId } from "./job-store";
 import type { Job, Offer } from "./types";
+
+/**
+ * Bir operasyon KARDEŞİNİN, "Aktif İlanlar" beslemesi açısından kendi başına
+ * artık "bitmiş" sayılıp sayılmadığı — TEK doğruluk kaynağı, aşağıdaki
+ * `isJobFullyCompletedForListing`'in operasyon dalının ihtiyaç duyduğu tek
+ * yardımcı. Bir kardeş üç BAĞIMSIZ yoldan "bitmiş" sayılabilir: gerçekten
+ * tamamlanmış (`getOperationStatusBucket === "tamamlandi"`), Hizmet Alan
+ * tarafından manuel kapatılmış (`job-closure.ts#isJobManuallyClosed`) ya da
+ * yayın süresi dolmuş (`job-publish-window.ts#isJobListingExpired`) — HANGİ
+ * yoldan olursa olsun, o kardeş artık teklif aramıyor/beklemiyor demektir.
+ * BUG DÜZELTMESİ: eskiden yalnızca "tamamlandi" bucket'ı sayılıyordu — bu
+ * yüzden tamamı tamamlanmış+kapatılmış (hiçbiri gerçekten "tamamlandi"
+ * olmayan) bir operasyon hiçbir zaman "hepsi bitti" sayılmıyor, tek bir
+ * gerçekten tamamlanmış kardeşi "hayalet" bir tekil ilan gibi Aktif
+ * İlanlar'da bırakıyordu (bkz. isJobFullyCompletedForListing'in kendi
+ * dokümantasyonu).
+ */
+function isOperationSiblingResolvedForListing(job: Job, offers: Offer[]): boolean {
+  return (
+    getOperationStatusBucket(job, offers) === "tamamlandi" ||
+    isJobManuallyClosed(job) ||
+    isJobListingExpired(job, offers)
+  );
+}
 
 /**
  * Bir ilanın (tekil ya da bir operasyona bağlı) "Aktif İlanlar" beslemesinden
@@ -11,7 +37,12 @@ import type { Job, Offer } from "./types";
  * job-closure.ts#isJobManuallyClosed (Hizmet Alan'ın manuel kapatması) ile
  * BİREBİR aynı mimari: ilan hiçbir zaman SİLİNMEZ, `Job.status`a hiç
  * dokunulmaz, yalnızca "artık aktif ilan listesinde/aramada/filtrede
- * görünmesin" sinyali üretir.
+ * görünmesin" sinyali üretir. Bu fonksiyon, TEKİL bir ilan için, süre
+ * dolumu/manuel kapatma kontrolleriyle AYNI seviyede (provider-job-
+ * listing.tsx#activeJobs'ta yan yana) çağrılan BAĞIMSIZ bir kapıdır — o iki
+ * kontrol her zaman THIS JOB'ın kendi durumuna bakar, bu fonksiyonun
+ * operasyon dalı ise kardeşlerin durumuna bakar; ikisi birbirini
+ * TEKRARLAMAZ.
  *
  * KRİTİK SINIR: bu fonksiyon YALNIZCA "Aktif İlanlar" keşif/listeleme
  * yüzeyini besleyen yerlerde (bugün: provider-job-listing.tsx) kullanılmalıdır
@@ -35,18 +66,29 @@ import type { Job, Offer } from "./types";
  * Tekil ilan (operationId yok): `job-requests.ts#getOperationStatusBucket`
  * (TEK doğruluk kaynağı — gerçek Job/Offer durumundan türetilir, ilerleme
  * yüzdesi/başlık/operationId'den ASLA tahmin edilmez) `"tamamlandi"` dönerse
- * tamamlanmış sayılır.
+ * tamamlanmış sayılır. Bu dal BİLEREK yalnızca gerçek tamamlanmayı kontrol
+ * eder — bu ilanın kendi kapatma/süre-dolumu durumu zaten provider-job-
+ * listing.tsx#activeJobs'ta AYRICA (ve bu ilan operasyona bağlı olsa da
+ * olmasa da AYNI şekilde) kontrol edilir.
  *
  * Operasyon ilanı: `job-store.ts#getJobsByOperationId` ile operasyonun
  * GERÇEK/tam (filtreden bağımsız) kardeş kümesi çözülür — job-listing-row.ts#
  * buildOperationListingItem'ın toplam/tamamlanan sayılarını hesaplarken
- * kullandığı AYNI kaynak — ve yalnızca kardeşlerin HEPSİ "tamamlandi"
- * bucket'ındaysa operasyon tamamlanmış sayılır. Kapatılmış (job-closure.ts)
- * ya da süresi dolmuş (job-publish-window.ts) ama HENÜZ tamamlanmamış bir
- * kardeş bu bucket'a hiç girmez (`getOperationStatusBucket` bu iki durumu
- * bilmez, kendi bucket'ında — genellikle "aktif" — kalır) — bu da onu doğal
- * olarak "tamamlanmamış" sayar ve operasyonu aktif listede tutar, ayrı bir
- * özel durum kodu GEREKMEZ.
+ * kullandığı AYNI kaynak — ve yalnızca kardeşlerin HEPSİ (yukarıdaki
+ * `isOperationSiblingResolvedForListing`e göre) "bitmiş" sayılırsa operasyon
+ * tamamlanmış sayılır. "Bitmiş" burada gerçekten tamamlanmış OLMASI kadar,
+ * manuel kapatılmış ya da süresi dolmuş olmasını da kapsar — üç hizmetten
+ * biri tamamlanıp diğer ikisi (hiçbiri tamamlanmadan) kapatılmış bir
+ * operasyon da BU YÜZDEN artık "tamamlanmış" sayılır ve tek kalan (zaten
+ * tamamlanmış) kardeş, kalan kardeşleri kapatılmış diye "hayalet" bir tekil
+ * ilan gibi Aktif İlanlar'da kalmaz — TÜM operasyon birlikte kalkar.
+ * Kardeşlerden EN AZ BİRİ gerçekten hâlâ açık/yayında/tamamlanmamışsa (bkz.
+ * `isOperationSiblingResolvedForListing`in `false` döndüğü tek durum) bu
+ * fonksiyon `false` döner ve operasyon (o tek açık kardeş sayesinde) aktif
+ * listede kalmaya devam eder — bu, o açık kardeşin kendi
+ * `!isJobManuallyClosed`/`!isJobListingExpired` kontrollerinden zaten geçmiş
+ * olması gerektiği anlamına gelir, aksi halde zaten kendi başına listeden
+ * düşerdi.
  */
 export function isJobFullyCompletedForListing(job: Job, offers: Offer[]): boolean {
   if (!job.operationId) {
@@ -60,5 +102,5 @@ export function isJobFullyCompletedForListing(job: Job, offers: Offer[]): boolea
     return getOperationStatusBucket(job, offers) === "tamamlandi";
   }
 
-  return siblings.every((sibling) => getOperationStatusBucket(sibling, offers) === "tamamlandi");
+  return siblings.every((sibling) => isOperationSiblingResolvedForListing(sibling, offers));
 }

@@ -85,6 +85,22 @@ export function markNotificationRead(userId: string, notificationId: string): vo
 }
 
 /**
+ * markNotificationRead'in TOPLU biçimi — TEK localStorage yazımıyla birden
+ * fazla id'yi aynı anda okunmuş işaretler (bkz. incoming-offers-panel.tsx:
+ * bir ilan seçildiğinde o ilana ait TÜM "yeni teklif" bildirimleri tek
+ * seferde okunmuş sayılır, her biri için ayrı ayrı yazma tetiklenmez).
+ * Zaten okunmuş olan id'ler yeniden eklenmez; eklenecek YENİ id yoksa hiçbir
+ * yazma/notify tetiklenmez (gereksiz re-render'ı önler).
+ */
+export function markNotificationsRead(userId: string, notificationIds: readonly string[]): void {
+  const current = readIdsSnapshot(userId);
+  const currentSet = new Set(current);
+  const newIds = notificationIds.filter((id) => !currentSet.has(id));
+  if (newIds.length === 0) return;
+  writeIds(userId, [...current, ...newIds]);
+}
+
+/**
  * Bir kullanıcının okunma durumu kaydını tamamen temizler — yalnızca
  * dev-only demo veri sıfırlama aracı (bkz. reset-demo-data.ts) için vardır.
  */

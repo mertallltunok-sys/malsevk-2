@@ -5,78 +5,58 @@ export type IncomingOfferJobGroup = {
   jobId: string;
   /** Silinmiş/eksik ilan için `undefined` — kart bu durumu zaten güvenle işler (bkz. incoming-offer-card.tsx). */
   job: Job | undefined;
+  /** `job` varsa service-catalog.ts#getCategoryDisplayLabel(job.category), yoksa MISSING_JOB_CATEGORY_LABEL — yalnızca görünen başlık chip'i içindir. */
+  categoryLabel: string;
   offers: Offer[];
 };
 
-export type IncomingOfferCategoryGroup = {
-  /** React `key` ve dahili gruplama anahtarı — job.category (ham, id ya da eski serbest metin) ya da eksik-ilan sentineli. Görünen etiketle KARIŞTIRILMAMALI. */
-  categoryKey: string;
-  categoryLabel: string;
-  jobGroups: IncomingOfferJobGroup[];
-  offerCount: number;
-};
-
-const MISSING_JOB_CATEGORY_KEY = "__missing-job__";
 const MISSING_JOB_CATEGORY_LABEL = "İlan Bilgisine Ulaşılamayan Teklifler";
 
 /**
- * "Gelen Teklifler" ekranının Hizmet Türü -> İlan -> Teklifler hiyerarşisini
- * kurar — salt görünüm katmanı, hiçbir Offer/Job kaydını değiştirmez, yeni
- * bir teklif durumu icat etmez.
+ * "Gelen Teklifler" ekranının üst kısmındaki, HER bağımsız ilan için ayrı bir
+ * seçilebilir başlık (chip) oluşturan ilan-bazlı gruplama — salt görünüm
+ * katmanı, hiçbir Offer/Job kaydını değiştirmez, yeni bir teklif durumu icat
+ * etmez. Bu, önceki "Hizmet Türü -> İlan -> Teklifler" iki seviyeli
+ * gruplamanın (bkz. eski `groupIncomingOffersByCategoryAndJob`) YERİNE geçer
+ * — kök gereksinim "yalnızca hizmet türüne göre gruplama yapma, aynı hizmet
+ * türünde iki farklı ilan varsa iki ayrı başlık olarak görünmeli" artık bu
+ * fonksiyonun kendisi tarafından garanti edilir (kategori seviyesi hiç yok,
+ * her ilan zaten kendi grubu).
  *
  * Girdi (`offers`) ZATEN filtrelenmiş VE `job-requests.ts#
  * sortIncomingOffersForDisplay` ile sıralanmış OLMALIDIR — bu fonksiyon o
  * sırayı bir daha SIRALAMAZ, yalnızca TEK GEÇİŞLİ (insertion-order) gruplar:
- * bir kategorinin/ilan grubunun listedeki KONUMU, o gruba giren İLK (yani
- * `offers` içinde en önce görünen — en öncelikli/en güncel) teklifin
- * konumuyla belirlenir. Böylece grup sırası da girdi kadar deterministiktir;
- * burada ayrıca bir sıralama kararı verilmez.
+ * bir ilan grubunun listedeki KONUMU, o gruba giren İLK (yani `offers`
+ * içinde en önce görünen — en öncelikli/en güncel) teklifin konumuyla
+ * belirlenir. Böylece grup sırası da girdi kadar deterministiktir; burada
+ * ayrıca bir sıralama kararı verilmez — çağıran taraf (incoming-offers-panel.tsx)
+ * bu yüzden "en güncel teklif bulunan ilan"ı güvenle `jobGroups[0]` olarak
+ * varsayılan seçebilir.
  *
  * `jobById.get(offer.jobId)` bulunamazsa (silinmiş/eksik ilan) teklif asla
- * atlanmaz/kaybolmaz — sabit bir "İlan Bilgisine Ulaşılamayan Teklifler"
- * kategorisinde, yine kendi `jobId`sine göre gruplanarak gösterilir (iki
- * farklı eksik `jobId` birbirine karışmaz). Kategori gruplama anahtarı
- * BİLEREK görünen etiket değil `job.category`nin HAM değeridir
- * (`getCategoryDisplayLabel` yalnızca ETİKET için çağrılır) — iki farklı ham
- * değerin görünüşte aynı etikete düşmesi gruplamayı yanlışlıkla
- * birleştirmesin diye.
+ * atlanmaz/kaybolmaz — kendi `jobId`sine göre AYRI bir grup olarak (sabit
+ * "İlan Bilgisine Ulaşılamayan Teklifler" başlığıyla) gösterilir; iki farklı
+ * eksik `jobId` birbirine karışmaz (her biri kendi chip'i).
  */
-export function groupIncomingOffersByCategoryAndJob(
-  offers: Offer[],
-  jobById: Map<string, Job>,
-): IncomingOfferCategoryGroup[] {
-  const categories: IncomingOfferCategoryGroup[] = [];
-  const categoryByKey = new Map<string, IncomingOfferCategoryGroup>();
-  // Bir jobId her zaman TEK bir kategoriye düşer (o ilanın kendi kategorisi
-  // sabittir), bu yüzden kategoriden bağımsız, tek bir global jobId->grup
-  // eşlemesi yeterlidir.
-  const jobGroupByJobId = new Map<string, IncomingOfferJobGroup>();
+export function groupIncomingOffersByJob(offers: Offer[], jobById: Map<string, Job>): IncomingOfferJobGroup[] {
+  const groups: IncomingOfferJobGroup[] = [];
+  const groupByJobId = new Map<string, IncomingOfferJobGroup>();
 
   for (const offer of offers) {
-    const job = jobById.get(offer.jobId);
-    const categoryKey = job ? job.category : MISSING_JOB_CATEGORY_KEY;
-
-    let category = categoryByKey.get(categoryKey);
-    if (!category) {
-      category = {
-        categoryKey,
+    let group = groupByJobId.get(offer.jobId);
+    if (!group) {
+      const job = jobById.get(offer.jobId);
+      group = {
+        jobId: offer.jobId,
+        job,
         categoryLabel: job ? getCategoryDisplayLabel(job.category) : MISSING_JOB_CATEGORY_LABEL,
-        jobGroups: [],
-        offerCount: 0,
+        offers: [],
       };
-      categoryByKey.set(categoryKey, category);
-      categories.push(category);
+      groupByJobId.set(offer.jobId, group);
+      groups.push(group);
     }
-    category.offerCount += 1;
-
-    let jobGroup = jobGroupByJobId.get(offer.jobId);
-    if (!jobGroup) {
-      jobGroup = { jobId: offer.jobId, job, offers: [] };
-      jobGroupByJobId.set(offer.jobId, jobGroup);
-      category.jobGroups.push(jobGroup);
-    }
-    jobGroup.offers.push(offer);
+    group.offers.push(offer);
   }
 
-  return categories;
+  return groups;
 }

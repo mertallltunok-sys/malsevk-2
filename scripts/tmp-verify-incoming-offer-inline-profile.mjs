@@ -8,7 +8,9 @@
 //   gösterilir (profili zengin OLSUN ya da OLMASIN, ikisi için de).
 // - Teklif kabul edildiği ANDA aynı kartta firma adı, logo, uzmanlık
 //   alanları, tamamlanan iş sayısı, bölge ve kısa tanıtım GÖRÜNÜR olur.
-// - Reddedilen bir teklif kabul edilmeden önce de sonra da anonim KALIR.
+// - Reddedilen bir teklif Gelen Teklifler ekranından tamamen kalkar (bkz.
+//   job-requests.ts#isOfferShownInIncomingOffersScreen) — kayıt silinmez,
+//   yalnızca bu ekrandan çıkar; kardeş (farklı) ilan etkilenmez.
 // - İletişim gizliliği kuralı (kabul edilmeden telefon/e-posta yok) bozulmadı.
 // - Kabul/Reddet butonları çalışıyor.
 // - Uzun firma adı / uzun tanıtım / yüksek teklif tutarında taşma yok.
@@ -304,14 +306,29 @@ async function main() {
     );
     check("Kabul sonrası: konsol hatası yok", page.jsProblems.length === 0, page.jsProblems.join(" | "));
 
-    // ============ 7) Reddet butonu çalışıyor (Mehmet'in teklifi) — reddedilen teklif ANONİM KALIR ============
-    console.log("\n=== Reddet butonu çalışıyor + reddedilen teklif anonim kalır ===");
+    // ============ 7) Reddet butonu çalışıyor — reddedilen teklif Gelen Teklifler'den KALKAR ============
+    // Mehmet'in ilanı ("Boş Profil") kendisine ait TEK teklife sahip; reddedilince
+    // job-requests.ts#isOfferShownInIncomingOffersScreen'e göre bu ekrandan
+    // tamamen düşmesi beklenir (kart DEĞİL, silinen bir kayıt da değil — bkz.
+    // o fonksiyonun dokümantasyonu). Anonimlik kontrolü artık anlamsız (kart
+    // hiç render edilmiyor), bunun yerine kartın/ilan grubunun kalkması ve
+    // KARDEŞ ilanın (Mert'in kabul edilmiş teklifi, "Zengin Profil") hiç
+    // etkilenmemesi doğrulanır.
+    console.log("\n=== Reddet butonu çalışıyor + reddedilen teklif Gelen Teklifler'den kalkar ===");
     const mehmetCard = page.locator("div.rounded-card", { hasText: "Inline Profil Testi — Boş Profil" }).first();
     await mehmetCard.getByRole("button", { name: "Reddet" }).click();
-    await page.getByText("Reddedildi").first().waitFor({ state: "visible", timeout: 10000 });
-    check("Reddet sonrası durum 'Reddedildi' olarak güncellendi", true);
+    await mehmetCard.waitFor({ state: "hidden", timeout: 10000 });
+    check("Reddet sonrası Mehmet'in kartı/ilan grubu Gelen Teklifler'den KALKTI", true);
+    check(
+      "'Inline Profil Testi — Boş Profil' başlığı artık sayfada YOK",
+      (await page.getByText("Inline Profil Testi — Boş Profil").count()) === 0,
+    );
     const afterRejectText = await page.locator("body").innerText();
-    check("Reddedilen teklifte 'Mehmet Demir' ismi HÂLÂ görünmüyor (anonim kaldı)", !afterRejectText.includes("Mehmet Demir"));
+    check(
+      "Kardeş ilan (Mert'in kabul edilmiş teklifi, 'Zengin Profil') etkilenmeden görünmeye devam ediyor",
+      afterRejectText.includes("Inline Profil Testi — Zengin Profil") && afterRejectText.includes(LONG_COMPANY_NAME),
+    );
+    check("Reddet sonrası: konsol hatası yok", page.jsProblems.length === 0, page.jsProblems.join(" | "));
 
     await context.close();
 

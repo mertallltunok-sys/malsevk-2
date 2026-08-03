@@ -8,17 +8,23 @@
 // aynı ilanın diğer tekliflerinin altına iner" TEK istisnasını test
 // ediyordu (`incomingOfferSortWeight` o zaman yalnızca 2 kademeliydi: 0/1).
 // "Gelen Teklifler kart sıralaması" göreviyle bu ağırlık fonksiyonu TAM
-// 7 kademeli bir iş-öncelik sırasına genişletildi (Beklemede -> Kabul
-// Edildi -> İşe Başlandı/Devam Eden -> Tamamlanma Süreci -> Tamamlandı ->
-// Anlaşma Sağlanamadı/İptal -> Reddedildi) — ALGORİTMANIN KENDİSİ (deterministik
-// slot-yeniden-yerleştirme) DEĞİŞMEDİ, yalnızca ağırlık tablosu genişledi.
-// Bu yüzden aşağıda: (a) ESKİ "agreement_failed" testleri AYNEN geçerli
-// kalır ve DEĞİŞTİRİLMEDİ (agreement_failed hâlâ pending/accepted'ın altında);
-// (b) yalnızca "pending/accepted'ın EŞİT öncelikli olduğu" varsayımına
-// dayanan TEK eski test, artık YANLIŞ olduğu için (görev gereği pending
-// artık accepted'dan daha yüksek öncelikli) güncellendi; (c) yeni kademeler
-// (in_progress/completion_requested/completion_disputed/completed/
-// cancelled/rejected) için yeni testler eklendi.
+// 7 kademeli bir iş-öncelik sırasına genişletildi — ALGORİTMANIN KENDİSİ
+// (deterministik slot-yeniden-yerleştirme) hiçbir zaman değişmedi, yalnızca
+// ağırlık tablosu genişletildi/güncellendi.
+//
+// "KABUL EDİLDİ AŞAĞI DÜŞMESİN" DÜZELTMESİ: sıra artık Kabul Edildi ->
+// Beklemede -> İşe Başlandı/Devam Eden -> Tamamlanma Süreci -> Tamamlandı ->
+// Anlaşma Sağlanamadı/İptal -> Reddedildi. Bu, ÖNCEKİ bir görevde BİLEREK
+// tersi (Beklemede -> Kabul Edildi) olarak kurulmuş sıralamanın KASITLI
+// TERSİNE ÇEVRİLMESİDİR — kök neden: bir teklif kabul edildiği anda, aynı
+// ilandaki hâlâ "pending" kalan kardeşleri onun ÜSTÜNE geçiyordu, yani
+// Hizmet Alan'ın az önce kabul ettiği teklif kendi ekranında aşağı
+// kayıyordu. Aşağıda: (a) "accepted"ın artık "pending"in ÜSTÜNDE olduğunu
+// doğrulayan testler GÜNCELLENDİ (eskiden tam tersini doğruluyorlardı); (b)
+// "agreement_failed"/"rejected"/diğer kademelerle ilgili testler bu
+// değişiklikten ETKİLENMEDİĞİ için AYNEN korundu (yalnızca accepted/pending
+// arasındaki göreli sıra değişti, diğer altı kademe arasındaki bağıl sıra
+// DEĞİŞMEDİ).
 //
 // job-requests.ts hiçbir tarayıcı-only API (window/localStorage/indexedDB)
 // KULLANMAZ (yalnızca ./jobs ve ./types'ı import eder), bu yüzden saf mantık
@@ -105,19 +111,19 @@ check("İki 'pending' teklif kendi aralarında recency sırasını korur (aynı 
   assert.deepEqual(result.map((o) => o.id), ["c", "a"], "aynı kademedeki (pending) teklifler arasında sıralama SADECE recency'e göre olmalı");
 });
 
-check("'pending' artık 'accepted'dan HER ZAMAN daha yüksek öncelikli — recency'den bağımsız (görev: Beklemede -> Kabul Edildi sırası)", () => {
+check("'accepted' artık 'pending'den HER ZAMAN daha yüksek öncelikli — recency'den bağımsız (görev: kabul edilen teklif aşağı düşmesin)", () => {
   const a = offer("a", "job-1", "pending", "2026-07-01T10:00:00.000Z");
   const b = offer("b", "job-1", "accepted", "2026-07-03T10:00:00.000Z");
   const c = offer("c", "job-1", "pending", "2026-07-02T10:00:00.000Z");
   const result = sortIncomingOffersForDisplay([a, b, c]);
   assert.deepEqual(
     result.map((o) => o.id),
-    ["c", "a", "b"],
-    "b (accepted) en yeni olsa bile pending'lerin (c, a — kendi recency sırasıyla) ALTINA inmeli",
+    ["b", "c", "a"],
+    "b (accepted) en üstte kalmalı; pending'ler (c, a — kendi recency sırasıyla) onun ALTINDA görünmeli",
   );
 });
 
-check("Tam 7 kademeli öncelik sırası: pending -> accepted -> in_progress -> tamamlanma süreci -> completed -> agreement_failed/cancelled -> rejected", () => {
+check("Tam 7 kademeli öncelik sırası: accepted -> pending -> in_progress -> tamamlanma süreci -> completed -> agreement_failed/cancelled -> rejected", () => {
   // Girdi KASITLI OLARAK ters/karışık sırada (recency önceliği sırasıyla ÇAKIŞMAYACAK
   // şekilde) verilir — sonucun SADECE öncelik ağırlığına göre kurulduğunu kanıtlamak için.
   const rejected = offer("rejected", "job-1", "rejected", "2026-07-01T10:00:00.000Z");
@@ -145,8 +151,8 @@ check("Tam 7 kademeli öncelik sırası: pending -> accepted -> in_progress -> t
   assert.deepEqual(
     result.map((o) => o.id),
     [
-      "pending",
       "accepted",
+      "pending",
       "in_progress",
       "completion_requested",
       "completion_disputed",
@@ -155,7 +161,7 @@ check("Tam 7 kademeli öncelik sırası: pending -> accepted -> in_progress -> t
       "cancelled",
       "rejected",
     ],
-    "yedi kademeli iş-öncelik sırası (Beklemede -> Kabul Edildi -> İşe Başlandı/Devam Eden -> Tamamlanma Süreci -> Tamamlandı -> Anlaşma Sağlanamadı/İptal -> Reddedildi) birebir uygulanmalı",
+    "yedi kademeli iş-öncelik sırası (Kabul Edildi -> Beklemede -> İşe Başlandı/Devam Eden -> Tamamlanma Süreci -> Tamamlandı -> Anlaşma Sağlanamadı/İptal -> Reddedildi) birebir uygulanmalı",
   );
 });
 

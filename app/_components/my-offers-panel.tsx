@@ -14,8 +14,10 @@ import {
 import { useFilterVisibleJobs } from "../_lib/job-visibility";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
+import { isTransportationCategory } from "../_lib/product-catalog";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import {
+  formatCommittedDays,
   getOfferStatusLabel,
   getOfferStatusTone,
   requestCompletion,
@@ -423,10 +425,12 @@ export function MyOffersPanel() {
                   </p>
 
                   <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
-                    <span className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
-                      {offer.estimatedDuration}
-                    </span>
+                    {job && isTransportationCategory(job.category) && (
+                      <span className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        {formatCommittedDays(offer.estimatedDuration)}
+                      </span>
+                    )}
                     <span className="flex items-center gap-2">
                       <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
                       {formatJobDate(offer.createdAt)}

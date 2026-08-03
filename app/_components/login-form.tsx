@@ -9,11 +9,12 @@ import { getLegalDocumentMeta, type LegalDocumentId } from "../_lib/legal-docume
 import { STORAGE_WRITE_ERROR_MESSAGE } from "../_lib/local-storage";
 import { validateLoginFields } from "../_lib/login-form-validation";
 import { evaluatePasswordRules } from "../_lib/password-rules";
-import { PROVIDER_DOCUMENT_DECLARATION_TEXT } from "../_lib/provider-document-consents";
+import { isCustomsOnlyRegistration } from "../_lib/customs-license";
+import { CUSTOMS_LICENSE_DECLARATION_TEXT, PROVIDER_DOCUMENT_DECLARATION_TEXT } from "../_lib/provider-document-consents";
 import { registerProviderAccount } from "../_lib/provider-registration";
 import { validateRegisterFormFields, type RegisterFormErrors } from "../_lib/register-form-validation";
 import { setSession } from "../_lib/session";
-import { SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import { GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import type { UserRole } from "../_lib/types";
 import { getDistrictsByProvinceCode, getProvinces } from "../_lib/turkey-locations";
 import { registerUser, seedDevAccountsIfNeeded, verifyLogin } from "../_lib/users";
@@ -108,6 +109,8 @@ export function LoginForm({
   const providerServicesId = useId();
   const providerDocumentsId = useId();
   const documentDeclarationId = useId();
+  const customsLicenseDocumentId = useId();
+  const customsLicenseDeclarationId = useId();
 
   const [mode, setMode] = useState<Mode>(initialMode);
   const [firstName, setFirstName] = useState("");
@@ -127,6 +130,9 @@ export function LoginForm({
   const [providerDocuments, setProviderDocuments] = useState<ReadyProviderDocument[]>([]);
   const [providerDocumentsBusy, setProviderDocumentsBusy] = useState(false);
   const [documentDeclarationAccepted, setDocumentDeclarationAccepted] = useState(false);
+  const [customsLicenseDocument, setCustomsLicenseDocument] = useState<ReadyProviderDocument | null>(null);
+  const [customsLicenseDocumentBusy, setCustomsLicenseDocumentBusy] = useState(false);
+  const [customsLicenseDeclarationAccepted, setCustomsLicenseDeclarationAccepted] = useState(false);
   const [errors, setErrors] = useState<RegisterFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -189,6 +195,43 @@ export function LoginForm({
       clearFieldError("providerDocuments");
       clearFieldError("documentDeclaration");
       setProviderDocuments([]);
+      clearFieldError("customsLicenseDocument");
+      clearFieldError("customsLicenseDeclaration");
+      setCustomsLicenseDocument(null);
+      setCustomsLicenseDeclarationAccepted(false);
+    }
+  }
+
+  // Gümrük Müşavirliği seçimi kaldırıldığında, o hizmete özel belge/beyan
+  // durumu da sıfırlanır (görev gereksinimi: bu alanlar yalnızca hizmet
+  // seçiliyken anlamlıdır) — IndexedDB blob'unun kendisi zaten
+  // ProviderDocumentUpload'ın unmount efektiyle (bu bileşen koşullu render
+  // edildiği için) silinir, burada yalnızca bu formun artık geçersiz olan
+  // referansı bırakılır (handleRoleChange'in providerDocuments için yaptığı
+  // AYNI desen).
+  //
+  // Seçim TAMAMEN Gümrük Müşavirliği'ne dönüştüğünde (bkz.
+  // customs-license.ts#isCustomsOnlyRegistration, TEK doğruluk kaynağı) genel
+  // Faaliyet Belgesi bölümü de aşağıda koşullu olarak GİZLENİR — bu yüzden
+  // aynı AYNI desenle (unmount -> kendi blob'unu siler, burada yalnızca
+  // formun referansı bırakılır) genel belge/beyan durumu da sıfırlanır.
+  // Tersi yönde (Gümrük'e ek bir kategori daha seçilince) bölüm yeniden
+  // MOUNT olur ve zaten boş (`providerDocuments` hâlâ `[]`) başlar — ayrı bir
+  // sıfırlama gerekmez.
+  function handleProviderServicesChange(next: string[]) {
+    setProviderServiceCategoryIds(next);
+    clearFieldError("providerServices");
+    if (!next.includes(GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID)) {
+      clearFieldError("customsLicenseDocument");
+      clearFieldError("customsLicenseDeclaration");
+      setCustomsLicenseDocument(null);
+      setCustomsLicenseDeclarationAccepted(false);
+    }
+    if (isCustomsOnlyRegistration(next)) {
+      clearFieldError("providerDocuments");
+      clearFieldError("documentDeclaration");
+      setProviderDocuments([]);
+      setDocumentDeclarationAccepted(false);
     }
   }
 
@@ -259,6 +302,8 @@ export function LoginForm({
         providerServiceCategoryIds,
         providerDocumentCount: providerDocuments.length,
         documentDeclarationAccepted,
+        hasCustomsLicenseDocument: customsLicenseDocument !== null,
+        customsLicenseDeclarationAccepted,
       });
       setErrors(fieldErrors);
       if (Object.keys(fieldErrors).length > 0) return;
@@ -293,6 +338,16 @@ export function LoginForm({
                 size: doc.size,
               })),
               documentDeclarationAccepted,
+              customsLicenseDocument: customsLicenseDocument
+                ? {
+                    indexedDbStorageKey: customsLicenseDocument.indexedDbStorageKey,
+                    originalFileName: customsLicenseDocument.originalFileName,
+                    mimeType: customsLicenseDocument.mimeType,
+                    extension: customsLicenseDocument.extension,
+                    size: customsLicenseDocument.size,
+                  }
+                : undefined,
+              customsLicenseDeclarationAccepted,
             })
           : await registerUser(baseInput);
       if (!result.ok) {
@@ -723,10 +778,7 @@ export function LoginForm({
                         label={group.label}
                         options={group.categories.map((category) => ({ value: category.id, label: category.label }))}
                         selected={providerServiceCategoryIds}
-                        onChange={(next) => {
-                          setProviderServiceCategoryIds(next);
-                          clearFieldError("providerServices");
-                        }}
+                        onChange={handleProviderServicesChange}
                       />
                     ))}
                   </div>
@@ -737,55 +789,132 @@ export function LoginForm({
                   )}
                 </fieldset>
 
-                <div>
-                  <p className="text-sm font-medium text-foreground">Faaliyet Belgesi veya Faaliyet Raporu Yükle</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Şirketinizin faaliyetini gösteren en az bir belge yükleyin (PDF, Word, Excel, ODT veya görsel
-                    biçimde).
-                  </p>
-                  <div className="mt-3">
-                    <ProviderDocumentUpload
-                      onDocumentsChange={(documents) => {
-                        setProviderDocuments(documents);
-                        clearFieldError("providerDocuments");
-                      }}
-                      onBusyChange={setProviderDocumentsBusy}
-                      disabled={submitting}
-                      errorId={errors.providerDocuments ? `${providerDocumentsId}-error` : undefined}
-                    />
-                  </div>
-                  {errors.providerDocuments && (
-                    <p id={`${providerDocumentsId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                      {errors.providerDocuments}
-                    </p>
-                  )}
-                </div>
+                {/* Genel Faaliyet Belgesi/Raporu bölümü — yalnızca seçilen hizmet
+                    kümesi TAMAMEN Gümrük Müşavirliği'nden ibaret DEĞİLSE
+                    gösterilir (bkz. customs-license.ts#isGeneralDocumentRequired,
+                    TEK doğruluk kaynağı, provider-registration.ts'in veri
+                    katmanı kuralıyla AYNI). Yalnızca Gümrük Müşavirliği
+                    seçiliyken bu bölüm tamamen gizlenir — kullanıcıya aynı
+                    anda iki ayrı zorunlu belge alanı gösterilmez, kendi özel
+                    "Gümrük Müşaviri İzin Belgesi" (aşağıda) tek başına yeterlidir. */}
+                {!isCustomsOnlyRegistration(providerServiceCategoryIds) && (
+                  <>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Faaliyet Belgesi veya Faaliyet Raporu Yükle</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Şirketinizin faaliyetini gösteren en az bir belge yükleyin (PDF, Word, Excel, ODT veya görsel
+                        biçimde).
+                      </p>
+                      <div className="mt-3">
+                        <ProviderDocumentUpload
+                          onDocumentsChange={(documents) => {
+                            setProviderDocuments(documents);
+                            clearFieldError("providerDocuments");
+                          }}
+                          onBusyChange={setProviderDocumentsBusy}
+                          disabled={submitting}
+                          errorId={errors.providerDocuments ? `${providerDocumentsId}-error` : undefined}
+                        />
+                      </div>
+                      {errors.providerDocuments && (
+                        <p id={`${providerDocumentsId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                          {errors.providerDocuments}
+                        </p>
+                      )}
+                    </div>
 
-                <div>
-                  <label
-                    htmlFor={documentDeclarationId}
-                    className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-                  >
-                    <input
-                      id={documentDeclarationId}
-                      type="checkbox"
-                      checked={documentDeclarationAccepted}
-                      onChange={(event) => {
-                        setDocumentDeclarationAccepted(event.target.checked);
-                        clearFieldError("documentDeclaration");
-                      }}
-                      aria-invalid={errors.documentDeclaration ? true : undefined}
-                      aria-describedby={errors.documentDeclaration ? `${documentDeclarationId}-error` : undefined}
-                      className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                    />
-                    <span className="text-sm leading-relaxed text-foreground">{PROVIDER_DOCUMENT_DECLARATION_TEXT}</span>
-                  </label>
-                  {errors.documentDeclaration && (
-                    <p id={`${documentDeclarationId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                      {errors.documentDeclaration}
-                    </p>
-                  )}
-                </div>
+                    <div>
+                      <label
+                        htmlFor={documentDeclarationId}
+                        className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
+                      >
+                        <input
+                          id={documentDeclarationId}
+                          type="checkbox"
+                          checked={documentDeclarationAccepted}
+                          onChange={(event) => {
+                            setDocumentDeclarationAccepted(event.target.checked);
+                            clearFieldError("documentDeclaration");
+                          }}
+                          aria-invalid={errors.documentDeclaration ? true : undefined}
+                          aria-describedby={errors.documentDeclaration ? `${documentDeclarationId}-error` : undefined}
+                          className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
+                        />
+                        <span className="text-sm leading-relaxed text-foreground">{PROVIDER_DOCUMENT_DECLARATION_TEXT}</span>
+                      </label>
+                      {errors.documentDeclaration && (
+                        <p id={`${documentDeclarationId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                          {errors.documentDeclaration}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {providerServiceCategoryIds.includes(GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID) && (
+                  <>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Gümrük Müşaviri İzin Belgesi</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Gümrük Müşavirliği hizmeti verebilmek için izin belgenizi yükleyin (PDF, JPG veya PNG).
+                      </p>
+                      <div className="mt-3">
+                        <ProviderDocumentUpload
+                          onDocumentsChange={(documents) => {
+                            setCustomsLicenseDocument(documents[0] ?? null);
+                            clearFieldError("customsLicenseDocument");
+                          }}
+                          onBusyChange={setCustomsLicenseDocumentBusy}
+                          disabled={submitting}
+                          errorId={errors.customsLicenseDocument ? `${customsLicenseDocumentId}-error` : undefined}
+                          allowedExtensions={["pdf", "jpg", "jpeg", "png"]}
+                          maxFiles={1}
+                          dropHintText="Gümrük Müşaviri İzin Belgenizi buraya sürükleyin veya dosya seçin."
+                          formatsHintText="PDF, JPG, PNG"
+                        />
+                      </div>
+                      {errors.customsLicenseDocument && (
+                        <p id={`${customsLicenseDocumentId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                          {errors.customsLicenseDocument}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor={customsLicenseDeclarationId}
+                        className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
+                      >
+                        <input
+                          id={customsLicenseDeclarationId}
+                          type="checkbox"
+                          checked={customsLicenseDeclarationAccepted}
+                          onChange={(event) => {
+                            setCustomsLicenseDeclarationAccepted(event.target.checked);
+                            clearFieldError("customsLicenseDeclaration");
+                          }}
+                          aria-invalid={errors.customsLicenseDeclaration ? true : undefined}
+                          aria-describedby={
+                            errors.customsLicenseDeclaration ? `${customsLicenseDeclarationId}-error` : undefined
+                          }
+                          className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
+                        />
+                        <span className="text-sm leading-relaxed text-foreground">
+                          {CUSTOMS_LICENSE_DECLARATION_TEXT}
+                        </span>
+                      </label>
+                      {errors.customsLicenseDeclaration && (
+                        <p
+                          id={`${customsLicenseDeclarationId}-error`}
+                          role="alert"
+                          className="mt-2 text-sm text-danger"
+                        >
+                          {errors.customsLicenseDeclaration}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </>
@@ -835,7 +964,8 @@ export function LoginForm({
           // zinciri henüz tamamlanmadıysa) gönderim kilitlenir — aksi halde
           // henüz "ready" olmamış bir belge sessizce listeden düşmüş gibi
           // kaydedilebilirdi.
-          const providerBusy = mode === "kayit" && role === "hizmet-veren" && providerDocumentsBusy;
+          const providerBusy =
+            mode === "kayit" && role === "hizmet-veren" && (providerDocumentsBusy || customsLicenseDocumentBusy);
           const isSubmitDisabled = submitting || providerBusy;
           return (
             <button
@@ -869,6 +999,7 @@ export function LoginForm({
             <p>Hizmet Veren: mert@test.com / Mert123!</p>
             <p>Hizmet Veren: mehmet.demir.demo@malsevk.com / Demo123!</p>
             <p>Nakliyeci: nakliyeci@test.com / Nakliye123!</p>
+            <p>Gümrük Müşaviri: gumrukdemo@malsevk.demo / Demo1234!</p>
             <p>Admin (Belge Kontrolü): admin@test.com / Admin123!</p>
           </div>
         )}

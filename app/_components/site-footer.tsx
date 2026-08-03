@@ -1,10 +1,7 @@
 "use client";
 
-import { Anchor } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
-import { getAllLegalDocuments, type LegalDocumentId } from "../_lib/legal-documents";
-import { LegalDocumentModal } from "./legal-document-modal";
+import { getAllLegalDocuments } from "../_lib/legal-documents";
 
 const platformLinks = [
   { href: "/", label: "Ana Sayfa" },
@@ -46,20 +43,18 @@ function FooterLinkList({
 }
 
 /**
- * "Yasal" bağlantıları — artık "Yakında" rozetiyle pasif değil, GERÇEKTEN
- * tıklanabilir. Her bağlantının `href`i o belgenin bağımsız sayfasına
- * (bkz. legal-documents.ts#routePath) işaret eder — bu, sağ tık/orta
- * tık/yeni sekme/klavye ile Ctrl+Enter gibi tüm "varsayılan gezinme"
- * senaryolarının GERÇEKTEN çalışmasını sağlar (boş/kırık bağlantı yok).
- * Sıradan bir sol tıkta ise `onClick` `preventDefault()` çağırır ve sayfaya
- * gitmek yerine `legal-document-modal.tsx`yi açar — bkz. görev gereksinimi
- * ("kullanıcı yeni sayfaya gitmesin"). Değiştirici tuşla (Ctrl/Cmd/Shift/Alt)
- * veya orta tıkla yapılan tıklamalar KASITLI olarak engellenmez — tarayıcının
- * "yeni sekmede aç" gibi standart davranışları bu sayede bozulmaz.
+ * "Bize Ulaşın" ve "Yasal" bağlantılarının TÜMÜ düz `<Link>`lerdir — hiçbiri
+ * modal/dialog/pop-up AÇMAZ (görev tanımı: önceki modal kararı iptal
+ * edildi; bkz. app/bize-ulasin/page.tsx, app/gizlilik-politikasi/page.tsx
+ * vb. bağımsız sayfalar). Her bağlantı kendi gerçek rotasına gider —
+ * sağ tık/orta tık/yeni sekme/klavye ile Ctrl+Enter gibi tüm "varsayılan
+ * gezinme" senaryoları normal bir `<Link>`te olduğu gibi çalışır, ayrıca
+ * bir `onClick`/`preventDefault` müdahalesi YOKTUR. Oturum durumundan
+ * (giriş yapılmış/yapılmamış) bağımsız olarak her zaman aynı yerde
+ * render edilir.
  */
 export function SiteFooter() {
   const year = new Date().getFullYear();
-  const [openDocumentId, setOpenDocumentId] = useState<LegalDocumentId | null>(null);
   const legalDocuments = getAllLegalDocuments();
 
   return (
@@ -68,15 +63,25 @@ export function SiteFooter() {
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-3 sm:col-span-2 lg:col-span-1">
             <div className="flex items-center gap-2">
-              <Anchor className="h-5 w-5" aria-hidden="true" />
               <span className="text-lg font-semibold tracking-tight">
-                MALSEVK.COM
+                MALSEVK.com
               </span>
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-primary-foreground/75">
               Lojistik hizmet alan firmalar ile uzman hizmet verenleri
               buluşturan profesyonel platform.
             </p>
+            {/*
+              Bize Ulaşın'a erişim BİLEREK yalnızca burada (footer'ın sol
+              marka/açıklama kolonu) sağlanır — üst menü/profil menüsü/mobil
+              menü/panel menüleri gibi tekrarlayan navigasyon alanlarının
+              hiçbirinde YOKTUR ve olmamalıdır (görev tanımı: "Bize Ulaşın"
+              yalnızca footer'da bulunacak). `app/bize-ulasin/page.tsx`e
+              giden GERÇEK bir sayfa bağlantısıdır — modal AÇMAZ.
+            */}
+            <Link href="/bize-ulasin" className={footerLinkClass}>
+              Bize Ulaşın
+            </Link>
           </div>
           <FooterLinkList heading="Platform" links={platformLinks} />
           <FooterLinkList heading="Hesap" links={accountLinks} />
@@ -87,21 +92,7 @@ export function SiteFooter() {
             <ul className="flex flex-col gap-2">
               {legalDocuments.map((document) => (
                 <li key={document.id}>
-                  <Link
-                    href={document.routePath}
-                    className={footerLinkClass}
-                    onClick={(event) => {
-                      const isPlainLeftClick =
-                        event.button === 0 &&
-                        !event.metaKey &&
-                        !event.ctrlKey &&
-                        !event.shiftKey &&
-                        !event.altKey;
-                      if (!isPlainLeftClick) return;
-                      event.preventDefault();
-                      setOpenDocumentId(document.id);
-                    }}
-                  >
+                  <Link href={document.routePath} className={footerLinkClass}>
                     {document.title}
                   </Link>
                 </li>
@@ -111,14 +102,10 @@ export function SiteFooter() {
         </div>
         <div className="mt-12 border-t border-white/10 pt-6">
           <p className="text-xs text-primary-foreground/60">
-            © {year} MALSEVK.COM. Tüm hakları saklıdır.
+            © {year} MALSEVK.com. Tüm hakları saklıdır.
           </p>
         </div>
       </div>
-
-      {openDocumentId && (
-        <LegalDocumentModal documentId={openDocumentId} mode="readonly" onClose={() => setOpenDocumentId(null)} />
-      )}
     </footer>
   );
 }

@@ -1,6 +1,23 @@
+import { isCustomsBrokerageCategory } from "./customs-brokerage-catalog";
+import { isStorageOnlyLocationCategory } from "./service-catalog";
 import { getFacilitiesByProvinceAndDistrict, getDistrictId, getFacilityTypeLabel, type Facility } from "./turkey-locations";
 import { foldTurkish, slugifyTurkish } from "./turkish-text";
 import type { Job } from "./types";
+
+/**
+ * Depolama (Kapalı/Açık Saha) VE Gümrük Müşavirliği için lokasyon artık
+ * yalnızca İl/İlçe'den oluşur — "Ana hizmetle aynı lokasyon", Liman/Sanayi/OSB,
+ * Açık Adres ve (Gümrük'ün eski) Bölge-Mahalle/Konum Bağlantısı/Adres Tarifi
+ * alanları hiç render edilmez/toplanmaz. TEK doğruluk kaynağı: job-store.ts#
+ * resolveLocationFields, job-form-validation.ts, job-request-form.tsx,
+ * job-edit-form.tsx hepsi BU fonksiyonu çağırır — hiçbiri kendi kategori
+ * listesini tutmaz. Depolama ve Gümrük Müşavirliği'nin birbiriyle hiçbir
+ * ilgisi yok (ayrı hizmet grupları) — burada birleşmeleri yalnızca "bu iki
+ * grup artık aynı sade konum modelini paylaşıyor" gerçeğini yansıtır.
+ */
+export function isSimplifiedLocationCategory(categoryId: string): boolean {
+  return isStorageOnlyLocationCategory(categoryId) || isCustomsBrokerageCategory(categoryId);
+}
 
 /**
  * job-request-form.tsx/job-edit-form.tsx'in Bölge/Tesis SearchableSelect'inde
@@ -11,8 +28,28 @@ import type { Job } from "./types";
  */
 export const FACILITY_FREE_TEXT_VALUE = "__diger__";
 
-/** job-request-form.tsx/job-edit-form.tsx'teki özel tesis seçeneğinin görünen etiketi — tek yerde tanımlanır, ikisi de aynı metni kullanır. */
+/**
+ * job-request-form.tsx/job-edit-form.tsx'teki özel tesis seçeneğinin görünen
+ * etiketi — Gümrük Müşavirliği'nin kendi (bu değişiklikten ÖNCEKİ, aynen
+ * korunan) konum bloğuna ÖZELDİR (bkz. görev tanımı madde 9/14) —
+ * toFacilitySelectOptions'ın varsayılan etiketi budur. Gümrük Müşavirliği
+ * DIŞINDAKİ TÜM kategoriler artık STANDARD_MANUAL_FACILITY_OPTION_LABEL'ı
+ * kullanır (aşağıda) — ikisi BİLEREK AYRI tutulur, tek bir metne
+ * birleştirilmez.
+ */
 export const CUSTOM_FACILITY_OPTION_LABEL = "Listede yok — tesis bilgilerini kendim gireceğim";
+
+/**
+ * Bir "Liman / Sanayi / OSB" combobox'ındaki manuel-giriş seçeneğinin görünen
+ * etiketi — Gümrük Müşavirliği HARİÇ platformdaki TÜM konum seçicileri
+ * (Nakliye DIŞI kategorilerin job-request-form.tsx/job-edit-form.tsx'teki
+ * kendi alanı VE Nakliye'nin Yük Alınacak Yer/Teslim Edilecek Yer'i, bkz.
+ * nakliye-route.ts#NAKLIYE_MANUAL_LOCATION_OPTION_LABEL'ın bunu yeniden dışa
+ * aktarması) aynı metni kullanır. Gümrük Müşavirliği kendi eski
+ * CUSTOM_FACILITY_OPTION_LABEL'ını (yukarıda) kullanmaya devam eder — bkz.
+ * görev tanımı madde 9/14.
+ */
+export const STANDARD_MANUAL_FACILITY_OPTION_LABEL = "Listede yok, kendim gireceğim";
 
 /** searchable-select.tsx#SearchableSelectOption ile yapısal olarak aynı — _lib, _components'e bağımlı olmasın diye burada ayrıca tanımlanır (job-listing-filters.ts#FilterOption ile aynı desen). */
 export type FacilitySelectOption = { value: string; label: string; hint?: string; keywords?: string[] };
@@ -22,9 +59,15 @@ export type FacilitySelectOption = { value: string; label: string; hint?: string
  * alfabetik sıralı + sona eklenen "Listede yok / Diğer" seçeneğiyle birlikte
  * SearchableSelect seçeneklerine çevirir. `hint` = tesis türü etiketi (ör.
  * "Liman") — yalnızca görsel bir ayraç, arama `keywords` (takma adlar)
- * üzerinden çalışır.
+ * üzerinden çalışır. `manualOptionLabel` varsayılan olarak Gümrük
+ * Müşavirliği'nin eski CUSTOM_FACILITY_OPTION_LABEL'ıdır — Gümrük Müşavirliği
+ * DIŞINDAKİ kategoriler çağırırken STANDARD_MANUAL_FACILITY_OPTION_LABEL'ı
+ * AÇIKÇA geçer (bkz. job-request-form.tsx/job-edit-form.tsx).
  */
-export function toFacilitySelectOptions(facilities: Facility[]): FacilitySelectOption[] {
+export function toFacilitySelectOptions(
+  facilities: Facility[],
+  manualOptionLabel: string = CUSTOM_FACILITY_OPTION_LABEL,
+): FacilitySelectOption[] {
   return [
     ...facilities
       .map((facility) => ({
@@ -34,7 +77,7 @@ export function toFacilitySelectOptions(facilities: Facility[]): FacilitySelectO
         keywords: facility.aliases,
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "tr")),
-    { value: FACILITY_FREE_TEXT_VALUE, label: CUSTOM_FACILITY_OPTION_LABEL },
+    { value: FACILITY_FREE_TEXT_VALUE, label: manualOptionLabel },
   ];
 }
 
@@ -83,7 +126,15 @@ export function resolveJobFacility(job: Job): Facility | null {
 export type JobLocationSummary = {
   /** job.companyOrFactoryName, trim'lenmiş; boş/yok ise null (asla ""). */
   companyOrFactoryName: string | null;
-  /** Bölge/Tesis görünen adı — resolveJobFacility bulabiliyorsa Facility.name, bulamıyorsa job.workLocationType aynen (her zaman dolu, zorunlu bir alan). */
+  /**
+   * Bölge/Tesis görünen adı — resolveJobFacility bulabiliyorsa Facility.name,
+   * bulamıyorsa job.workLocationType aynen. Depolama/Gümrük Müşavirliği
+   * (bkz. isSimplifiedLocationCategory) için `workLocationType` artık hep
+   * `""`dir, bu yüzden bu alan da o iki kategoride HER ZAMAN boş string olur
+   * — tüketiciler (formatJobLocationLine, job-listing-table.tsx/cards.tsx)
+   * bunu "gösterilecek tesis adı yok" olarak ele alır, asla "undefined"
+   * göstermez.
+   */
   facilityDisplayName: string;
   /** Yalnızca resolveJobFacility bir Facility bulabiliyorsa dolu; serbest metin/eski ilanlarda null. */
   facilityTypeLabel: string | null;
@@ -106,9 +157,13 @@ export function getJobLocationSummary(job: Job): JobLocationSummary {
  * Kısa tek satır özet — kart/liste bağlamları için. Firma adı BİLEREK
  * dışarıda bırakılır (kart/liste bağlamları firma adını ayrı, kendi
  * satırında gösterir — bkz. job-listing-row.ts/job-listing-table.tsx).
- * Örnek: "İMES OSB • Dilovası / Kocaeli".
+ * Örnek: "İMES OSB • Dilovası / Kocaeli". Depolama/Gümrük Müşavirliği'nde
+ * (bkz. isSimplifiedLocationCategory) gösterilecek bir tesis adı hiç
+ * olmadığından (facilityDisplayName == "") "•" ayracı da hiç eklenmez —
+ * yalnızca "Dilovası / Kocaeli" döner.
  */
 export function formatJobLocationLine(job: Job): string {
   const summary = getJobLocationSummary(job);
+  if (!summary.facilityDisplayName) return `${summary.district} / ${summary.province}`;
   return `${summary.facilityDisplayName} • ${summary.district} / ${summary.province}`;
 }

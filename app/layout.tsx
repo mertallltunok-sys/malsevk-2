@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { NavigationHistoryTracker } from "./_components/navigation-history-tracker";
 import { SiteFooter } from "./_components/site-footer";
 import { SiteHeader } from "./_components/site-header";
+import { WhatsappSupportButton } from "./_components/whatsapp-support-button";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,9 +46,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col font-sans">
+        <NavigationHistoryTracker />
         <SiteHeader />
         <main className="flex-1">{children}</main>
         <SiteFooter />
+        <WhatsappSupportButton />
       </body>
     </html>
   );

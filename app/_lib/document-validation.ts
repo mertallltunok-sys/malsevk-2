@@ -30,7 +30,15 @@ export type DocumentExtension =
   | "tif"
   | "tiff";
 
-const ALLOWED_EXTENSIONS: readonly DocumentExtension[] = [
+/**
+ * Bir yükleme alanının kabul ettiği TAM uzantı kümesi — dışa aktarılır ki
+ * (ör. provider-document-upload.tsx#allowedExtensions varsayılanı) bu
+ * kümenin bir KOPYASI başka bir dosyada elle yeniden yazılmasın; daha DAR
+ * bir alt küme isteyen bir çağıran (ör. Gümrük Müşaviri İzin Belgesi:
+ * yalnızca PDF/JPG/JPEG/PNG) kendi listesini burada TANIMLAMAZ, doğrudan
+ * kısıtlı bir alt dizi geçirir.
+ */
+export const ALLOWED_EXTENSIONS: readonly DocumentExtension[] = [
   "pdf",
   "doc",
   "docx",

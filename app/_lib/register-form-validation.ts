@@ -1,4 +1,5 @@
 import { isCompanyType } from "./company-type";
+import { isCustomsBrokerProvider, isGeneralDocumentRequired } from "./customs-license";
 import { isValidEmail } from "./login-form-validation";
 import { isPasswordValid } from "./password-rules";
 import { normalizePhoneNumber } from "./phone";
@@ -31,6 +32,10 @@ export type RegisterFormErrors = Partial<{
   providerDocuments: string;
   /** Yalnızca role "hizmet-veren" iken doğrulanır — bkz. "Belge Doğruluk Beyanı". */
   documentDeclaration: string;
+  /** Yalnızca Gümrük Müşavirliği seçiliyken doğrulanır — bkz. "Gümrük Müşaviri İzin Belgesi". */
+  customsLicenseDocument: string;
+  /** Yalnızca Gümrük Müşavirliği seçiliyken doğrulanır — bkz. "Yüklediğim belge bana aittir ve günceldir." */
+  customsLicenseDeclaration: string;
 }>;
 
 export type RegisterFormValidation = {
@@ -57,6 +62,10 @@ export function validateRegisterFormFields(fields: {
   providerDocumentCount: number;
   /** Yalnızca role "hizmet-veren" iken anlamlıdır. */
   documentDeclarationAccepted: boolean;
+  /** Yalnızca role "hizmet-veren" VE Gümrük Müşavirliği seçiliyken anlamlıdır. */
+  hasCustomsLicenseDocument: boolean;
+  /** Yalnızca role "hizmet-veren" VE Gümrük Müşavirliği seçiliyken anlamlıdır. */
+  customsLicenseDeclarationAccepted: boolean;
 }): RegisterFormValidation {
   const errors: RegisterFormErrors = {};
 
@@ -118,18 +127,38 @@ export function validateRegisterFormFields(fields: {
       errors.district = "İlçe zorunludur.";
     }
 
-    // Hizmet seçimi/belge yükleme/beyan yalnızca Hizmet Veren için zorunludur
-    // (görev gereksinimi) — Hizmet Alan akışı bu üç alanı hiç görmez/hiç
-    // doğrulanmaz.
+    // Hizmet seçimi yalnızca Hizmet Veren için zorunludur (görev
+    // gereksinimi) — Hizmet Alan akışı bu alanı hiç görmez/hiç doğrulanmaz.
     if (fields.role === "hizmet-veren") {
       if (fields.providerServiceCategoryIds.length === 0) {
         errors.providerServices = "En az bir hizmet seçmelisiniz.";
       }
-      if (fields.providerDocumentCount === 0) {
-        errors.providerDocuments = "En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz.";
+
+      // Genel Faaliyet Belgesi/Raporu zorunluluğu — yalnızca seçilen hizmet
+      // kümesi TAMAMEN Gümrük Müşavirliği'nden ibaretse atlanır (bkz.
+      // customs-license.ts#isGeneralDocumentRequired, TEK doğruluk kaynağı,
+      // provider-registration.ts'in veri katmanı doğrulamasıyla AYNI kural).
+      // Başka bir kategori de seçiliyse (ör. Gümrük + Lashing) bu kural
+      // diğer kategoriler için aynen geçerli kalır.
+      if (isGeneralDocumentRequired(fields.providerServiceCategoryIds)) {
+        if (fields.providerDocumentCount === 0) {
+          errors.providerDocuments = "En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz.";
+        }
+        if (!fields.documentDeclarationAccepted) {
+          errors.documentDeclaration = "Belge doğruluk beyanını kabul etmelisiniz.";
+        }
       }
-      if (!fields.documentDeclarationAccepted) {
-        errors.documentDeclaration = "Belge doğruluk beyanını kabul etmelisiniz.";
+
+      // Gümrük Müşavirliği ek KYC gereksinimi (bkz. customs-license.ts) —
+      // Gümrük Müşavirliği seçili olduğu sürece (tek başına veya başka
+      // kategorilerle birlikte) her zaman zorunludur.
+      if (isCustomsBrokerProvider(fields.providerServiceCategoryIds)) {
+        if (!fields.hasCustomsLicenseDocument) {
+          errors.customsLicenseDocument = "Gümrük Müşaviri İzin Belgesi yüklemelisiniz.";
+        }
+        if (!fields.customsLicenseDeclarationAccepted) {
+          errors.customsLicenseDeclaration = "Yüklediğiniz belgenin size ait ve güncel olduğunu onaylamalısınız.";
+        }
       }
     }
   }

@@ -130,6 +130,18 @@ export function OperationStatusCard({
             allowOfferAction: !isCurrent,
           });
 
+          // Satır ızgarası (grid, `flex flex-wrap` DEĞİL) — kök neden düzeltmesi
+          // (görev tanımı): `flex-wrap`'te satır kırma kararı çocukların
+          // HİPOTETİK (küçültülmeden ÖNCEKİ, doğal) genişliğine göre verilir,
+          // `min-w-0`/`truncate` bu kararı ETKİLEMEZ — bu yüzden uzun bir
+          // hizmet başlığı/açıklaması, sağdaki "Teklif Ver" butonunu sola/alta
+          // kaydırıyordu. `grid-cols-[minmax(0,1fr)_auto]` bunun yerine sabit
+          // iki KOLON tanımlar: sol kolon 0'a kadar küçülüp `truncate`
+          // edebilir, sağ kolon içeriğine göre boyutlanır ve ASLA sıkışmaz —
+          // masaüstünde satır kırma diye bir kavram yoktur. Mobilde
+          // (`grid-cols-1`) ikisi ayrı satıra düşer, `justify-self-end` sağ
+          // kolonu (hem mobildeki kendi tam-genişlik satırında hem
+          // masaüstündeki auto kolonda) sağa hizalı tutar.
           const rowContent = (
             <>
               <div className="min-w-0">
@@ -141,7 +153,7 @@ export function OperationStatusCard({
                   {isCurrent && <span> (Bu ilan)</span>}
                 </p>
               </div>
-              <div className="shrink-0">
+              <div className="shrink-0 justify-self-end">
                 {status.kind === "teklif-ver" ? (
                   <span className="inline-flex items-center justify-center whitespace-nowrap rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground">
                     Teklif Ver
@@ -155,7 +167,7 @@ export function OperationStatusCard({
 
           if (isCurrent) {
             return (
-              <li key={operationJob.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+              <li key={operationJob.id} className="grid grid-cols-1 items-center gap-x-3 gap-y-1 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto]">
                 {rowContent}
               </li>
             );
@@ -165,7 +177,7 @@ export function OperationStatusCard({
             <li key={operationJob.id}>
               <Link
                 href={`/ilanlar/${operationJob.id}`}
-                className="-mx-2 flex flex-wrap items-center justify-between gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="-mx-2 grid grid-cols-1 items-center gap-x-3 gap-y-1 rounded-md px-2 py-2.5 transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:grid-cols-[minmax(0,1fr)_auto]"
               >
                 {rowContent}
               </Link>

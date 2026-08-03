@@ -54,8 +54,14 @@ async function main() {
   await page.waitForURL(`${BASE_URL}/ilanlar/ilan-001`);
   ok("Hizmet Veren (mert@test.com) girişi çalışıyor");
 
+  // "Tamamlanması Taahhüt Edilen Gün" artık yalnızca Nakliye kategorisindeki
+  // ilanlarda gösteriliyor (bkz. CLAUDE.md/görev tanımı) — ilan-001 kategorisi
+  // Lashing olduğu için bu alan artık BİLEREK render edilmiyor, bu yüzden
+  // burada hiç doldurulmaz/aranmaz.
   await page.getByLabel("Teklif Fiyatı").fill("2500");
-  await page.getByLabel("Tahmini Hizmet Süresi").fill("2 gün");
+  await assert.rejects(
+    page.getByLabel("Tamamlanması Taahhüt Edilen Gün").waitFor({ state: "visible", timeout: 2000 }),
+  );
   await page
     .getByLabel("Teklif Açıklaması")
     .fill("Bu teklif otomatik regresyon testi tarafından oluşturulmuştur, en az yirmi karakter içerir.");
@@ -67,14 +73,15 @@ async function main() {
 
   // 3b) Oturum açıkken /ilanlar hâlâ gerçek listelemeyi gösteriyor (gate değil).
   // "Konteyner Sahasında Lashing Operasyonu" (ilan-001) DEĞİL — o İzmir'de,
-  // İl filtresi artık sabit/readonly Kocaeli olduğu için (bkz. CLAUDE.md
-  // "Provider job listing") Aktif İlanlar listesinde bilerek hiç görünmez.
-  // Kocaeli'deki sabit örnek ilanı (ilan-002) kontrol edilir.
+  // İl filtresi artık Türkiye geneli serbestçe seçilebilir olsa da varsayılan
+  // başlangıç değeri hâlâ Kocaeli'dir (bkz. job-listing-filters.ts)
+  // ve bu test filtreyi hiç değiştirmez — bu yüzden Aktif İlanlar listesinde
+  // hâlâ görünmez. Kocaeli'deki sabit örnek ilanı (ilan-002) kontrol edilir.
   await page.goto(`${BASE_URL}/ilanlar`);
   await assert.doesNotReject(
     page.getByText("Fabrika Sahasında Forklift Operatörü İhtiyacı").waitFor({ state: "visible", timeout: 10000 }),
   );
-  ok("Oturum açık Hizmet Veren için /ilanlar gerçek listelemeyi gösteriyor (Kocaeli-filtreli)");
+  ok("Oturum açık Hizmet Veren için /ilanlar gerçek listelemeyi gösteriyor (varsayılan Kocaeli filtreli)");
 
   // 4) Rol yetkisi: Hizmet Veren ilan oluşturma formunu göremez (fotoğraf öncesi de böyleydi)
   await page.goto(`${BASE_URL}/hizmet-talebi-olustur`);
@@ -83,36 +90,34 @@ async function main() {
   );
   ok("Rol yetkisi: Hizmet Veren hâlâ ilan oluşturamıyor");
 
-  // 5) Lokasyon seçimi: Hizmet Alan olarak giriş yap, İl/İlçe/Bölge-Tesis
+  // 5) Lokasyon seçimi: Hizmet Alan olarak giriş yap, İl/İlçe/Liman-Sanayi-OSB
   // seçimi çalışıyor (2026-07-25: "İşin Yapılacağı Yer Türü" ayrı adımı
-  // kaldırıldı, tek bir "Bölge / Tesis" seçiciyle birleştirildi).
-  // 2026-07-26: MALSEVK yalnızca Kocaeli'de hizmet verdiği için İl artık
-  // seçilemez, sabit/readonly "Kocaeli" gösterimidir (bkz. job-request-form.tsx) —
-  // bu adım artık bir SearchableSelect'e tıklamak yerine sabit metnin
-  // göründüğünü doğrular, İlçe -> Bölge/Tesis akışı değişmeden devam eder.
+  // kaldırıldı, tek bir "Liman / Sanayi / OSB" seçiciyle birleştirildi).
+  // Türkiye Geneli İl/İlçe: İl artık Nakliye DIŞINDAKİ hizmetlerde de gerçek
+  // bir SearchableSelect'tir, Kocaeli yalnızca başlangıç varsayılanıdır (bkz.
+  // job-request-form.tsx) — bu adım İl'in seçilebilir olduğunu VE varsayılan
+  // olarak Kocaeli geldiğini doğrular, İlçe -> Liman / Sanayi / OSB akışı
+  // değişmeden devam eder.
   await page.goto(`${BASE_URL}/giris-yap?redirect=/hizmet-talebi-olustur`);
   await page.locator('input[type="email"]').fill("zeynep@test.com");
   await page.locator('input[type="password"]').fill("Zeynep1!");
   await page.getByRole("button", { name: "Giriş Yap" }).click();
   await page.waitForURL(`${BASE_URL}/hizmet-talebi-olustur`);
-  await assert.doesNotReject(
-    page.getByText("Kocaeli", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 }),
-  );
-  assert.equal(
-    await page.getByRole("button", { name: "İl", exact: true }).count(),
-    0,
-    "İl artık seçilebilir bir SearchableSelect olmamalı",
-  );
-  await page.getByRole("button", { name: "İlçe", exact: true }).click();
+  const provinceButton = page.getByRole("button", { name: "İl", exact: true }).first();
+  await assert.doesNotReject(provinceButton.waitFor({ state: "visible", timeout: 5000 }));
+  const provinceButtonText = await provinceButton.innerText();
+  assert.match(provinceButtonText, /Kocaeli/);
+  ok("İl artık seçilebilir bir SearchableSelect, varsayılan olarak Kocaeli geliyor (kilitli/readonly değil)");
+  await page.getByRole("button", { name: "İlçe", exact: true }).first().click();
   await page.locator('ul[aria-label="İlçe"]').getByRole("option", { name: "Dilovası", exact: true }).click();
-  await page.getByRole("button", { name: "Bölge / Tesis", exact: true }).click();
+  await page.getByRole("button", { name: "Liman / Sanayi / OSB", exact: true }).first().click();
   await assert.doesNotReject(
     page
-      .locator('ul[aria-label="Bölge / Tesis"]')
+      .locator('ul[aria-label="Liman / Sanayi / OSB"]')
       .getByRole("option", { name: "Beldeport", exact: false })
       .waitFor({ state: "visible", timeout: 5000 }),
   );
-  ok("Lokasyon seçimi (İl artık sabit Kocaeli, İlçe -> Bölge/Tesis, Beldeport dahil) hâlâ doğru çalışıyor");
+  ok("Lokasyon seçimi (İl seçilebilir/varsayılan Kocaeli, İlçe -> Liman / Sanayi / OSB, Beldeport dahil) hâlâ doğru çalışıyor");
 
   if (consoleErrors.length > 0) {
     console.log("\n[browser-test-regression] UYARI: Konsolda hata yakalandı:");

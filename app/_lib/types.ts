@@ -73,7 +73,8 @@ export type ProviderProfile = {
   experienceRange?: ExperienceRange;
 };
 
-export type Currency = "TRY" | "USD";
+/** Bkz. money.ts#CURRENCY_VALUES/isValidCurrency/getCurrencyLabel — TEK doğruluk kaynağı, hiçbir dosya "TRY"/"USD"/"EUR" değerlerini kendi başına elle karşılaştırmaz. */
+export type Currency = "TRY" | "USD" | "EUR";
 
 export type JobStatus = "yayinda" | "tamamlandi" | "iptal";
 
@@ -95,15 +96,32 @@ export type JobPhoto = {
   storageKey: string;
 };
 
+/**
+ * Gümrük Müşavirliği ilanına eklenen destekleyici bir evrak — JobPhoto ile
+ * BİREBİR aynı şekil (aynı depo, aynı persist/rollback yardımcıları,
+ * job-store.ts#persistPhotosOrRollback ikisi için de tekrar kullanılır) —
+ * yalnızca semantik netlik için ayrı bir isimle dışa aktarılır. `order`
+ * evraklar için anlamsızdır (sıralama yok) ama tip uyumluluğu için taşınır.
+ */
+export type JobCustomsDocument = JobPhoto;
+
 export type Job = {
   id: string;
   title: string;
   category: string;
   province: string;
   district: string;
-  /** Bölge/Tesis GÖRÜNEN adı — `facilityId` doluysa o tesisin adının kopyası, "Listede yok / Diğer" seçilmişse (ya da facilityId'den önce oluşturulmuş eski ilanlarda) serbest metin. */
+  /**
+   * Bölge/Tesis GÖRÜNEN adı — `facilityId` doluysa o tesisin adının kopyası,
+   * "Listede yok / Diğer" seçilmişse (ya da facilityId'den önce oluşturulmuş
+   * eski ilanlarda) serbest metin. Depolama (Kapalı/Açık Saha) VE Gümrük
+   * Müşavirliği'nde (bkz. job-location.ts#isSimplifiedLocationCategory) HER
+   * ZAMAN `""`dır — bu iki grubun lokasyonu yalnızca İl/İlçe'den oluşur,
+   * gösterilecek bir tesis/bölge adı yoktur (bkz. job-location.ts#
+   * formatJobLocationLine'ın boş değeri nasıl atladığı).
+   */
   workLocationType: string;
-  /** turkey-locations.ts#Facility.id — yalnızca Bölge/Tesis alanında merkezi katalogdan bir tesis seçildiyse vardır. "Listede yok / Diğer" seçilmişse ya da bu alandan ÖNCE oluşturulmuş ilanlarda yoktur; bu durumda workLocationType serbest metindir ve job-location.ts#resolveJobFacility ad/takma-ad eşleştirmesiyle en iyi çaba ile bir Facility'e bağlamayı dener. */
+  /** turkey-locations.ts#Facility.id — yalnızca Bölge/Tesis alanında merkezi katalogdan bir tesis seçildiyse vardır. "Listede yok / Diğer" seçilmişse, bu alandan ÖNCE oluşturulmuş ilanlarda, ya da Depolama/Gümrük Müşavirliği'nde (bkz. isSimplifiedLocationCategory) yoktur; bu durumda workLocationType serbest metindir ve job-location.ts#resolveJobFacility ad/takma-ad eşleştirmesiyle en iyi çaba ile bir Facility'e bağlamayı dener. */
   facilityId?: string;
   /** "Firma / Fabrika Adı". Bu alandan ÖNCE oluşturulmuş ilanlarda yoktur. */
   companyOrFactoryName?: string;
@@ -113,7 +131,8 @@ export type Job = {
    * teklif "meşgul" (bkz. job-requests.ts#canViewJobAddress/ENGAGED_OFFER_STATUSES)
    * durumundaysa görebilir — contact-access.ts'in telefon/e-posta kapısıyla AYNI
    * zamanlamayı kullanır ama AYRI bir fonksiyondadır (contact-access.ts yalnızca
-   * telefon/e-posta içindir). Bu alandan önce oluşturulmuş ilanlarda yoktur.
+   * telefon/e-posta içindir). Bu alandan önce oluşturulmuş ilanlarda, ve
+   * Depolama/Gümrük Müşavirliği'nde (bkz. isSimplifiedLocationCategory) yoktur.
    */
   addressText?: string;
   /**
@@ -122,28 +141,28 @@ export type Job = {
    * bilgilerini kendim gireceğim" seçeneğiyle kendi tesis/adres bilgisini
    * girdi; bu durumda facilityId hiçbir zaman yoktur ve workLocationType
    * kullanıcının serbestçe yazdığı tesis/işletme adıdır. Bu alandan önce
-   * oluşturulmuş TÜM ilanlarda yoktur — yokluğu HER ZAMAN "catalog" olarak
+   * oluşturulmuş TÜM ilanlarda, ve Depolama/Gümrük Müşavirliği'nde (bkz.
+   * isSimplifiedLocationCategory) yoktur — yokluğu HER ZAMAN "catalog" olarak
    * yorumlanır (bkz. job-location.ts, job-edit-form.tsx'in facilityId
    * varlığına dayanan geriye dönük mod tespiti zaten bu iki durumu da aynı
    * şekilde ele alır).
    */
   locationMode?: "catalog" | "custom";
   /**
-   * Yalnızca locationMode "custom" olan ilanlarda anlamlı, isteğe bağlı
-   * Bölge/Mahalle bilgisi. addressText ile AYNI gizlilik kapısını
-   * (job-requests.ts#canViewJobAddress) kullanır — bkz. job-detail-content.tsx.
+   * ESKİ (LEGACY) ALAN — artık hiçbir kategorinin formu bu alanı toplamıyor
+   * (Gümrük Müşavirliği'nin bu üç alanı topladığı eski "custom" konum bloğu
+   * kaldırıldı, bkz. job-location.ts#isSimplifiedLocationCategory). Yalnızca
+   * bu değişiklikten ÖNCE Gümrük Müşavirliği'nin "Listede yok — tesis
+   * bilgilerini kendim gireceğim" moduyla oluşturulmuş eski ilanlarda anlamlı
+   * olabilir; o kayıtlar düzenlense bile (job-store.ts#resolveLocationFields
+   * artık bu alanı hiç yazmadığı için) değeri dokunulmadan korunur. addressText
+   * ile AYNI gizlilik kapısını (job-requests.ts#canViewJobAddress) kullanır —
+   * bkz. job-detail-content.tsx.
    */
   neighborhood?: string;
-  /**
-   * Yalnızca locationMode "custom" olan ilanlarda anlamlı, isteğe bağlı
-   * konum/harita bağlantısı (düz metin URL, ayrı bir harita/coğrafi kodlama
-   * entegrasyonu YOKTUR). addressText ile AYNI gizlilik kapısını kullanır.
-   */
+  /** Bkz. neighborhood — AYNI eski (legacy) alan, AYNI gerekçe/koruma. Düz metin konum/harita bağlantısı (ayrı bir harita/coğrafi kodlama entegrasyonu YOKTUR). */
   locationUrl?: string;
-  /**
-   * Yalnızca locationMode "custom" olan ilanlarda anlamlı, isteğe bağlı
-   * ilave adres tarifi notu. addressText ile AYNI gizlilik kapısını kullanır.
-   */
+  /** Bkz. neighborhood — AYNI eski (legacy) alan, AYNI gerekçe/koruma. İlave adres tarifi notu. */
   directionsNote?: string;
   workDate: string;
   description: string;
@@ -169,8 +188,82 @@ export type Job = {
    * zorunlu tutulur (bkz. job-request-form.tsx).
    */
   workEndDate?: string;
+  /**
+   * "Ürün Bilgileri" — yalnızca product-catalog.ts#requiresProductInfo'nun
+   * true döndüğü hizmet kategorilerinde doldurulur: Liman Hizmetleri kapsamı
+   * (bkz. PORT_SERVICE_CATEGORY_IDS — Lashing, Unlashing, Yükleme/Boşaltma
+   * Gözetimi, Konteyner Dolum/Boşaltım) İLE Nakliye'nin (bkz.
+   * isTransportationCategory) BİRLEŞİMİ. Depolama/Forklift Hizmeti ve
+   * diğer tüm kategoriler KAPSAM DIŞIDIR. Bu üç alandan önce oluşturulmuş
+   * TÜM ilanlarda ve kapsam dışı bir kategoride oluşturulan ilanlarda
+   * hiçbiri yoktur — yokluğu bir hata durumu değildir. productQuantity/
+   * productType her zaman zorunlu; productTonnage Nakliye'de ZORUNLU,
+   * Liman Hizmetleri'nin tamamında isteğe bağlıdır (bkz.
+   * product-catalog.ts#isTonnageRequired). Görüntüleme tarafında her zaman
+   * product-catalog.ts#hasProductInfo/formatJobProductInfoLine üzerinden
+   * okunmalı — bunlar kapsam kontrolünü de uygular, ham alan varlığına
+   * (`productType !== undefined` gibi) doğrudan bakmak eski/kapsam-dışı
+   * kalıntı veriyi yanlışlıkla gösterebilir (bkz. o dosyanın dokümantasyonu).
+   * Çoklu Hizmet Operasyonu'nda her hizmet kendi ürün bilgisini bağımsız
+   * taşır (bkz. job-store.ts#OperationServiceInput).
+   */
+  productQuantity?: number;
+  /** Bkz. productQuantity üstündeki doküman. Ondalıklı olabilir (ör. 8.5). */
+  productTonnage?: number;
+  /** Bkz. productQuantity üstündeki doküman. Serbest metin — product-catalog.ts#PRODUCT_TYPE_SUGGESTIONS listeden seçilmiş ya da kullanıcının kendi yazdığı bir değer olabilir. */
+  productType?: string;
   /** Sıralı operasyon fotoğrafları. Eski/sabit ilanlarda boş dizi olabilir. */
   photos: JobPhoto[];
+  /**
+   * Gümrük Müşavirliği'ne ÖZEL "Operasyon Bilgileri" — yalnızca
+   * customs-brokerage-catalog.ts#isCustomsBrokerageCategory(category) true
+   * iken doldurulur; diğer TÜM kategorilerde (Nakliye dahil) bu alanların
+   * hiçbiri hiç yoktur. customsTransactionType/customsProductType her zaman
+   * zorunlu; customsRequestedServices/customsDocuments isteğe bağlıdır. Bu
+   * alanlardan önce oluşturulmuş ya da ilgisiz bir kategoride oluşturulmuş
+   * ilanlarda hiçbiri yoktur — yokluğu bir hata durumu değildir (bkz.
+   * job-store.ts#resolveCustomsBrokerageFields). Çoklu Hizmet Operasyonu'nda
+   * YALNIZCA Gümrük Müşavirliği hizmet kartı bu alanları taşır — kardeş
+   * ilanlara asla kopyalanmaz (bkz. görev tanımı).
+   */
+  customsTransactionType?: string;
+  /**
+   * ESKİ (legacy) alan — "Gümrük Müdürlüğü", formdan tamamen kaldırıldı
+   * (eski yerinde artık Ürün Cinsi var, bkz. customs-brokerage-fields.tsx).
+   * customsGtipCode/customsDeclarationItemCount/customsContainerCount İLE
+   * AYNI gerekçe/koruma: hiçbir form artık bunu toplamaz/gösterir, ama var
+   * olan bir değeri düzenleme sırasında dokunulmadan korunur (bkz.
+   * job-store.ts#resolveCustomsBrokerageFields).
+   */
+  customsOfficeId?: string;
+  /** Bkz. customsTransactionType üstündeki doküman. customs-brokerage-catalog.ts#CUSTOMS_REQUESTED_SERVICE_OPTIONS'a ait id'ler — isteğe bağlı, boş seçim hiç yazılmaz (undefined). */
+  customsRequestedServices?: string[];
+  /**
+   * Bkz. customsTransactionType üstündeki doküman. Gümrüklenecek ürünün
+   * cinsi — product-catalog.ts#Job.productType ile KARIŞTIRILMAMALI, o alan
+   * Liman Hizmetleri/Nakliye içindir, bu alan tamamen bağımsızdır (AYNI
+   * `Job` üzerinde ikisi asla birlikte bulunmaz, kategoriler kesişmez).
+   * Form tarafında productType ile AYNI seçim sistemini (product-catalog.ts#
+   * PRODUCT_TYPE_SUGGESTIONS/ProductTypeCombobox) kullanır — ama kaydedilen
+   * son değer her zaman düz metindir (katalogdan seçilmiş öneri ya da
+   * kullanıcının serbestçe yazdığı ad); sentinel değeri burada asla
+   * saklanmaz.
+   */
+  customsProductType?: string;
+  /**
+   * ESKİ (LEGACY) ALAN — GTİP Kodu, formdan tamamen kaldırıldı, artık hiçbir
+   * ilanda yeni yazılmaz (bkz. job-store.ts#resolveCustomsBrokerageFields).
+   * Yalnızca bu değişiklikten ÖNCE oluşturulmuş bir Gümrük Müşavirliği
+   * ilanında anlamlı olabilir; o ilan düzenlense bile değeri dokunulmadan
+   * korunur (görüntülenmez, silinmez).
+   */
+  customsGtipCode?: string;
+  /** Bkz. customsGtipCode — AYNI eski (legacy) alan, AYNI gerekçe/koruma. Tahmini Beyan Kalem Sayısı. */
+  customsDeclarationItemCount?: number;
+  /** Bkz. customsGtipCode — AYNI eski (legacy) alan, AYNI gerekçe/koruma. Konteyner Sayısı. */
+  customsContainerCount?: number;
+  /** Bkz. customsTransactionType üstündeki doküman. İsteğe bağlı destekleyici evraklar (Ticari Fatura, Packing List, ATR, EUR.1, Menşe Şahadetnamesi vb.) — JobPhoto ile AYNI depolama şeklini (photo-blob-store.ts IndexedDB + storageKey) paylaşır, bu yüzden JobPhoto tipiyle birebir aynı şekle sahiptir (bkz. JobCustomsDocument tanımı). */
+  customsDocuments?: JobCustomsDocument[];
   /**
    * İlan Yayın Süresi Yönetimi: ilanın GERÇEKTEN oluşturulduğu an (ISO 8601
    * zaman damgası — yalnızca tarih değil, saat/dakika/saniye de içerir; 14
@@ -224,6 +317,34 @@ export type Job = {
   closedAt?: string;
   /** Yalnızca `closedAt` doluysa anlamlıdır — seçilen kapatma nedeni, kalıcı olarak saklanır. */
   closureReason?: JobClosureReason;
+  /**
+   * Nakliye Güzergâh Yönetimi — "Teslim Edilecek Yer" (delivery). Yalnızca
+   * product-catalog.ts#isTransportationCategory(category) true iken doldurulur;
+   * diğer TÜM kategorilerde (Nakliye dışında) bu altı alanın hiçbiri hiç
+   * yoktur (bkz. job-store.ts#resolveDeliveryLocationFields — Ürün Bilgileri/
+   * Gümrük Müşavirliği alanlarıyla AYNI "TEK yer, kategori kapsam dışıysa
+   * temizlenir" deseni). "Yük Alınacak Yer" (pickup) İÇİN AYRI bir alan grubu
+   * YOKTUR — yukarıdaki province/district/workLocationType/facilityId/
+   * addressText/locationMode alanları Nakliye ilanlarında pickup'ın kendisidir
+   * (bkz. nakliye-route.ts); bu, mevcut filtreleme/görünürlük/adres-gizliliği
+   * sistemlerinin HİÇBİRİNİN değişmemesini sağlayan kasıtlı bir tercihtir
+   * (neighborhood/locationUrl/directionsNote Nakliye'nin pickup'ında hiç
+   * kullanılmaz — yalnızca Nakliye DIŞINDAKİ kategorilerin "Listede yok"
+   * serbest-tesis moduna özeldir). `deliveryLocationType` "facility" ise
+   * deliveryFacilityId/deliveryFacilityName doludur, deliveryAddressText
+   * yoktur; "open_address" ise tam tersi. deliveryAddressText, job.addressText
+   * ile AYNI gizlilik kapısını (job-requests.ts#canViewJobAddress) kullanır —
+   * yeni bir güvenlik kuralı YOKTUR (bkz. nakliye-route-card.tsx).
+   */
+  deliveryProvince?: string;
+  deliveryDistrict?: string;
+  deliveryLocationType?: "facility" | "open_address";
+  /** turkey-locations.ts#Facility.id — yalnızca deliveryLocationType "facility" iken vardır. */
+  deliveryFacilityId?: string;
+  /** Seçilen tesisin GÖRÜNEN adı (facilityId'nin denormalize kopyası — workLocationType'ın pickup'taki rolüyle AYNI). */
+  deliveryFacilityName?: string;
+  /** Yalnızca deliveryLocationType "open_address" iken vardır. */
+  deliveryAddressText?: string;
 };
 
 /**
@@ -271,7 +392,26 @@ export type Offer = {
   amount: number;
   currency: Currency;
   description: string;
-  estimatedDuration: string;
+  /**
+   * "Tamamlanması Taahhüt Edilen Gün" — yalnızca Nakliye kategorisindeki
+   * ilanlara verilen tekliflerde toplanır (bkz. product-catalog.ts#
+   * isTransportationCategory, offer-form.tsx); Nakliye DIŞINDAKİ hiçbir
+   * kategoride bu alan artık hiç yoktur (undefined) — teklif formu
+   * göstermez/zorunlu kılmaz, offers.ts#createOffer doğrulamaz/yazmaz. Bu
+   * değişiklikten ÖNCE oluşturulmuş, kategorisi ne olursa olsun HER teklifte
+   * bu alan zaten dolu — o eski değerler asla silinmez, yalnızca Nakliye
+   * dışı bir ilanın teklif kartında/özetinde artık gösterilmez.
+   *
+   * Nakliye'deki yeni teklifler her zaman `number` (1-60 arası, bkz.
+   * offers.ts#createOffer'ın doğrulaması) olarak saklar; bu alan bu
+   * özellikten ÖNCE serbest metin ("1 iş günü" gibi) olarak toplanıyordu, o
+   * eski kayıtlar `string` olarak okunmaya devam eder — hiçbiri geriye dönük
+   * olarak sayıya ZORLA çevrilmez/kaybolmaz. Görüntüleme tarafı her zaman
+   * offers.ts#formatCommittedDays üzerinden okunmalı (eski metni güvenle
+   * sayıya çevirebiliyorsa "N gün" gösterir, çeviremiyorsa ham metni olduğu
+   * gibi gösterir, hiç yoksa "-" gösterir — asla çökmez).
+   */
+  estimatedDuration?: string | number;
   status: OfferStatus;
   createdAt: string;
   updatedAt: string;

@@ -56,7 +56,12 @@ async function startWorkFor(page, jobTitle) {
   await page.waitForTimeout(400);
 }
 async function requestCompletionFor(page, jobTitle) {
-  await page.goto(`${BASE_URL}/panel/tekliflerim`);
+  // "Tamamlandı Olarak İşaretle" yalnızca "Devam Eden" (in_progress) sekmesinde
+  // görünür (bkz. my-offers-panel.tsx#getProviderOfferFilter) — sorgu
+  // parametresi olmadan sayfa varsayılan "Aktif" sekmesine düşer, kart hiç
+  // render edilmez ve buton araması zaman aşımına uğrar (önceden burada
+  // eksikti — ön koşul kurulumundaki gerçek bir hataydı).
+  await page.goto(`${BASE_URL}/panel/tekliflerim?durum=devam-eden`);
   const card = page.locator("div.rounded-card").filter({ hasText: jobTitle });
   await card.getByRole("button", { name: "Tamamlandı Olarak İşaretle", exact: true }).click();
   await page.getByRole("button", { name: "Evet, Tamamlandı Olarak İşaretle" }).click();
@@ -94,6 +99,16 @@ const J_TAMAM = { id: "simplify-job-tamam", title: "Sadeleştirme Testi - Tamaml
 
 async function main() {
   const browser = await chromium.launch();
+  try {
+    await run(browser);
+  } finally {
+    // Hata durumunda bile browser'ı kapat — aksi halde açık kalan
+    // Playwright browser bağlantısı Node process'ini süresiz canlı tutar.
+    await browser.close();
+  }
+}
+
+async function run(browser) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const consoleErrors = [];
@@ -234,7 +249,6 @@ async function main() {
     localStorage.setItem("malsevk.ratings.v1", JSON.stringify(ratings));
   }, jobIds);
 
-  await browser.close();
   console.log(`\n[job-requests-simplify-test] ${passed} test geçti.`);
 }
 

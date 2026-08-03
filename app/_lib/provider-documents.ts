@@ -4,6 +4,24 @@ import type { ProviderDocumentReviewStatus } from "./types";
 const PROVIDER_DOCUMENTS_STORAGE_KEY = "malsevk.provider_documents.v1";
 
 /**
+ * Bir belgenin HANGİ amaçla yüklendiği — "genel" (Faaliyet Belgesi/Raporu,
+ * her Hizmet Veren kaydında zorunlu, mevcut/eski davranış) ile "gumruk-musaviri-izin-belgesi"
+ * (yalnızca Gümrük Müşavirliği seçildiğinde EK olarak zorunlu, bkz.
+ * customs-license.ts) arasında ayrım yapar. Bu alan eklenmeden ÖNCE yazılmış
+ * TÜM kayıtlarda (Nakliyeci demo hesabı dahil) yoktur — `readAll` bunu her
+ * zaman "genel" olarak normalize eder (aynı `locationMode` eksikse "catalog"
+ * varsayılan deseni, bkz. job-store.ts#normalizeStoredJob), bu yüzden geriye
+ * dönük hiçbir kayıt bozulmaz/yanlış sınıflandırılmaz.
+ */
+export type ProviderDocumentType = "genel" | "gumruk-musaviri-izin-belgesi";
+export const GENERAL_DOCUMENT_TYPE: ProviderDocumentType = "genel";
+export const CUSTOMS_LICENSE_DOCUMENT_TYPE: ProviderDocumentType = "gumruk-musaviri-izin-belgesi";
+
+function isProviderDocumentType(value: unknown): value is ProviderDocumentType {
+  return value === GENERAL_DOCUMENT_TYPE || value === CUSTOMS_LICENSE_DOCUMENT_TYPE;
+}
+
+/**
  * Bir Hizmet Veren'in yüklediği Faaliyet Belgesi/Raporu'nun METADATA'sı —
  * asıl dosya İÇERİĞİ burada DEĞİL, IndexedDB'de (bkz.
  * photo-blob-store.ts — ilan fotoğraflarıyla PAYLAŞILAN aynı blob deposu,
@@ -32,6 +50,7 @@ export type StoredProviderDocument = {
   reviewNote?: string;
   reviewedAt?: string;
   reviewedByAdminId?: string;
+  documentType: ProviderDocumentType;
 };
 
 export type NewProviderDocumentInput = {
@@ -40,6 +59,8 @@ export type NewProviderDocumentInput = {
   extension: string;
   size: number;
   indexedDbStorageKey: string;
+  /** Belirtilmezse "genel" (Faaliyet Belgesi/Raporu) sayılır — mevcut tüm çağıranlar bu varsayılanla değişmeden çalışır. */
+  documentType?: ProviderDocumentType;
 };
 
 function isReviewStatus(value: unknown): value is ProviderDocumentReviewStatus {
@@ -49,21 +70,24 @@ function isReviewStatus(value: unknown): value is ProviderDocumentReviewStatus {
 function readAll(): StoredProviderDocument[] {
   const raw = readJson<unknown[]>(PROVIDER_DOCUMENTS_STORAGE_KEY);
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item): item is StoredProviderDocument => {
-    if (typeof item !== "object" || item === null) return false;
-    const value = item as Record<string, unknown>;
-    return (
-      typeof value.id === "string" &&
-      typeof value.userId === "string" &&
-      typeof value.originalFileName === "string" &&
-      typeof value.mimeType === "string" &&
-      typeof value.extension === "string" &&
-      typeof value.size === "number" &&
-      typeof value.indexedDbStorageKey === "string" &&
-      typeof value.uploadedAt === "string" &&
-      isReviewStatus(value.reviewStatus)
-    );
-  });
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .filter(
+      (value): value is Record<string, unknown> =>
+        typeof value.id === "string" &&
+        typeof value.userId === "string" &&
+        typeof value.originalFileName === "string" &&
+        typeof value.mimeType === "string" &&
+        typeof value.extension === "string" &&
+        typeof value.size === "number" &&
+        typeof value.indexedDbStorageKey === "string" &&
+        typeof value.uploadedAt === "string" &&
+        isReviewStatus(value.reviewStatus),
+    )
+    .map((value) => ({
+      ...(value as unknown as StoredProviderDocument),
+      documentType: isProviderDocumentType(value.documentType) ? value.documentType : GENERAL_DOCUMENT_TYPE,
+    }));
 }
 
 function writeAll(rows: StoredProviderDocument[]): boolean {
@@ -102,6 +126,7 @@ export function addProviderDocuments(userId: string, documents: NewProviderDocum
     indexedDbStorageKey: doc.indexedDbStorageKey,
     uploadedAt: now,
     reviewStatus: "pending",
+    documentType: doc.documentType ?? GENERAL_DOCUMENT_TYPE,
   }));
   return writeAll([...readAll(), ...newRows]);
 }

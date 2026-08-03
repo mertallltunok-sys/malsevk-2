@@ -2,9 +2,18 @@ import { ENGAGED_OFFER_STATUSES } from "./job-requests";
 import { findJobById } from "./jobs-lookup";
 import { getAllOffers } from "./offers";
 import type { Session } from "./types";
-import { findUserById } from "./users";
+import { findUserById, type StoredUser } from "./users";
 
-export type ContactInfo = { name: string; phone: string; email: string };
+/**
+ * `phone`/`email` `null` olabilir — bu, zamanlama kapısının kapalı olmasından
+ * (o durumda `RevealedContact`in TAMAMI `null` döner, aşağıya bkz.) AYRI bir
+ * kavramdır: kapı açık (taraflar birbirinin ismini görebiliyor) ama bu
+ * ALANIN sahibi "İletişim Bilgisi Görünürlüğü" (Hesap Ayarları) tercihinde
+ * bu alanı paylaşmamayı seçmiş demektir (bkz. `applyContactVisibility`).
+ * `name` hiçbir zaman bu tercihe tabi değildir — yalnızca e-posta/telefon
+ * bağımsız olarak kapatılabilir.
+ */
+export type ContactInfo = { name: string; phone: string | null; email: string | null };
 
 export type RevealedContact = {
   /** Teklifi veren Hizmet Veren'in iletişim bilgisi. */
@@ -12,6 +21,25 @@ export type RevealedContact = {
   /** İlanı oluşturan Hizmet Alan'ın iletişim bilgisi. */
   requester: ContactInfo;
 };
+
+/**
+ * Bir kullanıcının HAM `phone`/`email` değerlerini, o kullanıcının KENDİ
+ * "İletişim Bilgisi Görünürlüğü" tercihine göre süzer — bu, veri erişim
+ * katmanının kendisidir (yalnızca görsel gizleme değil): opt-out edilmiş bir
+ * alanın ham değeri bu fonksiyonun DIŞINA hiç çıkmaz. `undefined` (kullanıcı
+ * henüz tercih belirlemedi) her iki alan için de `true` (görünür) sayılır —
+ * bu, özellik eklenmeden ÖNCEki davranışla (her ikisi de her zaman
+ * gösteriliyordu) birebir aynı sonucu verir, mevcut kullanıcıların akışını
+ * bozmaz. Bir kullanıcının tercihi yalnızca KENDİ kaydından okunur — karşı
+ * tarafın tercihini asla etkilemez.
+ */
+function applyContactVisibility(user: StoredUser): ContactInfo {
+  return {
+    name: user.name,
+    phone: (user.showPhoneAfterAgreement ?? true) ? user.phone : null,
+    email: (user.showEmailAfterAgreement ?? true) ? user.email : null,
+  };
+}
 
 /**
  * İletişim bilgilerinin TEK ortak erişim kapısı. Bu fonksiyon dışında
@@ -56,7 +84,7 @@ export function getRevealedContactForOffer(
   if (!provider || !requester) return null;
 
   return {
-    provider: { name: provider.name, phone: provider.phone, email: provider.email },
-    requester: { name: requester.name, phone: requester.phone, email: requester.email },
+    provider: applyContactVisibility(provider),
+    requester: applyContactVisibility(requester),
   };
 }

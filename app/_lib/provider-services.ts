@@ -1,5 +1,5 @@
 import { writeJson } from "./local-storage";
-import { isServiceCategoryId } from "./service-catalog";
+import { isServiceCategoryId, resolveServiceCategoryId } from "./service-catalog";
 
 const PROVIDER_SERVICES_STORAGE_KEY = "malsevk.provider_services.v1";
 
@@ -113,18 +113,22 @@ function writeAll(rows: StoredProviderService[]): boolean {
 
 /**
  * Bir kullanıcının güncel hizmet kategorisi id'lerini döner — sırasız,
- * tekrarsız. `isServiceCategoryId` ile SÜZÜLÜR: bozuk/eski (kataloğun artık
- * tanımadığı) bir id localStorage'da kalmışsa bile döndürülmez — bu, bozuk
- * verinin (ör. yanlışlıkla "nakliye"ye eşit olmayan ama yine de bir şekilde
- * geçersiz bir değerin) job-visibility.ts'teki kontrollerde tanımsız/beklenmedik
- * bir davranışa yol açmasını engeller (yalnızca gerçekten kataloğa ait bir id
- * "nakliye" ile eşleşebilir, başka hiçbir şey asla eşleşmez).
+ * tekrarsız. Her id `resolveServiceCategoryId` ile çözülür: kataloğun artık
+ * tanımadığı, KALDIRILMIŞ bir id (ör. eski "paletleme") sessizce düşer (bkz.
+ * service-catalog.ts#REMOVED_CATEGORY_IDS); BİRLEŞTİRME öncesi eski bir id
+ * (ör. "lashing"/"unlashing") güncel birleşik id'ye ("lashing-unlashing")
+ * çözülür — bu, localStorage'daki `StoredProviderService` satırları hiç
+ * yeniden yazılmadan (migrasyon YOK) her okumada uygulanan bir normalizasyon
+ * katmanıdır. Sonuç `Set` ile tekilleştirilir: bir Hizmet Veren eskiden hem
+ * "lashing" hem "unlashing" seçmişse (ikisi de aynı yeni id'ye çözülür) bu
+ * artık tek bir kayıt olarak görünür, mükerrer değil.
  */
 export function getProviderServiceCategoryIds(userId: string): string[] {
-  return readAllSnapshot()
+  const resolvedIds = readAllSnapshot()
     .filter((row) => row.userId === userId)
-    .map((row) => row.serviceCategoryId)
-    .filter(isServiceCategoryId);
+    .map((row) => resolveServiceCategoryId(row.serviceCategoryId))
+    .filter((id): id is string => id !== null);
+  return Array.from(new Set(resolvedIds));
 }
 
 /**

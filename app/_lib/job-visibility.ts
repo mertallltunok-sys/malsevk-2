@@ -2,30 +2,49 @@
 
 import { useMemo } from "react";
 import { getProviderServiceCategoryIds } from "./provider-services";
-import { NAKLIYE_SERVICE_CATEGORY_ID, resolveLegacyJobCategoryToId } from "./service-catalog";
+import {
+  GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID,
+  NAKLIYE_SERVICE_CATEGORY_ID,
+  resolveLegacyJobCategoryToId,
+} from "./service-catalog";
 import type { Job, Session } from "./types";
 import { useProviderServiceCategoryIds } from "./use-provider-services";
 
 /**
- * NAKLİYE'YE ÖZEL keşif izolasyonu — TEK doğruluk kaynağı. Diğer altı hizmete
- * (Lashing/Gözetim/Depolama/Forklift/Konteyner Dolum/Konteyner Boşaltım) HİÇ
- * uygulanmaz ve bu bilerek böyledir (görev gereksinimi: "bu özel izolasyon
- * şimdilik diğer hizmetlere uygulanmayacak").
+ * İZOLE EDİLMİŞ HİZMETLERE ÖZEL keşif izolasyonu — TEK doğruluk kaynağı.
+ * Yalnızca aşağıdaki `ISOLATED_SERVICE_CATEGORY_IDS` listesindeki hizmetlere
+ * uygulanır (bugün: Nakliye ve Gümrük Müşavirliği); diğer hizmetlere
+ * (Lashing/Gözetim/Depolama/Forklift/Konteyner Dolum/Konteyner Boşaltım/vb.)
+ * HİÇ uygulanmaz ve bu bilerek böyledir (görev gereksinimi: "bu özel
+ * izolasyon şimdilik diğer hizmetlere uygulanmayacak"). Gümrük Müşavirliği,
+ * Nakliye'nin İLK sürümdeki tek-kategorili halinin AYNI mantığının ikinci bir
+ * kategoriye genellenmiş hâlidir — Nakliye'nin kendi davranışı bu genellemeyle
+ * BİREBİR aynı kalır (bkz. aşağıdaki `resolveVisibility` dokümantasyonu).
  *
  * Kural: `provider-services.ts` (tek doğruluk kaynağı, bkz. o dosya) üzerinde
- * kayıtlı hizmetleri arasında Nakliye BULUNAN bir Hizmet Veren, ilan keşfi
- * bakımından yalnızca Nakliye kategorili ilanları görebilir — başka hizmetler
- * de seçilmiş olsa bile (Nakliye + Lashing seçiliyse hâlâ yalnızca Nakliye).
- * Nakliye seçili DEĞİLSE bu fonksiyon mevcut davranışı hiç değiştirmez (her
- * ilan görünür kalır, bugüne kadar olduğu gibi).
+ * kayıtlı hizmetleri arasında izole edilmiş hizmetlerden EN AZ BİRİ bulunan
+ * bir Hizmet Veren, ilan keşfi bakımından yalnızca KENDİ SEÇTİĞİ izole
+ * hizmet(ler)in kategorili ilanlarını görebilir — izole olmayan başka
+ * hizmetler de seçilmiş olsa bile (Nakliye + Lashing seçiliyse hâlâ yalnızca
+ * Nakliye; Gümrük Müşavirliği + Lashing seçiliyse hâlâ yalnızca Gümrük
+ * Müşavirliği). Hem Nakliye HEM Gümrük Müşavirliği seçiliyse (görev
+ * kapsamında öngörülmeyen ama engellenmeyen bir kombinasyon) bu iki izole
+ * kategorinin BİRLEŞİMİ (union) görünür kalır — kesişim değil; bu, tek bir
+ * izole kategori seçen mevcut Nakliye sağlayıcılarının davranışını hiç
+ * DEĞİŞTİRMEZ (aşağıdaki `getSelectedIsolatedCategoryIds` tek elemanlı bir
+ * kümede zaten aynı sonucu üretir), yalnızca iki izole kategoriyi birden
+ * seçen yeni/nadir bir durumu makul şekilde ele alır. Hiçbir izole kategori
+ * seçili DEĞİLSE bu fonksiyon mevcut davranışı hiç değiştirmez (her ilan
+ * görünür kalır, bugüne kadar olduğu gibi).
  *
  * Hizmet Alan/admin/misafir (oturum yok) bu kuraldan HİÇ etkilenmez — kural
- * yalnızca "hizmet-veren" rolü ve yalnızca Nakliye seçili olduğunda devreye
- * girer.
+ * yalnızca "hizmet-veren" rolü ve yalnızca izole bir hizmet seçili olduğunda
+ * devreye girer.
  *
  * BU MODÜL, ilan görünürlüğünün TEK merkezi kapısıdır — hiçbir ekran kendi
- * `job.category === "nakliye"` kontrolünü yazmamalı, bunun yerine bu dosyadaki
- * fonksiyonlardan/hook'lardan birini kullanmalıdır:
+ * `job.category === "nakliye"` (ya da "gumruk-musavirligi") kontrolünü
+ * yazmamalı, bunun yerine bu dosyadaki fonksiyonlardan/hook'lardan birini
+ * kullanmalıdır:
  *  - `isJobVisibleToSession`/`filterVisibleJobs`: DÜZ (reaktif olmayan)
  *    fonksiyonlar — her çağrıda localStorage'ı TAZE okur ama bir React
  *    bileşenini OTOMATİK yeniden render ETMEZ. Bileşen dışı, tek seferlik
@@ -64,6 +83,22 @@ import { useProviderServiceCategoryIds } from "./use-provider-services";
  * sızdırmamasıdır — sunucu tarafı bir yetkilendirme sınırı değildir.
  */
 
+/**
+ * Keşif izolasyonu uygulanan hizmet kategorisi id'lerinin TEK listesi — yeni
+ * bir hizmete bu izolasyon gerekirse TEK eklenmesi gereken yer burasıdır.
+ * Sırasız bir küme olarak ele alınır (görüntüleme sırası bu listeden ASLA
+ * türetilmez, bkz. service-catalog.ts#getServiceCategoryOrderIndex).
+ */
+const ISOLATED_SERVICE_CATEGORY_IDS: readonly string[] = [
+  NAKLIYE_SERVICE_CATEGORY_ID,
+  GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID,
+];
+
+/** Bir Hizmet Veren'in seçtiği hizmetler arasından yalnızca izole edilmiş olanları döner — sırası `serviceCategoryIds`inkiyle aynıdır. */
+function getSelectedIsolatedCategoryIds(serviceCategoryIds: string[]): string[] {
+  return serviceCategoryIds.filter((id) => ISOLATED_SERVICE_CATEGORY_IDS.includes(id));
+}
+
 /** Bir ilanın kararlı katalog kategori id'sini çözer — eski (düz metin) ve yeni (id) kayıtların ikisiyle de çalışır. */
 function resolveJobCategoryId(job: Job): string | null {
   return resolveLegacyJobCategoryToId(job.category);
@@ -79,8 +114,10 @@ function resolveJobCategoryId(job: Job): string | null {
 function resolveVisibility(session: Session | null, serviceCategoryIds: string[], job: Job | null): boolean {
   if (!job) return true;
   if (!session || session.role !== "hizmet-veren") return true;
-  if (!serviceCategoryIds.includes(NAKLIYE_SERVICE_CATEGORY_ID)) return true;
-  return resolveJobCategoryId(job) === NAKLIYE_SERVICE_CATEGORY_ID;
+  const isolatedSelected = getSelectedIsolatedCategoryIds(serviceCategoryIds);
+  if (isolatedSelected.length === 0) return true;
+  const jobCategoryId = resolveJobCategoryId(job);
+  return jobCategoryId !== null && isolatedSelected.includes(jobCategoryId);
 }
 
 /**
@@ -98,16 +135,20 @@ export function isJobVisibleToSession(session: Session | null, job: Job | null):
 
 /**
  * `isJobVisibleToSession`in dizi üzerindeki kısayolu — sıralamayı korur,
- * yalnızca görünmeyen ilanları eler. Normal (Nakliye'ye kilitlenmemiş) bir
- * oturum için bu her zaman girdiyle AYNI içeriği (referans olarak farklı ama
- * elemanları birebir aynı bir dizi) döner — bu yüzden aşağı akıştaki hiçbir
- * kod bu filtrenin var olup olmadığını bilmek/dallanmak ZORUNDA değildir.
+ * yalnızca görünmeyen ilanları eler. Normal (izole bir hizmete kilitlenmemiş)
+ * bir oturum için bu her zaman girdiyle AYNI içeriği (referans olarak farklı
+ * ama elemanları birebir aynı bir dizi) döner — bu yüzden aşağı akıştaki
+ * hiçbir kod bu filtrenin var olup olmadığını bilmek/dallanmak ZORUNDA değildir.
  */
 export function filterVisibleJobs(session: Session | null, jobs: Job[]): Job[] {
   if (!session || session.role !== "hizmet-veren") return jobs;
   const serviceCategoryIds = getProviderServiceCategoryIds(session.id);
-  if (!serviceCategoryIds.includes(NAKLIYE_SERVICE_CATEGORY_ID)) return jobs;
-  return jobs.filter((job) => resolveJobCategoryId(job) === NAKLIYE_SERVICE_CATEGORY_ID);
+  const isolatedSelected = getSelectedIsolatedCategoryIds(serviceCategoryIds);
+  if (isolatedSelected.length === 0) return jobs;
+  return jobs.filter((job) => {
+    const jobCategoryId = resolveJobCategoryId(job);
+    return jobCategoryId !== null && isolatedSelected.includes(jobCategoryId);
+  });
 }
 
 /** `isJobVisibleToSession`in REAKTİF hâli — bkz. bu dosyanın üstündeki dokümantasyon. `job` henüz çözülmemişse (`null`) `true` döner, çağıran taraf ayrıca kendi "bulunamadı" kontrolünü uygular. */
@@ -121,7 +162,11 @@ export function useFilterVisibleJobs(session: Session | null, jobs: Job[]): Job[
   const serviceCategoryIds = useProviderServiceCategoryIds(session?.role === "hizmet-veren" ? session.id : undefined);
   return useMemo(() => {
     if (!session || session.role !== "hizmet-veren") return jobs;
-    if (!serviceCategoryIds.includes(NAKLIYE_SERVICE_CATEGORY_ID)) return jobs;
-    return jobs.filter((job) => resolveJobCategoryId(job) === NAKLIYE_SERVICE_CATEGORY_ID);
+    const isolatedSelected = getSelectedIsolatedCategoryIds(serviceCategoryIds);
+    if (isolatedSelected.length === 0) return jobs;
+    return jobs.filter((job) => {
+      const jobCategoryId = resolveJobCategoryId(job);
+      return jobCategoryId !== null && isolatedSelected.includes(jobCategoryId);
+    });
   }, [session, serviceCategoryIds, jobs]);
 }

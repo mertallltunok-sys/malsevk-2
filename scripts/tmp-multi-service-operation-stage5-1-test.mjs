@@ -256,8 +256,14 @@ async function main() {
     ok("Operasyonun yalnızca 1 hizmeti (Lashing) filtreyi geçtiğinde bile operasyon kartı görünür, kardeşleri ayrı satır olarak sızmaz");
 
     const operationRow = page.locator("tr", { has: page.getByText("Asama51 Lashing", { exact: true }) });
-    await assert.doesNotReject(operationRow.getByText("Operasyon · 3 Hizmet", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
-    ok("Kart 'Operasyon · 3 Hizmet' gösterir (filtreyi geçen 1 değil, operasyonun GERÇEK toplamı)");
+    // job-listing-row.ts#getJobListingCategoryBadgeLabel'ın GÜNCEL/kasıtlı
+    // formatı "Operasyon • {kalan} Hizmet Arıyor"dur (statik "Operasyon · N
+    // Hizmet" biçimi bu testten BAĞIMSIZ, önceki bir özellik çalışmasında
+    // kalıcı olarak değiştirildi — bkz. CLAUDE.md "Operation discovery &
+    // status UI"). `kalan = totalCount(3) - completedCount(1) = 2` (bkz.
+    // birkaç satır aşağıdaki "%33" ilerleme kontrolü — 1/3 tamamlanmış).
+    await assert.doesNotReject(operationRow.getByText("Operasyon • 2 Hizmet Arıyor", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
+    ok("Kart 'Operasyon • 2 Hizmet Arıyor' gösterir (filtreyi geçen 1 değil, operasyonun GERÇEK kalan sayısı — toplam 3, 1 tamamlanmış)");
 
     await assert.doesNotReject(operationRow.getByText("Operasyon İlerlemesi: %33", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
     ok("İlerleme yüzdesi operasyonun TÜM 3 hizmeti üzerinden hesaplanır (1 tamamlanan / 3 toplam = %33), filtreyi geçen 1 hizmet üzerinden değil");
@@ -333,7 +339,8 @@ async function main() {
     await page.waitForSelector("ul[role='list']", { timeout: 10000 });
 
     await selectCategoryFilter(page, "Lashing");
-    await assert.doesNotReject(page.getByText("Operasyon · 3 Hizmet", { exact: true }).waitFor({ state: "visible", timeout: 10000 }));
+    // Bkz. GRUP B'deki AYNI güncel format notu — aynı operasyon (1/3 tamamlanmış), kalan=2.
+    await assert.doesNotReject(page.getByText("Operasyon • 2 Hizmet Arıyor", { exact: true }).waitFor({ state: "visible", timeout: 10000 }));
 
     const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     assert.equal(hasHorizontalOverflow, false, "Mobil genişlikte (375px) filtrelenmiş operasyon kartı yatay taşma OLUŞTURMAMALI");

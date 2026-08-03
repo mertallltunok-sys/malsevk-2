@@ -6,6 +6,8 @@ export type ServiceCategory = { id: string; label: string };
 export type ServiceCategoryGroup = {
   id: string;
   label: string;
+  /** Ana sayfa/filtre/form gibi TÜM sıra-duyarlı ekranların tek doğruluk kaynağı — küçük değer önce gösterilir. Hiçbir ekran kendi sıralamasını elle yapmaz; hepsi doğrudan (zaten bu alana göre sıralanmış) `SERVICE_CATEGORY_GROUPS` dizisini okur. */
+  order: number;
   categories: ServiceCategory[];
 };
 
@@ -24,49 +26,43 @@ export type ServiceCategoryGroup = {
  * Ana sayfadaki `services-section.tsx`in rol bazlı tanıtım/hızlı-erişim
  * bölümü de (bkz. `getAllServiceCategories` altında) BURADAN beslenir —
  * elle yazılmış ayrı bir hizmet listesi tutmaz.
+ *
+ * Kaldırılan/birleştirilen kategoriler (aşağıdaki `REMOVED_CATEGORY_IDS`/
+ * `MERGED_CATEGORY_ID_ALIASES`e bkz.): "Liman Personeli", "Depo Personeli",
+ * "Depo Düzenleme", "Paletleme", "Etiketleme", "Sayım Hizmeti", "Paletli
+ * Ürün Depolama", "Ağır Yük Depolama", "Vardiyalı Çalışma", "Proje Yük"
+ * kataloğa tamamen KALDIRILDI (eski kayıtlar için geriye dönük uyumluluk
+ * yalnızca okuma anında normalize edilir, kayıtlar silinmez). Lashing+
+ * Unlashing, Konteyner Dolum+Konteyner Boşaltım, Yükleme+Boşaltma Gözetimi
+ * BİRLEŞTİRİLDİ (üçü de artık tek birer id).
  */
-export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
+const RAW_SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
+  {
+    id: "nakliye-hizmetleri",
+    label: "Nakliye Hizmetleri",
+    order: 1,
+    categories: [{ id: "nakliye", label: "Nakliye" }],
+  },
+  {
+    id: "gumruk-hizmetleri",
+    label: "Gümrük Hizmetleri",
+    order: 2,
+    categories: [{ id: "gumruk-musavirligi", label: "Gümrük Müşavirliği" }],
+  },
   {
     id: "liman-hizmetleri",
     label: "Liman Hizmetleri",
+    order: 3,
     categories: [
-      { id: "lashing", label: "Lashing" },
-      { id: "unlashing", label: "Unlashing" },
-      { id: "konteyner-dolum", label: "Konteyner Dolum" },
-      { id: "konteyner-bosaltim", label: "Konteyner Boşaltım" },
-      { id: "yukleme-gozetimi", label: "Yükleme Gözetimi" },
-      { id: "bosaltma-gozetimi", label: "Boşaltma Gözetimi" },
-      { id: "liman-personeli", label: "Liman Personeli" },
-    ],
-  },
-  {
-    id: "depo-hizmetleri",
-    label: "Depo Hizmetleri",
-    categories: [
-      { id: "depo-personeli", label: "Depo Personeli" },
-      { id: "depo-duzenleme", label: "Depo Düzenleme" },
-      { id: "ellecleme", label: "Elleçleme" },
-      { id: "paletleme", label: "Paletleme" },
-      { id: "etiketleme", label: "Etiketleme" },
-      { id: "sayim-hizmeti", label: "Sayım Hizmeti" },
-      { id: "genel-depolama", label: "Genel Depolama" },
-      { id: "acik-saha-depolama", label: "Açık Saha Depolama" },
-      { id: "kapali-depolama", label: "Kapalı Depolama" },
-      { id: "antrepo-gumruklu", label: "Antrepo (Gümrüklü)" },
-      { id: "gecici-depolama", label: "Geçici Depolama" },
-      { id: "konteyner-depolama", label: "Konteyner Depolama" },
-      { id: "paletli-urun-depolama", label: "Paletli Ürün Depolama" },
-      { id: "dokme-yuk-depolama", label: "Dökme Yük Depolama" },
-      { id: "agir-yuk-depolama", label: "Ağır Yük Depolama" },
-      { id: "proje-yuku-depolama", label: "Proje Yükü Depolama" },
-      { id: "soguk-hava-depolama", label: "Soğuk Hava Depolama" },
-      { id: "kimyasal-depolama", label: "Kimyasal Depolama" },
-      { id: "tehlikeli-madde-depolama", label: "Tehlikeli Madde Depolama" },
+      { id: "lashing-unlashing", label: "Lashing / Unlashing" },
+      { id: "gozetim-hizmetleri", label: "Gözetim Hizmetleri" },
+      { id: "konteyner-dolum-bosaltim", label: "Konteyner Dolum / Boşaltım" },
     ],
   },
   {
     id: "is-makinesi-hizmetleri",
     label: "İş Makinesi Hizmetleri",
+    order: 4,
     categories: [
       { id: "forklift", label: "Forklift" },
       { id: "reach-stacker", label: "Reach Stacker" },
@@ -77,6 +73,7 @@ export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
   {
     id: "operator-hizmetleri",
     label: "Operatör Hizmetleri",
+    order: 5,
     categories: [
       { id: "forklift-operatoru", label: "Forklift Operatörü" },
       { id: "reach-stacker-operatoru", label: "Reach Stacker Operatörü" },
@@ -85,25 +82,95 @@ export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
     ],
   },
   {
-    id: "diger-hizmetler",
-    label: "Diğer Hizmetler",
+    id: "depo-hizmetleri",
+    label: "Depo Hizmetleri",
+    order: 6,
     categories: [
-      { id: "personel-temini", label: "Personel Temini" },
-      { id: "vardiyali-calisma", label: "Vardiyalı Çalışma" },
-      { id: "acil-operasyon-destegi", label: "Acil Operasyon Desteği" },
+      { id: "ellecleme", label: "Elleçleme" },
+      { id: "genel-depolama", label: "Genel Depolama" },
+      { id: "acik-saha-depolama", label: "Açık Saha Depolama" },
+      { id: "kapali-depolama", label: "Kapalı Depolama" },
+      { id: "antrepo-gumruklu", label: "Antrepo (Gümrüklü)" },
+      { id: "gecici-depolama", label: "Geçici Depolama" },
+      { id: "konteyner-depolama", label: "Konteyner Depolama" },
+      { id: "dokme-yuk-depolama", label: "Dökme Yük Depolama" },
+      { id: "proje-yuku-depolama", label: "Proje Yükü Depolama" },
+      { id: "soguk-hava-depolama", label: "Soğuk Hava Depolama" },
+      { id: "kimyasal-depolama", label: "Kimyasal Depolama" },
+      { id: "tehlikeli-madde-depolama", label: "Tehlikeli Madde Depolama" },
     ],
   },
   {
-    id: "proje-yuku-hizmetleri",
-    label: "Proje Yükü Hizmetleri",
-    categories: [{ id: "proje-yuku", label: "Proje Yük" }],
-  },
-  {
-    id: "nakliye-hizmetleri",
-    label: "Nakliye Hizmetleri",
-    categories: [{ id: "nakliye", label: "Nakliye" }],
+    id: "diger-hizmetler",
+    label: "Diğer Hizmetler",
+    order: 7,
+    categories: [
+      { id: "personel-temini", label: "Personel Temini" },
+      { id: "acil-operasyon-destegi", label: "Acil Operasyon Desteği" },
+    ],
   },
 ];
+
+/** `RAW_SERVICE_CATEGORY_GROUPS`in `order` alanına göre BİR KEZ sıralanmış hâli — tüm tüketiciler (login-form.tsx, service-info-editor.tsx, job-request-form.tsx, job-edit-form.tsx, services-section.tsx, job-listing-filters.ts) doğrudan bu diziyi okur, hiçbiri kendi sıralamasını yapmaz. */
+export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [...RAW_SERVICE_CATEGORY_GROUPS].sort(
+  (a, b) => a.order - b.order,
+);
+
+/**
+ * Kataloktan TAMAMEN kaldırılmış eski kategori id'leri — bir `Job`/
+ * `ProviderProfile` kaydında bu id'lerden biri bulunursa (eski, kataloğun
+ * bu değişiklikten önceki hâlinde oluşturulmuş kayıt) uygulama ÇÖKMEZ,
+ * kayıt SİLİNMEZ; yalnızca `getCategoryDisplayLabel` bunun için özel bir
+ * "Artık Kullanılmayan Hizmet" etiketi döner ve `resolveServiceCategoryId`
+ * bunu geçersiz (null) sayarak ilan düzenlerken kullanıcının aktif bir
+ * kategori seçmesini zorunlu kılar.
+ */
+export const REMOVED_CATEGORY_IDS: ReadonlySet<string> = new Set([
+  "liman-personeli",
+  "depo-personeli",
+  "depo-duzenleme",
+  "paletleme",
+  "etiketleme",
+  "sayim-hizmeti",
+  "paletli-urun-depolama",
+  "agir-yuk-depolama",
+  "vardiyali-calisma",
+  "proje-yuku",
+]);
+
+/** Bir kayıtta "Artık Kullanılmayan Hizmet" olarak gösterilecek kategori için güvenli, sahte-olmayan etiket. */
+export const DEPRECATED_CATEGORY_LABEL = "Artık Kullanılmayan Hizmet";
+
+/**
+ * Birleştirme ÖNCESİ kullanılan tek-hizmetli eski id'lerden yeni birleşik
+ * id'lere eşleme — TEK yer, `resolveServiceCategoryId` üzerinden hem
+ * `Job.category` çözümüne (bkz. `resolveLegacyJobCategoryToId`) hem
+ * `provider-services.ts`in okuma-anı normalizasyonuna hem
+ * `migrateLegacyExpertiseToServiceCategoryIds`e beslenir — hiçbir dosya bu
+ * altı id'yi kendi başına kopyalamaz.
+ */
+const MERGED_CATEGORY_ID_ALIASES: Readonly<Record<string, string>> = {
+  lashing: "lashing-unlashing",
+  unlashing: "lashing-unlashing",
+  "konteyner-dolum": "konteyner-dolum-bosaltim",
+  "konteyner-bosaltim": "konteyner-dolum-bosaltim",
+  "yukleme-gozetimi": "gozetim-hizmetleri",
+  "bosaltma-gozetimi": "gozetim-hizmetleri",
+};
+
+/**
+ * Ham bir kategori id'sini (eski BİRLEŞTİRİLMİŞ id, güncel id, ya da
+ * kaldırılmış/tanınmayan bir değer) güncel, geçerli bir katalog id'sine
+ * çözer — TEK doğruluk kaynağı. Eski birleştirilmiş bir id ise yeni birleşik
+ * id'yi döner (kullanıcıya asla fark ettirmeden); zaten geçerliyse olduğu
+ * gibi döner; kaldırılmış ya da hiç tanınmayan bir değerse `null` döner
+ * (çağıran taraf bunu "geçersiz/seçilmemiş" olarak ele alır).
+ */
+export function resolveServiceCategoryId(rawId: string): string | null {
+  const aliased = MERGED_CATEGORY_ID_ALIASES[rawId];
+  if (aliased) return aliased;
+  return isServiceCategoryId(rawId) ? rawId : null;
+}
 
 /**
  * Nakliye hizmet kategorisinin id'si — job-visibility.ts'teki Nakliye'ye özel
@@ -112,6 +179,54 @@ export const SERVICE_CATEGORY_GROUPS: ServiceCategoryGroup[] = [
  * yasak) — her zaman bu sabit üzerinden içe aktarılır.
  */
 export const NAKLIYE_SERVICE_CATEGORY_ID = "nakliye";
+
+/**
+ * Gümrük Müşavirliği hizmet kategorisinin id'si — Nakliye ile AYNI iki merkezi
+ * kurala tek referans noktası: (1) job-visibility.ts'teki keşif izolasyonu
+ * (bkz. o dosyanın ISOLATED_SERVICE_CATEGORY_IDS listesi), (2) customs-license.ts'teki
+ * "belge onaylanana kadar teklif veremez" kapısı. Diğer hiçbir dosya
+ * "gumruk-musavirligi" değerini elle yazmaz (magic string yasak).
+ */
+export const GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID = "gumruk-musavirligi";
+
+/**
+ * Depolama lokasyon sadeleştirmesi kapsamına giren İKİ alt kategori —
+ * "Depo Hizmetleri" grubunun (bkz. STORAGE_SERVICE_GROUP_ID) TAMAMI değil,
+ * yalnızca Kapalı Depolama ve Açık Saha Depolama. `job-location.ts#
+ * isSimplifiedLocationCategory` bu id'leri Gümrük Müşavirliği ile birleştirip
+ * "yalnızca İl/İlçe" konum kuralının TEK doğruluk kaynağını oluşturur —
+ * `getStorageGroupCategoryIds()` (aşağıda) BUNUN İÇİN KULLANILMAZ, o yalnızca
+ * ana sayfanın tanıtım filtresi içindir.
+ */
+export const STORAGE_LOCATION_ONLY_CATEGORY_IDS: ReadonlySet<string> = new Set([
+  "kapali-depolama",
+  "acik-saha-depolama",
+]);
+
+/** Bkz. STORAGE_LOCATION_ONLY_CATEGORY_IDS. */
+export function isStorageOnlyLocationCategory(categoryId: string): boolean {
+  return STORAGE_LOCATION_ONLY_CATEGORY_IDS.has(categoryId);
+}
+
+/**
+ * "Depo Hizmetleri" grubunun sabit id'si — ana sayfadaki (bkz.
+ * services-section.tsx) tek bir "Depolama Hizmetleri" kartı altında
+ * BİRLEŞTİRİLMİŞ gösterilen 12 alt depolama kategorisinin TEK ortak
+ * referans noktası. Bu yalnızca ana sayfa TANITIM gösteriminin sadeleşmesi
+ * içindir — ilan oluşturma formundaki alt kategoriler, hizmet kataloğunun
+ * kendisi, filtreler ve görünürlük kuralları HİÇBİRİ değişmez/birleşmez
+ * (bkz. görev tanımı); yalnızca provider-job-listing.tsx bu id'yi
+ * `getStorageGroupCategoryIds()` ile genişletip "bu 12 kategoriden
+ * herhangi biri" şeklinde ek bir filtre boyutu olarak kullanır.
+ */
+export const STORAGE_SERVICE_GROUP_ID = "depo-hizmetleri";
+
+/** Bkz. STORAGE_SERVICE_GROUP_ID — o gruba ait TÜM alt kategori id'leri, sıralı. Grup bulunamazsa (olmamalı) boş dizi döner. */
+export function getStorageGroupCategoryIds(): string[] {
+  return SERVICE_CATEGORY_GROUPS.find((group) => group.id === STORAGE_SERVICE_GROUP_ID)?.categories.map(
+    (category) => category.id,
+  ) ?? [];
+}
 
 const VALID_SERVICE_CATEGORY_IDS = new Set(
   SERVICE_CATEGORY_GROUPS.flatMap((group) => group.categories.map((category) => category.id)),
@@ -213,10 +328,10 @@ void LEGACY_DEPOLAMA; // bilerek eşlenmedi, bkz. aşağıdaki not.
  * orijinal veri olduğu gibi kalır).
  */
 export const LEGACY_CATEGORY_TO_SERVICE_IDS: Readonly<Record<string, readonly string[]>> = {
-  [LEGACY_LASHING]: ["lashing"],
-  [LEGACY_YUKLEME_BOSALTMA_GOZETIMI]: ["yukleme-gozetimi", "bosaltma-gozetimi"],
-  [LEGACY_KONTEYNER_DOLUM]: ["konteyner-dolum"],
-  [LEGACY_KONTEYNER_BOSALTIM]: ["konteyner-bosaltim"],
+  [LEGACY_LASHING]: ["lashing-unlashing"],
+  [LEGACY_YUKLEME_BOSALTMA_GOZETIMI]: ["gozetim-hizmetleri"],
+  [LEGACY_KONTEYNER_DOLUM]: ["konteyner-dolum-bosaltim"],
+  [LEGACY_KONTEYNER_BOSALTIM]: ["konteyner-dolum-bosaltim"],
   [LEGACY_FORKLIFT_OPERATORU]: ["forklift-operatoru"],
   [LEGACY_VINC_OPERATORU]: ["vinc-operatoru"],
   [LEGACY_REACH_STACKER_OPERATORU]: ["reach-stacker-operatoru"],
@@ -236,8 +351,9 @@ export const LEGACY_CATEGORY_TO_SERVICE_IDS: Readonly<Record<string, readonly st
 export function migrateLegacyExpertiseToServiceCategoryIds(expertise: string[]): string[] {
   const ids = new Set<string>();
   for (const value of expertise) {
-    if (isServiceCategoryId(value)) {
-      ids.add(value);
+    const resolved = resolveServiceCategoryId(value);
+    if (resolved) {
+      ids.add(resolved);
       continue;
     }
     const mapped = LEGACY_CATEGORY_TO_SERVICE_IDS[value];
@@ -248,33 +364,41 @@ export function migrateLegacyExpertiseToServiceCategoryIds(expertise: string[]):
 
 /**
  * `Job.category` (tekli seçim) için en iyi çaba ("best effort") migrasyonu
- * — `migrateLegacyExpertiseToServiceCategoryIds`in tekli karşılığıdır.
- * Zaten geçerli bir id ise olduğu gibi döner. Eski, birden fazla yeni
- * id'ye karşılık gelen bir değerse (ör. "Yükleme / Boşaltma Gözetimi")
- * eşlemedeki İLK id kullanılır — tek seçimlik bir alan için makul bir
- * varsayılan, ama tam karşılığın kaybolabileceği bilinen bir sınırlamadır
- * (bkz. rapor). Hiç eşleşme yoksa (ör. "Depolama") `null` döner — çağıran
- * taraf (job-edit-form.tsx) bunu "kategori seçilmemiş" gibi ele alır,
- * kullanıcıyı yeni katalogdan geçerli bir kategori seçmeye yönlendirir;
- * ilanın kendi `category` alanı bu fonksiyon çağrılırken DEĞİŞTİRİLMEZ.
+ * — `migrateLegacyExpertiseToServiceCategoryIds`in tekli karşılığıdır. Önce
+ * `resolveServiceCategoryId` denenir (zaten geçerli bir id, ya da eski
+ * BİRLEŞTİRİLMİŞ bir id — bkz. `MERGED_CATEGORY_ID_ALIASES` — ise onu
+ * çözer); bulamazsa eski, ham Türkçe `jobs.ts#SERVICE_CATEGORIES` metnine
+ * (`LEGACY_CATEGORY_TO_SERVICE_IDS`) bakılır — birden fazla yeni id'ye
+ * karşılık gelen bir değerse eşlemedeki İLK id kullanılır (tek seçimlik bir
+ * alan için makul bir varsayılan). Hiç eşleşme yoksa (ör. "Depolama", ya da
+ * KALDIRILMIŞ bir kategori id'si — bkz. `REMOVED_CATEGORY_IDS`) `null`
+ * döner — çağıran taraf (job-edit-form.tsx) bunu "kategori seçilmemiş" gibi
+ * ele alır, kullanıcıyı yeni katalogdan geçerli bir kategori seçmeye
+ * yönlendirir; ilanın kendi `category` alanı bu fonksiyon çağrılırken
+ * DEĞİŞTİRİLMEZ.
  */
 export function resolveLegacyJobCategoryToId(rawCategory: string): string | null {
-  if (isServiceCategoryId(rawCategory)) return rawCategory;
+  const resolved = resolveServiceCategoryId(rawCategory);
+  if (resolved) return resolved;
   const mapped = LEGACY_CATEGORY_TO_SERVICE_IDS[rawCategory];
   return mapped?.[0] ?? null;
 }
 
 /**
  * `Job.category`'nin GÜVENLİ görüntüleme etiketini üretir — hem yeni
- * (id tabanlı) hem eski (ham Türkçe metin) kayıtlarla çalışır. Yeni bir
- * katalog id'si ise karşılığı gösterilir; değilse (eski ilanlarda olduğu
- * gibi zaten okunabilir bir Türkçe metin, ya da hiç tanınmayan bir değer)
- * olduğu gibi gösterilir — veri asla kaybolmaz/boş görünmez.
+ * (id tabanlı, eski BİRLEŞTİRİLMİŞ id dahil) hem eski (ham Türkçe metin)
+ * kayıtlarla çalışır. `resolveServiceCategoryId` ile çözülebiliyorsa güncel
+ * etiket gösterilir (eski "lashing" bir kayıt artık "Lashing / Unlashing"
+ * gösterir — kullanıcı hiçbir fark görmez). Çözülemiyor ama bilinen bir
+ * KALDIRILMIŞ id ise (bkz. `REMOVED_CATEGORY_IDS`) `DEPRECATED_CATEGORY_LABEL`
+ * gösterilir. Hiçbiri değilse (eski ilanlarda olduğu gibi zaten okunabilir
+ * bir Türkçe metin, ya da hiç tanınmayan bir değer) ham değer olduğu gibi
+ * gösterilir — veri asla kaybolmaz/boş görünmez.
  */
 export function getCategoryDisplayLabel(rawCategory: string): string {
-  if (isServiceCategoryId(rawCategory)) {
-    return getServiceCategoryLabel(rawCategory) ?? rawCategory;
-  }
+  const resolved = resolveServiceCategoryId(rawCategory);
+  if (resolved) return getServiceCategoryLabel(resolved) ?? resolved;
+  if (REMOVED_CATEGORY_IDS.has(rawCategory)) return DEPRECATED_CATEGORY_LABEL;
   return rawCategory;
 }
 

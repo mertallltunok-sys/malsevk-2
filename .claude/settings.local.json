@@ -21,7 +21,12 @@
       "Bash(vercel --version)",
       "Bash(node -e ' *)",
       "Read(//temp/readonly/**)",
-      "Bash(grep -n \"paths\\\\|@/\\\\*\" tsconfig.json)"
+      "Bash(grep -n \"paths\\\\|@/\\\\*\" tsconfig.json)",
+      "Bash(node -e \"const icons = require\\('/c/Users/merta/malsevk-2/node_modules/lucide-react/dist/cjs/lucide-react.js'\\); const names=['Anchor','Users','UserCog','LifeBuoy','Truck','HardHat','Forklift','Container','Warehouse','Package','Link2','MoveVertical','PackagePlus','PackageMinus','Wrench','ClipboardList','ShieldCheck','Timer']; names.forEach\\(n=>console.log\\(n, typeof icons[n]\\)\\);\")",
+      "Bash(npx tsc *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(node scripts/tmp-active-listing-closed-plus-completed-visibility-test.mjs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000)"
     ]
   }
 }

@@ -6,6 +6,20 @@ import type { Currency } from "./types";
  */
 export const MAX_OFFER_AMOUNT = 999_999_999;
 
+/** Geçerli para birimlerinin TEK doğruluk kaynağı — offer-form.tsx, offer-form-validation.ts, offers.ts hepsi buradan içe aktarır, hiçbiri kendi "TRY"/"USD"/"EUR" karşılaştırmasını tutmaz. */
+export const CURRENCY_VALUES: readonly Currency[] = ["TRY", "USD", "EUR"];
+
+export function isValidCurrency(value: unknown): value is Currency {
+  return typeof value === "string" && (CURRENCY_VALUES as readonly string[]).includes(value);
+}
+
+const CURRENCY_LABELS: Record<Currency, string> = { TRY: "TL", USD: "USD", EUR: "€" };
+
+/** Bir para biriminin gösterim etiketi/sembolü — formatMoney ve offer-form.tsx'in tutar alanı yanındaki rozet AYNI bu haritayı kullanır, kopyalanmaz. */
+export function getCurrencyLabel(currency: Currency): string {
+  return CURRENCY_LABELS[currency];
+}
+
 export type PriceParseError =
   | "empty"
   | "invalid"
@@ -78,10 +92,11 @@ export function hasAtMostTwoDecimals(value: number): boolean {
 }
 
 /**
- * Örnekler: 2500 -> "2.500 TL", 12500.5 -> "12.500,50 TL", 350 USD -> "350 USD".
- * Intl'in "currency" biçimindeki sembol/kod yerleşimi ortama göre değişebildiği
- * için burada sayı grupları Intl ile biçimlendirilip para birimi kodu açıkça
- * sona eklenir; böylece kullanıcıya her zaman TL veya USD net şekilde gösterilir.
+ * Örnekler: 2500 -> "2.500 TL", 12500.5 -> "12.500,50 TL", 350 USD -> "350 USD",
+ * 8750.5 EUR -> "8.750,50 €". Intl'in "currency" biçimindeki sembol/kod
+ * yerleşimi ortama göre değişebildiği için burada sayı grupları Intl ile
+ * biçimlendirilip para birimi etiketi (bkz. getCurrencyLabel) açıkça sona
+ * eklenir; böylece kullanıcıya her zaman net bir para birimi gösterilir.
  */
 export function formatMoney(amount: number, currency: Currency): string {
   const isWholeNumber = Number.isInteger(amount);
@@ -89,6 +104,5 @@ export function formatMoney(amount: number, currency: Currency): string {
     minimumFractionDigits: isWholeNumber ? 0 : 2,
     maximumFractionDigits: 2,
   }).format(amount);
-  const label = currency === "TRY" ? "TL" : "USD";
-  return `${formattedNumber} ${label}`;
+  return `${formattedNumber} ${getCurrencyLabel(currency)}`;
 }

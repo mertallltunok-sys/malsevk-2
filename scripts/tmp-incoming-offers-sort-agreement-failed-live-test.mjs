@@ -1,5 +1,22 @@
 // node scripts/tmp-incoming-offers-sort-agreement-failed-live-test.mjs
 //
+// SÜPERSEDE EDİLDİ — bkz. scripts/tmp-incoming-offers-hide-settled-status-test.mjs.
+// Bu script'in kök varsayımı ("agreement_failed durumundaki bir teklif Gelen
+// Teklifler'de KALIR, yalnızca aynı ilanın altına iner") sonraki bir görevle
+// KASITLI OLARAK tersine çevrildi: artık `job-requests.ts#
+// isOfferShownInIncomingOffersScreen` gereği "agreement_failed" (ve
+// "rejected") bu ekrandan TAMAMEN kalkıyor — kayıt silinmiyor, yalnızca bu
+// TEK ekranın render listesinden çıkıyor. Bu script BİLEREK değiştirilmedi —
+// o anki (o zaman doğru sanılan) sıralama davranışının tarihsel kaydı olarak
+// kalır (bkz. CLAUDE.md "tmp-*.mjs" script konvansiyonu) — bu yüzden
+// aşağıdaki "agreement_failed teklif aynı grupta görünmeye devam ediyor"
+// beklentileri artık KASITLI OLARAK geçmeyecektir; canlı regresyon kapısı
+// olarak tmp-incoming-offers-hide-settled-status-test.mjs kullanılmalıdır.
+// "Kabul edildi -> butonlar gizlenir -> Anlaşma Sağlanamadı -> kardeşin
+// butonları tekrar görünür" alt kuralı kavramsal olarak hâlâ doğrudur ama
+// yeni script bunu da kendi senaryosunda ayrıca kapsar.
+//
+// --- Aşağıdaki orijinal açıklama (artık kısmen geçersiz) ---
 // "Gelen Teklifler" (incoming-offers-panel.tsx) ekranındaki yeni sıralama
 // kuralını GERÇEK arayüz akışlarıyla (ham localStorage enjeksiyonu YOK) uçtan
 // uca doğrular: "agreement_failed" durumundaki bir teklif AYNI ilana ait

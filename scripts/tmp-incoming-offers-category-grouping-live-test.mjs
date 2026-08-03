@@ -297,14 +297,22 @@ async function main() {
   assert.equal(await unrelatedDepoCard.getByRole("button", { name: "Kabul Et", exact: true }).count(), 1, "TEST F: FARKLI kategoriye (Depo) ait teklifin butonları ETKİLENMEMELİ");
   ok("TEST F: Aynı ilandaki kilit mesajı doğru görünüyor; farklı ilan/kategorideki teklifler ETKİLENMİYOR");
 
-  await offerCard(page, AMOUNT_LASHING_A_1).getByRole("button", { name: "Anlaşma Sağlanamadı", exact: true }).click();
-  await offerCard(page, AMOUNT_LASHING_A_1).getByRole("radio", { name: "Diğer", exact: true }).check();
-  await offerCard(page, AMOUNT_LASHING_A_1).getByRole("button", { name: "Anlaşma Sağlanamadı Olarak İşaretle", exact: true }).click();
-  await offerCard(page, AMOUNT_LASHING_A_1).getByText("Anlaşma Sağlanamadı", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  const agreementFailedCard = offerCard(page, AMOUNT_LASHING_A_1);
+  await agreementFailedCard.getByRole("button", { name: "Anlaşma Sağlanamadı", exact: true }).click();
+  await agreementFailedCard.getByRole("radio", { name: "Diğer", exact: true }).check();
+  await agreementFailedCard.getByRole("button", { name: "Anlaşma Sağlanamadı Olarak İşaretle", exact: true }).click();
+  // job-requests.ts#isOfferShownInIncomingOffersScreen: "agreement_failed" artık
+  // Gelen Teklifler'den TAMAMEN kalkar (kayıt silinmez, yalnızca bu ekrandan
+  // çıkar) — kart bir rozetle GÜNCELLENMEZ, DOM'dan kaldırılır.
+  await agreementFailedCard.waitFor({ state: "hidden", timeout: 10000 });
   await siblingCard.getByRole("button", { name: "Kabul Et", exact: true }).waitFor({ state: "visible", timeout: 10000 });
   assert.equal(await siblingCard.getByRole("button", { name: "Reddet", exact: true }).count(), 1, "TEST G: Anlaşma sağlanamadığında Reddet butonu da tekrar görünmeli");
-  assert.equal(await lashingSection.getByRole("heading", { level: 3, name: jobLashingATitle, exact: true }).count(), 1, "TEST G: Anlaşma Sağlanamadı teklifi HÂLÂ aynı (Lashing) kategori ve aynı (İlan A) ilan grubunda kalmalı — farklı sayfaya taşınmamalı");
-  ok("TEST G: 'Anlaşma Sağlanamadı' sonrası kardeş teklifin butonları tekrar görünüyor; ilgili teklif kendi hizmet türü ve ilan grubunda KALDI");
+  assert.equal(
+    await lashingSection.getByRole("heading", { level: 3, name: jobLashingATitle, exact: true }).count(),
+    1,
+    "TEST G: kardeş (hâlâ pending) teklif sayesinde İlan A grubu (Lashing kategorisi altında) hâlâ görünür kalmalı",
+  );
+  ok("TEST G: 'Anlaşma Sağlanamadı' sonrası kardeş teklifin butonları tekrar görünüyor; anlaşma sağlanamayan teklifin kendisi Gelen Teklifler'den kalktı, İlan A grubu kardeş teklif sayesinde kaldı");
 
   // =====================================================================
   // TEST J/K + masaüstü geniş alan kullanımı: xl (>=1280px) genişlikte iki

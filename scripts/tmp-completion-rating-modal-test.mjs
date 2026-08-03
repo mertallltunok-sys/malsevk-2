@@ -55,7 +55,12 @@ async function startWorkFor(page, jobTitle) {
   await page.waitForTimeout(400);
 }
 async function requestCompletionFor(page, jobTitle) {
-  await page.goto(`${BASE_URL}/panel/tekliflerim`);
+  // "Tamamlandı Olarak İşaretle" yalnızca "Devam Eden" (in_progress) sekmesinde
+  // görünür (bkz. my-offers-panel.tsx#getProviderOfferFilter) — sorgu
+  // parametresi olmadan bu sayfa varsayılan "Aktif" sekmesine düşer, kart hiç
+  // render edilmez ve buton araması 30sn sonra zaman aşımına uğrar (önceden
+  // burada eksikti — ön koşul kurulumundaki gerçek bir hataydı).
+  await page.goto(`${BASE_URL}/panel/tekliflerim?durum=devam-eden`);
   const card = page.locator("div.rounded-card").filter({ hasText: jobTitle });
   await card.getByRole("button", { name: "Tamamlandı Olarak İşaretle", exact: true }).click();
   await page.getByRole("button", { name: "Evet, Tamamlandı Olarak İşaretle" }).click();
@@ -112,6 +117,19 @@ async function setupAcceptedInProgress(page, job, providerLoginFn) {
 
 async function main() {
   const browser = await chromium.launch();
+  try {
+    await run(browser);
+  } finally {
+    // `main()` başarısız olursa bile browser'ı kapat — bu olmadan, hata
+    // sonrası açık kalan browser/Chromium süreç ağacı Node event loop'unu
+    // (Playwright'ın browser bağlantısı üzerinden) canlı tutar ve process
+    // asla kendiliğinden sonlanmaz (görünürde "takılmış" gibi durur, aslında
+    // test çoktan başarısız olmuştur — bkz. bu görevin kök neden analizi).
+    await browser.close();
+  }
+}
+
+async function run(browser) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const consoleErrors = [];
@@ -407,7 +425,6 @@ async function main() {
     localStorage.setItem("malsevk.ratings.v1", JSON.stringify(ratings));
   }, jobIds);
 
-  await browser.close();
   console.log(`\n[completion-rating-modal-test] ${passed} test geçti.`);
 }
 

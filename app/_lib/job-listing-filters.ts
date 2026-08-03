@@ -1,5 +1,6 @@
 import { resolveJobFacility } from "./job-location";
 import { isOfferVisibleInNormalLists } from "./job-requests";
+import { isTransportationCategory } from "./nakliye-route";
 import { getOfferForJob } from "./offers";
 import { resolveLegacyJobCategoryToId, SERVICE_CATEGORY_GROUPS } from "./service-catalog";
 import { slugifyTurkish } from "./turkish-text";
@@ -8,6 +9,7 @@ import {
   getDistrictsByProvinceCode,
   getFacilitiesByProvinceAndDistrict,
   getProvinceCodeBySlug,
+  getProvinces,
 } from "./turkey-locations";
 import type { Job } from "./types";
 
@@ -29,16 +31,13 @@ export const OFFER_STATUS_FILTER_OPTIONS: { value: OfferStatusFilter; label: str
 ];
 
 /**
- * MALSEVK şu an yalnızca Kocaeli'de hizmet veriyor — bu yüzden İl filtresi
- * arayüzde artık bir seçim kutusu değil, sabit/readonly bir değer olarak
- * gösterilir (bkz. job-listing-filter-bar.tsx). Anahtar, `resolveJobProvinceKey`
+ * Türkiye Geneli İl/İlçe: İl filtresi artık `job-listing-filter-bar.tsx`'te
+ * gerçek bir `SearchableSelect` (bu dosyadaki `buildProvinceOptions`/
+ * `matchesProvinceFilter` ile beslenen) — Kocaeli yalnızca başlangıç
+ * varsayılanıdır, kilitli/readonly DEĞİLDİR. Anahtar, `resolveJobProvinceKey`
  * ile ayrı bir yerde tekrar üretilmesi gereken bir ham string olarak DEĞİL,
  * tesis/ilan eşleştirmesinde zaten kullanılan aynı `slugifyTurkish` üzerinden
- * türetilir — bu yüzden Türkiye geneline açıldığında yapılması gereken tek
- * şey, `job-listing-filter-bar.tsx`'teki sabit "Kocaeli" bloğunu tekrar bir
- * `SearchableSelect`e (bu dosyada hâlâ değişmeden duran `buildProvinceOptions`/
- * `matchesProvinceFilter` ile beslenen) çevirmektir — filtre mantığının
- * kendisi hiç değişmez.
+ * türetilir.
  */
 export const FIXED_PROVINCE_LABEL = "Kocaeli";
 export const FIXED_PROVINCE_KEY = slugifyTurkish(FIXED_PROVINCE_LABEL);
@@ -46,7 +45,7 @@ export const FIXED_PROVINCE_KEY = slugifyTurkish(FIXED_PROVINCE_LABEL);
 export type JobListingFilterState = {
   /** service-catalog.ts#SERVICE_CATEGORY_GROUPS'taki bir kategori id'si, ya da "" (Tümü). */
   category: string;
-  /** `slugifyTurkish(job.province)` ile üretilen il anahtarı. Arayüzde artık düzenlenemez — her zaman FIXED_PROVINCE_KEY (bkz. yukarıdaki not). */
+  /** `slugifyTurkish(job.province)` ile üretilen il anahtarı — Türkiye geneli serbestçe seçilebilir, başlangıç değeri FIXED_PROVINCE_KEY (bkz. yukarıdaki not). */
   province: string;
   /** `getDistrictId(job.district)` ile üretilen ilçe anahtarı, ya da "" (Tümü). */
   district: string;
@@ -54,6 +53,24 @@ export type JobListingFilterState = {
   facility: string;
   dateBucket: DateBucket;
   offerStatus: OfferStatusFilter;
+  /**
+   * Nakliye Güzergâh Yönetimi — yalnızca `category` Nakliye'nin kendi id'sine
+   * eşitken görünür/uygulanır (bkz. job-listing-filter-bar.tsx) ve o durumda
+   * yukarıdaki `district`/`facility`nin YERİNE geçer — `province` (genel,
+   * sabit Kocaeli kilidi) ayrı kalır, kilit görsel olarak DEĞİŞMEZ, ama
+   * Nakliye satırları için eşleştirmede KULLANILMAZ (bkz.
+   * provider-job-listing.tsx — pickup artık serbestçe seçilebildiği için bu
+   * genel kilidi Nakliye satırlarına uygulamak, Kocaeli dışı pickup'lı her
+   * Nakliye ilanını bu ekrandan tamamen gizlerdi). `nakliyePickupProvince`/
+   * `nakliyePickupDistrict` job.province/job.district'in (pickup'ın kendisi)
+   * anahtarlarıdır — `resolveJobProvinceKey`/`resolveJobDistrictKey` ile AYNI
+   * şema.
+   */
+  nakliyePickupProvince: string;
+  nakliyePickupDistrict: string;
+  /** `job.deliveryProvince`/`job.deliveryDistrict`in anahtarları — AYNI şema. */
+  nakliyeDeliveryProvince: string;
+  nakliyeDeliveryDistrict: string;
 };
 
 export const DEFAULT_JOB_LISTING_FILTERS: JobListingFilterState = {
@@ -63,6 +80,10 @@ export const DEFAULT_JOB_LISTING_FILTERS: JobListingFilterState = {
   facility: "",
   dateBucket: "tumu",
   offerStatus: "tumu",
+  nakliyePickupProvince: "",
+  nakliyePickupDistrict: "",
+  nakliyeDeliveryProvince: "",
+  nakliyeDeliveryDistrict: "",
 };
 
 export function hasActiveFilters(filters: JobListingFilterState): boolean {
@@ -72,7 +93,11 @@ export function hasActiveFilters(filters: JobListingFilterState): boolean {
     filters.district !== "" ||
     filters.facility !== "" ||
     filters.dateBucket !== "tumu" ||
-    filters.offerStatus !== "tumu"
+    filters.offerStatus !== "tumu" ||
+    filters.nakliyePickupProvince !== "" ||
+    filters.nakliyePickupDistrict !== "" ||
+    filters.nakliyeDeliveryProvince !== "" ||
+    filters.nakliyeDeliveryDistrict !== ""
   );
 }
 
@@ -171,27 +196,22 @@ export function matchesDistrictFilter(job: Job, selectedDistrictKey: string): bo
 }
 
 /**
- * `İlanlarda gerçekten kullanılan şehirleri gösterebilir` — seçenekler o an
- * ekrandaki aktif ilanlardan türetilir (hiçbir seçenek garanti sıfır sonuç
- * vermez), ama eşleştirme kimliği yukarıdaki `resolveJobProvinceKey` ile
- * (isim değil) üretilir; bu yüzden aynı il farklı yazımla iki kez görünmez.
- *
- * ŞU AN ARAYÜZDE KULLANILMIYOR: İl filtresi MALSEVK'in Kocaeli-odaklı ilk
- * sürümünde sabit/readonly'dir (bkz. FIXED_PROVINCE_KEY, job-listing-filter-bar.tsx).
- * Bu fonksiyon, Türkiye geneline açılınca İl alanının tekrar bir
- * `SearchableSelect`e dönüştürülebilmesi için BİLEREK silinmeden bırakıldı —
- * `getJobOfferAvailability`'nin kullanılmayan "kapali" dalıyla aynı desen.
+ * İl seçenekleri — İlçe/Bölge-Tesis filtreleriyle AYNI ilkeyle, o an
+ * ekrandaki ilan verisinden DEĞİL, turkey-locations.ts'in merkezi il
+ * referans verisinden (`getProvinces()`, ilan oluşturma/düzenleme
+ * formlarının kullandığı AYNI 81 illik kaynak) gelir. ÖNCEDEN (bug) bu
+ * liste yalnızca o an en az bir ilanı olan illeri gösteriyordu — Kocaeli
+ * ağırlıklı örnek/seed verisiyle pratikte yalnızca 2-3 il listede
+ * görünüyordu (bkz. buildDistrictOptions'ın aynı sınıf, zaten düzeltilmiş
+ * hatası). Artık seçili ilde/hiçbir ilde hiç ilan olmasa da Türkiye'nin 81
+ * ili eksiksiz listelenir. Anahtar (value) yine `resolveJobProvinceKey`
+ * (slugifyTurkish) ile üretilir — matchesProvinceFilter'ın job.province'i
+ * çözerken kullandığı AYNI şema, ayrı bir eşleştirme yolu icat edilmez.
+ * `job-listing-filter-bar.tsx`'teki İl `SearchableSelect`ini besleyen kaynak.
  */
-export function buildProvinceOptions(jobs: Job[]): FilterOption[] {
-  const seen = new Map<string, string>();
-  for (const job of jobs) {
-    const trimmed = job.province.trim();
-    if (!trimmed) continue;
-    const key = resolveJobProvinceKey(trimmed);
-    if (!seen.has(key)) seen.set(key, trimmed);
-  }
-  return [...seen.entries()]
-    .map(([value, label]) => ({ value, label }))
+export function buildProvinceOptions(): FilterOption[] {
+  return getProvinces()
+    .map((province) => ({ value: resolveJobProvinceKey(province.name), label: province.name }))
     .sort((a, b) => a.label.localeCompare(b.label, "tr"));
 }
 
@@ -240,4 +260,64 @@ export function buildFacilityOptions(selectedProvinceKey: string, selectedDistri
 export function matchesFacilityFilter(job: Job, selectedFacilityId: string): boolean {
   if (selectedFacilityId === "") return true;
   return resolveJobFacility(job)?.id === selectedFacilityId;
+}
+
+function buildProvinceOptionsFromNames(names: string[]): FilterOption[] {
+  const seen = new Map<string, string>();
+  for (const raw of names) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = resolveJobProvinceKey(trimmed);
+    if (!seen.has(key)) seen.set(key, trimmed);
+  }
+  return [...seen.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "tr"));
+}
+
+/**
+ * "Alınacak İl" seçenekleri — Nakliye ilanlarının PICKUP'ı (job.province,
+ * mevcut/paylaşılan alan) artık serbestçe seçilebildiği için (bkz.
+ * nakliye-route.ts) burada da `buildProvinceOptions` ile AYNI "gerçek
+ * kayıtlı ilan verisinden türet" ilkesi kullanılır — yalnızca Nakliye
+ * ilanları arasından, o an ekrandaki listeden (görev tanımı madde 9:
+ * "Filtre sonuçları gerçek kayıtlı güzergâh verilerine göre hesaplanmalı").
+ */
+export function buildNakliyePickupProvinceOptions(jobs: Job[]): FilterOption[] {
+  return buildProvinceOptionsFromNames(
+    jobs.filter((job) => isTransportationCategory(job.category)).map((job) => job.province),
+  );
+}
+
+/** "Teslim İli" seçenekleri — `buildNakliyePickupProvinceOptions` ile AYNI ilke, `job.deliveryProvince` üzerinden. */
+export function buildNakliyeDeliveryProvinceOptions(jobs: Job[]): FilterOption[] {
+  return buildProvinceOptionsFromNames(
+    jobs
+      .filter((job): job is Job & { deliveryProvince: string } => isTransportationCategory(job.category) && Boolean(job.deliveryProvince))
+      .map((job) => job.deliveryProvince),
+  );
+}
+
+/** "Alınacak İl" eşleştirmesi — pickup === job.province (mevcut/paylaşılan alan), matchesProvinceFilter'ın AYNEN kullanımı. */
+export function matchesNakliyePickupProvinceFilter(job: Job, selectedProvinceKey: string): boolean {
+  return matchesProvinceFilter(job, selectedProvinceKey);
+}
+
+/** "Alınacak İlçe" eşleştirmesi — pickup === job.district (mevcut/paylaşılan alan), matchesDistrictFilter'ın AYNEN kullanımı. */
+export function matchesNakliyePickupDistrictFilter(job: Job, selectedDistrictKey: string): boolean {
+  return matchesDistrictFilter(job, selectedDistrictKey);
+}
+
+/** "Teslim İli" eşleştirmesi — job.deliveryProvince üzerinden, matchesProvinceFilter ile AYNI anahtar şeması. */
+export function matchesNakliyeDeliveryProvinceFilter(job: Job, selectedProvinceKey: string): boolean {
+  if (selectedProvinceKey === "") return true;
+  if (!job.deliveryProvince) return false;
+  return resolveJobProvinceKey(job.deliveryProvince) === selectedProvinceKey;
+}
+
+/** "Teslim İlçesi" eşleştirmesi — job.deliveryDistrict üzerinden, matchesDistrictFilter ile AYNI anahtar şeması. */
+export function matchesNakliyeDeliveryDistrictFilter(job: Job, selectedDistrictKey: string): boolean {
+  if (selectedDistrictKey === "") return true;
+  if (!job.deliveryDistrict) return false;
+  return resolveJobDistrictKey(job.deliveryDistrict) === selectedDistrictKey;
 }

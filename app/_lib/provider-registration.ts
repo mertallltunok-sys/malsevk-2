@@ -3,11 +3,17 @@ import { deletePhotoBlobs } from "./photo-blob-store";
 import {
   recordProviderDocumentConsent,
   deleteProviderDocumentConsentForUser,
+  CUSTOMS_LICENSE_STATEMENT_ID,
 } from "./provider-document-consents";
-import { addProviderDocuments, deleteProviderDocumentsForUser } from "./provider-documents";
+import {
+  addProviderDocuments,
+  deleteProviderDocumentsForUser,
+  CUSTOMS_LICENSE_DOCUMENT_TYPE,
+} from "./provider-documents";
 import { deleteProviderServicesForUser, setProviderServiceCategoryIds } from "./provider-services";
 import { isServiceCategoryId } from "./service-catalog";
 import { deleteUserById, registerUser, type RegisterInput, type RegisterResult } from "./users";
+import { isCustomsBrokerProvider, isGeneralDocumentRequired } from "./customs-license";
 
 /**
  * Kayıt sırasında (kullanıcı kaydı tamamlanmadan ÖNCE) zaten doğrulanıp
@@ -28,6 +34,20 @@ export type RegisterProviderInput = RegisterInput & {
   documents: ProviderRegistrationDocumentInput[];
   /** Kullanıcı "Belge Doğruluk Beyanı" kutusunu işaretlemiş olmalıdır — burada da (arayüzden bağımsız) tekrar doğrulanır. */
   documentDeclarationAccepted: boolean;
+  /**
+   * Yalnızca `serviceCategoryIds` Gümrük Müşavirliği içeriyorsa anlamlıdır ve
+   * ZORUNLUDUR (bkz. customs-license.ts) — genel `documents` listesinden
+   * AYRI tutulur çünkü kendi belge türüyle (CUSTOMS_LICENSE_DOCUMENT_TYPE)
+   * etiketlenmesi ve kendi beyanıyla (customsLicenseDeclarationAccepted)
+   * eşleşmesi gerekir. Seçilen hizmet kümesi TAMAMEN Gümrük Müşavirliği'nden
+   * ibaretse (bkz. customs-license.ts#isCustomsOnlyRegistration) genel
+   * Faaliyet Belgesi zorunluluğunun YERİNE geçer; başka bir kategori de
+   * seçiliyse (ör. Gümrük + Lashing) genel belge kuralı diğer kategoriler
+   * için zaten geçerli olduğundan bu ONUN YANINA eklenir.
+   */
+  customsLicenseDocument?: ProviderRegistrationDocumentInput;
+  /** Yalnızca Gümrük Müşavirliği seçiliyken anlamlıdır — "Yüklediğim belge bana aittir ve günceldir." kutusu işaretlenmiş olmalıdır. */
+  customsLicenseDeclarationAccepted?: boolean;
 };
 
 /**
@@ -53,7 +73,10 @@ export type RegisterProviderInput = RegisterInput & {
  * gereksinimini karşılayan tek nokta burasıdır.
  */
 export async function registerProviderAccount(input: RegisterProviderInput): Promise<RegisterResult> {
-  const documentStorageKeys = input.documents.map((doc) => doc.indexedDbStorageKey);
+  const documentStorageKeys = [
+    ...input.documents.map((doc) => doc.indexedDbStorageKey),
+    ...(input.customsLicenseDocument ? [input.customsLicenseDocument.indexedDbStorageKey] : []),
+  ];
 
   async function failWithCleanup(error: string): Promise<RegisterResult> {
     await deletePhotoBlobs(documentStorageKeys);
@@ -68,11 +91,33 @@ export async function registerProviderAccount(input: RegisterProviderInput): Pro
   if (validServiceIds.length === 0) {
     return failWithCleanup("En az bir hizmet seçmelisiniz.");
   }
-  if (input.documents.length === 0) {
+
+  // Genel Faaliyet Belgesi/Raporu zorunluluğu (TÜM Hizmet Veren kayıtları
+  // için geçerli global KYC kuralı) — yalnızca seçilen hizmet kümesi
+  // TAMAMEN Gümrük Müşavirliği'nden ibaretse atlanır, çünkü o durumda kendi
+  // özel "Gümrük Müşaviri İzin Belgesi" bu rolü zaten üstlenir (bkz.
+  // customs-license.ts#isGeneralDocumentRequired, TEK doğruluk kaynağı).
+  // Gümrük Müşavirliği başka bir kategoriyle BİRLİKTE seçiliyse (ör.
+  // Gümrük + Lashing) bu kural diğer kategoriler için aynen geçerli kalır.
+  const generalDocumentRequired = isGeneralDocumentRequired(validServiceIds);
+  if (generalDocumentRequired && input.documents.length === 0) {
     return failWithCleanup("En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz.");
   }
-  if (!input.documentDeclarationAccepted) {
+  if (generalDocumentRequired && !input.documentDeclarationAccepted) {
     return failWithCleanup("Belge doğruluk beyanını kabul etmelisiniz.");
+  }
+
+  // Gümrük Müşavirliği ek KYC gereksinimi (bkz. customs-license.ts) — Gümrük
+  // Müşavirliği seçili olduğu sürece (tek başına veya başka kategorilerle
+  // birlikte) her zaman zorunludur.
+  const isCustomsBrokerRegistration = isCustomsBrokerProvider(validServiceIds);
+  if (isCustomsBrokerRegistration) {
+    if (!input.customsLicenseDocument) {
+      return failWithCleanup("Gümrük Müşaviri İzin Belgesi yüklemelisiniz.");
+    }
+    if (!input.customsLicenseDeclarationAccepted) {
+      return failWithCleanup("Yüklediğiniz belgenin size ait ve güncel olduğunu onaylamalısınız.");
+    }
   }
 
   const userResult = await registerUser(input);
@@ -94,21 +139,40 @@ export async function registerProviderAccount(input: RegisterProviderInput): Pro
     return rollbackUser(STORAGE_WRITE_ERROR_MESSAGE);
   }
 
-  const documentsOk = addProviderDocuments(
-    userId,
-    input.documents.map((doc) => ({
+  const documentsOk = addProviderDocuments(userId, [
+    ...input.documents.map((doc) => ({
       originalFileName: doc.originalFileName,
       mimeType: doc.mimeType,
       extension: doc.extension,
       size: doc.size,
       indexedDbStorageKey: doc.indexedDbStorageKey,
     })),
-  );
+    ...(input.customsLicenseDocument
+      ? [
+          {
+            originalFileName: input.customsLicenseDocument.originalFileName,
+            mimeType: input.customsLicenseDocument.mimeType,
+            extension: input.customsLicenseDocument.extension,
+            size: input.customsLicenseDocument.size,
+            indexedDbStorageKey: input.customsLicenseDocument.indexedDbStorageKey,
+            documentType: CUSTOMS_LICENSE_DOCUMENT_TYPE,
+          },
+        ]
+      : []),
+  ]);
   if (!documentsOk) {
     return rollbackUser(STORAGE_WRITE_ERROR_MESSAGE);
   }
 
-  if (!recordProviderDocumentConsent(userId)) {
+  // Genel "Belge Doğruluk Beyanı" yalnızca gerçekten bir genel belge
+  // yüklendiyse kaydedilir — Gümrük Müşavirliği TEK seçiliyken (yukarıda
+  // `generalDocumentRequired === false`) `input.documents` zaten boştur,
+  // var olmayan bir belge için sahte bir beyan kaydı üretilmez.
+  if (input.documents.length > 0 && !recordProviderDocumentConsent(userId)) {
+    return rollbackUser(STORAGE_WRITE_ERROR_MESSAGE);
+  }
+
+  if (isCustomsBrokerRegistration && !recordProviderDocumentConsent(userId, CUSTOMS_LICENSE_STATEMENT_ID)) {
     return rollbackUser(STORAGE_WRITE_ERROR_MESSAGE);
   }
 

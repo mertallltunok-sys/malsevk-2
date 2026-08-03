@@ -4,6 +4,7 @@ import { getProviderClosedReasonLabel } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { getJobListingCategoryBadgeLabel, type JobListingDisplayItem } from "../_lib/job-listing-row";
 import { JobThumbnail } from "./job-thumbnail";
+import { NakliyeListingRoute } from "./nakliye-listing-route";
 import { OperationServiceTags } from "./operation-service-tags";
 
 /**
@@ -51,9 +52,12 @@ import { OperationServiceTags } from "./operation-service-tags";
 export function JobListingTable({
   items,
   onJobClick,
+  showNakliyeRoute,
 }: {
   items: JobListingDisplayItem[];
   onJobClick: (jobId: string) => void;
+  /** İzleyen Hizmet Veren gerçek bir Nakliyeci mi (bkz. provider-job-listing.tsx#viewerIsNakliyeci) — false ise bu satırın Nakliye olup olmadığına bakılmaksızın her zaman standart Firma/Bölge/Konum görünümü kullanılır. */
+  showNakliyeRoute: boolean;
 }) {
   return (
     <table className="w-full border-collapse text-sm">
@@ -107,9 +111,14 @@ export function JobListingTable({
                     <OperationServiceTags services={item.services} />
                   </>
                 ) : (
-                  <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-                    {getJobListingCategoryBadgeLabel(item)}
-                  </span>
+                  <>
+                    <span className="inline-flex w-fit items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
+                      {getJobListingCategoryBadgeLabel(item)}
+                    </span>
+                    {row.productInfoLine && (
+                      <p className="mt-1.5 truncate text-xs text-muted-foreground">{row.productInfoLine}</p>
+                    )}
+                  </>
                 )}
               </td>
               <td className="max-w-xs px-3 py-3 align-top">
@@ -121,17 +130,33 @@ export function JobListingTable({
                   {job.title}
                 </Link>
               </td>
+              {/* Nakliyeci güzergâh görünümü: showNakliyeRoute (izleyici gerçek bir
+                  Nakliyeci mi, bkz. provider-job-listing.tsx) VE row.nakliyeRoute
+                  (bu satır Nakliye kategorisinde mi VE teslimat bilgisi dolu mu,
+                  bkz. nakliye-route.ts#getNakliyeShortRoute) İKİSİ birden doğruysa
+                  nakliye-listing-route.tsx#NakliyeListingRoute render edilir — aksi
+                  halde (Nakliyeci olmayan bir izleyici, ya da Nakliyeci'nin Gümrük
+                  Müşavirliği/başka kategoriden bir satırı) standart Firma/Bölge/
+                  Konum görünümü AYNEN kalır. */}
               <td className="max-w-[220px] px-3 py-3 align-top text-muted-foreground">
-                {row.location.companyOrFactoryName && (
-                  <p className="truncate font-medium text-foreground">{row.location.companyOrFactoryName}</p>
+                {showNakliyeRoute && row.nakliyeRoute ? (
+                  <NakliyeListingRoute pickup={row.nakliyeRoute.pickup} delivery={row.nakliyeRoute.delivery} />
+                ) : (
+                  <>
+                    {row.location.companyOrFactoryName && (
+                      <p className="truncate font-medium text-foreground">{row.location.companyOrFactoryName}</p>
+                    )}
+                    {row.location.facilityDisplayName && (
+                      <p className="truncate">
+                        {row.location.facilityDisplayName}
+                        {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`}
+                      </p>
+                    )}
+                    <p className="truncate text-xs">
+                      {row.location.district} / {row.location.province}
+                    </p>
+                  </>
                 )}
-                <p className="truncate">
-                  {row.location.facilityDisplayName}
-                  {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`}
-                </p>
-                <p className="truncate text-xs">
-                  {row.location.district} / {row.location.province}
-                </p>
               </td>
               <td className="whitespace-nowrap px-3 py-3 align-top text-muted-foreground">
                 {formatJobDate(job.workDate)}

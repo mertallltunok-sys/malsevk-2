@@ -1,4 +1,4 @@
-import { CalendarDays, MapPin } from "lucide-react";
+import { CalendarDays, MapPin, Package } from "lucide-react";
 import Link from "next/link";
 import {
   getJobOfferAvailability,
@@ -7,6 +7,7 @@ import {
 } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { formatJobLocationLine } from "../_lib/job-location";
+import { formatJobProductInfoLine } from "../_lib/product-catalog";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import type { Job, Offer } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
@@ -26,6 +27,7 @@ export function JobCard({
 }) {
   const rawAvailability = getJobOfferAvailability(job, offers);
   const availability = forceClosed && rawAvailability === "acik" ? "kapali" : rawAvailability;
+  const productInfoLine = formatJobProductInfoLine(job);
 
   return (
     <Link
@@ -65,6 +67,12 @@ export function JobCard({
           <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
           {formatJobDate(job.workDate)}
         </span>
+        {productInfoLine && (
+          <span className="flex items-center gap-2">
+            <Package className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {productInfoLine}
+          </span>
+        )}
       </div>
 
       <span className="text-sm font-medium text-primary">İlanı İncele</span>

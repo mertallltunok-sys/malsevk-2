@@ -1,3 +1,40 @@
+// KISMEN SÜPERSEDE EDİLDİ (İKİ AYRI DEĞİŞİKLİKLE) — bkz.
+// scripts/tmp-legal-pages-footer-modal-test.mjs VE
+// scripts/tmp-provider-registration-document-verification-test.mjs.
+// İKİNCİ süperseme: Hizmet Veren kaydına "Verdiğiniz Hizmetler" (çoklu
+// hizmet seçimi) + "Faaliyet Belgesi/Raporu Yükle" + "Belge Doğruluk
+// Beyanı" alanları eklendi, üçü de Hizmet Veren için ZORUNLU (bkz.
+// register-form-validation.ts, provider-registration.ts). Bu script'in
+// aşağıdaki "7) Hizmet Veren kaydı" adımı bu üç alanı hiç doldurmadığı için
+// artık KASITLI OLARAK "Hesap Oluştur"a bastığında yeni zorunlu-alan
+// hatalarıyla (kayıt TAMAMLANMADAN) karşılaşır — canlı regresyon kapısı
+// olarak tmp-provider-registration-document-verification-test.mjs
+// kullanılmalıdır (Hizmet Alan akışının bu değişiklikten HİÇ etkilenmediğini
+// de o script doğrular). Dosyanın geri kalanı (1-6 arası adımlar, Hizmet
+// Alan kaydı dahil) kavramsal olarak hâlâ doğrudur ve etkilenmedi.
+//
+// --- Aşağıdaki ilk süperseme notu (KVKK/Kullanım Koşulları) ---
+// Bu script'in KVKK/Kullanım Koşulları'na dair kök varsayımı ("kayıt formunda
+// AYRI iki onay kutusu vardır, her birinin kendi zorunlu-alan hata metni ve
+// kendi tam etiket metniyle işaretlenebilir checkbox'ı vardır") sonraki bir
+// görevle KASITLI OLARAK değiştirildi: artık login-form.tsx'te TEK birleşik
+// bir onay kutusu var ("Gizlilik Politikası, Kullanım Koşulları ve KVKK
+// Aydınlatma Metni'ni okudum, anladım ve kabul ediyorum.", bkz.
+// register-form-validation.ts#RegisterFormErrors.legalConsent) — üç hukuki
+// metnin adı bu cümle içinde AYRI AYRI tıklanabilir birer buton olarak yer
+// alıyor ve kendi modalını açıyor (bkz. legal-document-modal.tsx). Bu script
+// BİLEREK değiştirilmedi — kayıt formunun O ANKİ (o zaman doğru sanılan)
+// davranışının tarihsel kaydı olarak kalır (bkz. CLAUDE.md "tmp-*.mjs" script
+// konvansiyonu) — bu yüzden aşağıdaki "KVKK zorunlu hatası görünüyor" /
+// "Kullanım Koşulları zorunlu hatası görünüyor" ve `getByLabel("KVKK
+// Aydınlatma Metni'ni okudum ve kabul ediyorum.")` / `getByLabel("Kullanım
+// Koşulları'nı kabul ediyorum.")` çağrıları artık KASITLI OLARAK
+// geçmeyecektir; canlı regresyon kapısı olarak tmp-legal-pages-footer-modal-
+// test.mjs kullanılmalıdır. Bu dosyanın geri kalanı (zorunlu alan/e-posta/
+// telefon/şifre doğrulaması, rol bazlı ek alanlar, kayıt sonrası yönlendirme)
+// kavramsal olarak hâlâ doğrudur ve etkilenmedi.
+//
+// --- Aşağıdaki orijinal açıklama (artık kısmen geçersiz) ---
 // Genişletilmiş kayıt ekranının (Hesap Türü seçimi + rol bazlı ek alanlar +
 // KVKK/Kullanım Koşulları + kayıt sonrası giriş sayfasına yönlendirme)
 // uçtan uca doğrulaması. Gerçek yeni kullanıcılar oluşturur (mevcut demo

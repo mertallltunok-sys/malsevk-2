@@ -283,8 +283,14 @@ async function main() {
     ok("Çoklu hizmet operasyonu Aktif İlanlar listesinde TEK kart/satır olarak görünür, aynı operasyonun diğer ilanları tekrar etmez");
 
     const operationRow = page.locator("tr", { has: page.getByText("Asama5 Ana Hizmet", { exact: true }) });
-    await assert.doesNotReject(operationRow.getByText("Operasyon · 3 Hizmet", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
-    ok("Operasyon kartındaki toplam hizmet sayısı doğru gösterilir (3)");
+    // job-listing-row.ts#getJobListingCategoryBadgeLabel'ın GÜNCEL/kasıtlı
+    // formatı "Operasyon • {kalan} Hizmet Arıyor"dur (statik "Operasyon · N
+    // Hizmet" biçimi bu testten BAĞIMSIZ, önceki bir özellik çalışmasında
+    // kalıcı olarak değiştirildi — bkz. CLAUDE.md "Operation discovery &
+    // status UI"). `kalan = totalCount(3) - completedCount(1) = 2` (bkz.
+    // birkaç satır aşağıdaki "%33" ilerleme kontrolü — 1/3 tamamlanmış, satır 255).
+    await assert.doesNotReject(operationRow.getByText("Operasyon • 2 Hizmet Arıyor", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
+    ok("Operasyon kartındaki kalan (henüz tamamlanmamış) hizmet sayısı doğru gösterilir (toplam 3, 1 tamamlanmış, kalan 2)");
 
     await assert.doesNotReject(operationRow.getByText("Dilovası", { exact: false }).first().waitFor({ state: "visible", timeout: 5000 }));
     ok("Operasyon kartında ilçe (ilk hizmetin lokasyonu) doğru gösterilir");
@@ -406,7 +412,8 @@ async function main() {
     // "Asama5 Ucuncu Hizmet" satırına DÖNÜŞMEMESİ) anlamına gelir.
     const operationRow = page.locator("tr", { has: page.getByText("Asama5 Ana Hizmet", { exact: true }) });
     await assert.doesNotReject(operationRow.waitFor({ state: "visible", timeout: 10000 }));
-    await assert.doesNotReject(operationRow.getByText("Operasyon · 3 Hizmet", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
+    // Bkz. GRUP B'deki AYNI güncel format notu — aynı operasyon (1/3 tamamlanmış), kalan=2.
+    await assert.doesNotReject(operationRow.getByText("Operasyon • 2 Hizmet Arıyor", { exact: true }).waitFor({ state: "visible", timeout: 5000 }));
     assert.equal(await page.getByText("Asama5 Ucuncu Hizmet", { exact: true }).count(), 0, "Filtreyi geçen hizmet kendi başına ayrı bir satırda SIZMAMALI — operasyon kartının bir parçası olarak kalmalı");
     ok("Operasyona ait yalnızca 1 hizmet filtreyi geçse bile operasyon kartı TÜM operasyonu temsil ederek görünmeye devam eder (Aşama 5.1)");
 

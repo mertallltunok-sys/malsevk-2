@@ -3,13 +3,14 @@
 import { FileUp, UploadCloud } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
-  ACCEPTED_DOCUMENT_INPUT,
+  ALLOWED_EXTENSIONS,
   MAX_DOCUMENTS,
   MAX_DOCUMENT_SIZE_BYTES,
   getFileExtension,
   isAllowedDocumentExtension,
   isPreviewableImageExtension,
   validateDocumentClientSide,
+  type DocumentExtension,
 } from "../_lib/document-validation";
 import { deletePhotoBlob, putPhotoBlob } from "../_lib/photo-blob-store";
 import { ProviderDocumentCard } from "./provider-document-card";
@@ -88,11 +89,23 @@ export function ProviderDocumentUpload({
   onBusyChange,
   disabled = false,
   errorId,
+  allowedExtensions = ALLOWED_EXTENSIONS,
+  maxFiles = MAX_DOCUMENTS,
+  dropHintText = "Faaliyet belgesi/raporunuzu buraya sürükleyin veya dosya seçin.",
+  formatsHintText = "PDF, DOC(X), XLS(X), ODT, JPG, PNG, WEBP, HEIC/HEIF, TIF",
 }: {
   onDocumentsChange: (documents: ReadyProviderDocument[]) => void;
   onBusyChange?: (busy: boolean) => void;
   disabled?: boolean;
   errorId?: string;
+  /** Bu alanın kabul ettiği DAR bir alt küme — belirtilmezse document-validation.ts#ALLOWED_EXTENSIONS'ın TAMAMI (mevcut/eski davranış). */
+  allowedExtensions?: readonly DocumentExtension[];
+  /** Belirtilmezse document-validation.ts#MAX_DOCUMENTS (mevcut/eski davranış) — 1 verilirse tekil belge alanı olarak davranır (input `multiple` değildir). */
+  maxFiles?: number;
+  /** Sürükle-bırak alanının üst açıklama metni — belirtilmezse Faaliyet Belgesi'nin mevcut/eski metni. */
+  dropHintText?: string;
+  /** Alt satırdaki desteklenen biçim listesi metni — belirtilmezse Faaliyet Belgesi'nin mevcut/eski metni. */
+  formatsHintText?: string;
 }) {
   const [items, setItems] = useState<DocumentItem[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -176,14 +189,20 @@ export function ProviderDocumentUpload({
       const currentCount = itemsRef.current.length;
 
       for (const file of incoming) {
-        if (currentCount + toQueue.length >= MAX_DOCUMENTS) {
-          errors.push(`En fazla ${MAX_DOCUMENTS} belge yükleyebilirsiniz.`);
+        if (currentCount + toQueue.length >= maxFiles) {
+          errors.push(`En fazla ${maxFiles} belge yükleyebilirsiniz.`);
           break;
         }
 
         const extension = getFileExtension(file.name);
         if (!isAllowedDocumentExtension(extension)) {
           errors.push(`${file.name}: Desteklenmeyen dosya türü.`);
+          continue;
+        }
+        if (!allowedExtensions.includes(extension as DocumentExtension)) {
+          errors.push(
+            `${file.name}: Bu alan için yalnızca ${allowedExtensions.map((ext) => ext.toUpperCase()).join(", ")} dosyaları kabul edilir.`,
+          );
           continue;
         }
 
@@ -213,7 +232,7 @@ export function ProviderDocumentUpload({
         void processOne(newItems[i].clientId, toQueue[i]);
       }
     },
-    [disabled, processOne],
+    [disabled, processOne, maxFiles, allowedExtensions],
   );
 
   function handleDelete(clientId: string) {
@@ -253,9 +272,7 @@ export function ProviderDocumentUpload({
         } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
       >
         <UploadCloud className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
-        <p className="text-sm text-muted-foreground">
-          Faaliyet belgesi/raporunuzu buraya sürükleyin veya dosya seçin.
-        </p>
+        <p className="text-sm text-muted-foreground">{dropHintText}</p>
         <label
           htmlFor={inputId}
           className={`inline-flex items-center gap-2 rounded-full border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:border-primary/40 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent ${
@@ -268,16 +285,16 @@ export function ProviderDocumentUpload({
         <input
           id={inputId}
           type="file"
-          multiple
-          accept={ACCEPTED_DOCUMENT_INPUT}
+          multiple={maxFiles > 1}
+          accept={allowedExtensions.map((ext) => `.${ext}`).join(",")}
           disabled={disabled}
           onChange={handleInputChange}
           aria-describedby={errorId}
           className="sr-only"
         />
         <p className="text-xs text-muted-foreground">
-          {items.length} / {MAX_DOCUMENTS} belge yüklendi · PDF, DOC(X), XLS(X), ODT, JPG, PNG, WEBP, HEIC/HEIF,
-          TIF · en fazla {Math.round(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024))} MB
+          {items.length} / {maxFiles} belge yüklendi · {formatsHintText} · en fazla{" "}
+          {Math.round(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024))} MB
         </p>
       </div>
 

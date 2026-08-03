@@ -32,37 +32,59 @@ async function login(page, email, password) {
   await page.waitForURL(`${BASE_URL}/hizmet-talebi-olustur`);
 }
 
+// DÜZELTME (Y7, veritabanı geçişi öncesi denetim): bu yardımcı, MALSEVK'in
+// sonradan yaptığı birkaç bağımsız değişiklikten dolayı eskimişti — "Depo
+// Personeli" kategorisi kaldırılmış (bkz. service-catalog.ts#
+// REMOVED_CATEGORY_IDS), "İş Tarihi" tek alanı "Başlangıç/Bitiş Tarihi"
+// aralığına dönüşmüş, "İş Açıklaması" "Hizmete Özel Açıklama" olmuş,
+// "Firma / Fabrika Adı" ve "Operasyon Detayları" alanları formdan tamamen
+// kaldırılmış. "vinc-operatoru" kategorisi bilerek seçildi: Liman
+// Hizmetleri/Nakliye/Depolama/Gümrük Müşavirliği'nin hiçbirine dahil değil,
+// bu yüzden ne "Ürün Bilgileri" ne de sadeleştirilmiş konum/özel alan
+// blokları tetiklenir — bu test dosyasının asıl konusu (fotoğraf yükleme)
+// için en sade, ilgisiz kategori.
 async function fillBaseFormFields(page, titleSuffix) {
-  await page.getByLabel("Hizmet Kategorisi").selectOption({ label: "Depo Personeli" });
-  await page.getByLabel("İş Tarihi").fill("2026-09-15");
-  await page.getByLabel("İlan Başlığı").fill(`Foto Test İlanı ${titleSuffix}`);
+  await page.getByLabel("Hizmet Kategorisi").first().selectOption("vinc-operatoru");
+  await page.getByLabel("Başlangıç Tarihi").first().fill("2026-09-15");
+  await page.getByLabel("Bitiş Tarihi").first().fill("2026-09-15");
+  await page.getByLabel("İlan Başlığı").first().fill(`Foto Test İlanı ${titleSuffix}`);
   await page
-    .getByLabel("İş Açıklaması")
+    .getByLabel("Hizmete Özel Açıklama")
+    .first()
     .fill("Bu test ilanı otomatik tarayıcı testinden oluşturulmuştur ve en az yirmi karakter içerir.");
 
-  await page.getByRole("button", { name: "İl", exact: true }).click();
-  await page.locator('ul[aria-label="İl"]').waitFor({ state: "visible" });
-  await page.locator('ul[aria-label="İl"]').getByRole("option", { name: "Kocaeli", exact: true }).click();
+  await page.getByRole("button", { name: "İl", exact: true }).first().click();
+  await page.locator('ul[aria-label="İl"]').first().waitFor({ state: "visible" });
+  await page.locator('ul[aria-label="İl"]').first().getByRole("option", { name: "Kocaeli", exact: true }).click();
 
-  await page.getByRole("button", { name: "İlçe", exact: true }).click();
-  await page.locator('ul[aria-label="İlçe"]').waitFor({ state: "visible" });
-  await page.locator('ul[aria-label="İlçe"]').getByRole("option", { name: "Dilovası", exact: true }).click();
+  await page.getByRole("button", { name: "İlçe", exact: true }).first().click();
+  await page.locator('ul[aria-label="İlçe"]').first().waitFor({ state: "visible" });
+  await page.locator('ul[aria-label="İlçe"]').first().getByRole("option", { name: "Dilovası", exact: true }).click();
 
   // 2026-07-25: "İşin Yapılacağı Yer Türü" ayrı adımı kaldırıldı, tek bir
-  // "Bölge / Tesis" seçiciyle birleştirildi (bkz. job-location.ts).
-  await page.getByRole("button", { name: "Bölge / Tesis", exact: true }).click();
-  await page.locator('ul[aria-label="Bölge / Tesis"]').waitFor({ state: "visible" });
+  // "Liman / Sanayi / OSB" seçiciyle birleştirildi (bkz. job-location.ts).
+  await page.getByRole("button", { name: "Liman / Sanayi / OSB", exact: true }).first().click();
+  await page.locator('ul[aria-label="Liman / Sanayi / OSB"]').first().waitFor({ state: "visible" });
   await page
-    .locator('ul[aria-label="Bölge / Tesis"]')
+    .locator('ul[aria-label="Liman / Sanayi / OSB"]')
+    .first()
     .getByRole("option", { name: "Beldeport", exact: false })
+    .first()
     .click();
 
-  await page.getByLabel("Firma / Fabrika Adı").fill("Foto Test Firma A.Ş.");
-  await page.getByLabel("Açık Adres").fill("Deneme Mahallesi, Test Sokak No:1, Dilovası/Kocaeli");
+  await page.getByLabel("Açık Adres").first().fill("Deneme Mahallesi, Test Sokak No:1, Dilovası/Kocaeli");
+}
 
-  await page
-    .getByLabel("Operasyon Detayları")
-    .fill("Otomatik test için operasyon detayları girilmiştir.");
+// DÜZELTME (Y7): "İlanı Yayınla" artık tek tıklamayla yayınlamıyor —
+// Operasyon Önizlemesi (preview) modu araya girdi (bkz. CLAUDE.md "Çoklu
+// Hizmet Operasyonu"): ilk tıklama yalnızca doğrular ve önizlemeye geçer,
+// asıl yayınlama (createJob/createJobsForOperation) yalnızca önizlemenin
+// KENDİ "İlanı Yayınla" butonuna (handlePublish) tıklanınca gerçekleşir.
+async function publishJob(page) {
+  await page.getByRole("button", { name: "İlanı Yayınla" }).click();
+  await page.getByRole("heading", { name: "Operasyon Özeti" }).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByRole("button", { name: "İlanı Yayınla" }).click();
+  await page.waitForURL(/\/ilanlar\/.+/, { timeout: 15000 });
 }
 
 async function waitForPhotosReady(page, expectedCount) {
@@ -123,8 +145,7 @@ async function main() {
   await page.setInputFiles('input[type="file"]', [FIX("fixture-valid-1.jpg")]);
   await waitForPhotosReady(page, 1);
   await assert.doesNotReject(page.getByText("1 / 10 fotoğraf yüklendi").waitFor({ state: "visible" }));
-  await page.getByRole("button", { name: "İlanı Yayınla" }).click();
-  await page.waitForURL(/\/ilanlar\/.+/, { timeout: 15000 });
+  await publishJob(page);
   const firstJobUrl = page.url();
   await assert.doesNotReject(page.locator("img[alt*=' - fotoğraf ']").waitFor({ state: "visible", timeout: 10000 }));
   ok("TEST 2: 1 geçerli fotoğrafla ilan başarıyla oluşturuldu, detay sayfasında kapak fotoğrafı görünüyor");
@@ -180,8 +201,7 @@ async function main() {
   await waitForPhotosReady(page, 2);
   assert.deepEqual(await currentOrder(), ["fixture-valid-2.jpg", "fixture-valid-1.jpg"]);
 
-  await page.getByRole("button", { name: "İlanı Yayınla" }).click();
-  await page.waitForURL(/\/ilanlar\/.+/, { timeout: 15000 });
+  await publishJob(page);
   // IndexedDB'den blob okuma + object URL oluşturma asenkrondur; <img>
   // etiketi DOM'a yalnızca çözüldükten sonra eklenir — önce kapak
   // görselinin göründüğünü bekle, sonra küçük resmi say.
@@ -229,8 +249,7 @@ async function main() {
   await assert.doesNotReject(heicPreviewImg.waitFor({ state: "visible", timeout: 15000 }));
   const naturalWidth = await heicPreviewImg.evaluate((img) => img.naturalWidth);
   assert.ok(naturalWidth > 0, "HEIC önizlemesi gerçek bir görüntü olarak yüklenemedi");
-  await page.getByRole("button", { name: "İlanı Yayınla" }).click();
-  await page.waitForURL(/\/ilanlar\/.+/, { timeout: 15000 });
+  await publishJob(page);
   const detailCoverImg = page.locator("img[alt*=' - fotoğraf ']");
   await assert.doesNotReject(detailCoverImg.waitFor({ state: "visible", timeout: 10000 }));
   const detailNaturalWidth = await detailCoverImg.evaluate((img) => img.naturalWidth);

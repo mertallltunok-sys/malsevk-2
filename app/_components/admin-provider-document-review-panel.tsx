@@ -4,13 +4,23 @@ import { Check, Download, Loader2, RotateCcw, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatFileSize } from "../_lib/photo-validation";
 import { getPhotoBlob } from "../_lib/photo-blob-store";
-import { getProviderDocumentConsent, type StoredProviderDocumentConsent } from "../_lib/provider-document-consents";
+import {
+  CUSTOMS_LICENSE_STATEMENT_ID,
+  getProviderDocumentConsent,
+  type StoredProviderDocumentConsent,
+} from "../_lib/provider-document-consents";
 import { recordProviderDocumentReview } from "../_lib/provider-document-reviews";
-import { getAllProviderDocuments, type StoredProviderDocument } from "../_lib/provider-documents";
+import {
+  CUSTOMS_LICENSE_DOCUMENT_TYPE,
+  getAllProviderDocuments,
+  type StoredProviderDocument,
+} from "../_lib/provider-documents";
 import { getProviderServiceCategoryIds } from "../_lib/provider-services";
 import { getServiceCategoryLabel } from "../_lib/service-catalog";
+import { useAllContactMessages } from "../_lib/use-contact-messages";
 import { useSession } from "../_lib/use-session";
 import { getAllUsers, type StoredUser } from "../_lib/users";
+import { AdminNav } from "./admin-nav";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { StatusBadge } from "./status-badge";
 
@@ -260,6 +270,13 @@ function ProviderReviewCard({
 export function AdminProviderDocumentReviewPanel() {
   const session = useSession();
   const [refreshKey, setRefreshKey] = useState(0);
+  // Yalnızca AdminNav'daki "Bize Ulaşın" sekmesinin rozet sayısı için —
+  // bu ekranın kendi içeriğiyle ilgisi yok (bkz. contact-messages-admin-panel.tsx).
+  const contactMessages = useAllContactMessages();
+  const newContactMessageCount = useMemo(
+    () => contactMessages.filter((message) => message.status === "yeni").length,
+    [contactMessages],
+  );
 
   const groups = useMemo(() => {
     if (!session || session.role !== "admin") return [];
@@ -268,8 +285,35 @@ export function AdminProviderDocumentReviewPanel() {
     return providerUsers
       .map((user) => ({
         user,
-        documents: allDocuments.filter((doc) => doc.userId === user.id),
+        // Gümrük Müşaviri İzin Belgesi kendi AYRI bölümünde gösterilir (bkz.
+        // aşağıdaki `customsGroups`) — burada TEKRAR listelenmez.
+        documents: allDocuments.filter((doc) => doc.userId === user.id && doc.documentType !== CUSTOMS_LICENSE_DOCUMENT_TYPE),
         consent: getProviderDocumentConsent(user.id),
+      }))
+      .filter((group) => group.documents.length > 0)
+      .sort((a, b) => {
+        const aLatest = a.documents.reduce((max, doc) => (doc.uploadedAt > max ? doc.uploadedAt : max), "");
+        const bLatest = b.documents.reduce((max, doc) => (doc.uploadedAt > max ? doc.uploadedAt : max), "");
+        return bLatest.localeCompare(aLatest);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, refreshKey]);
+
+  // Gümrük Müşavirliği Belgeleri — yukarıdaki genel Faaliyet Belgesi
+  // bölümünden AYRI bir bölüm (görev gereksinimi). Aynı `ProviderReviewCard`/
+  // `DocumentRow` bileşenleri yeniden kullanılır (merkezi mimari, ikinci bir
+  // inceleme UI'ı İCAT EDİLMEZ) — yalnızca belge kümesi ve beyan (bu belgeye
+  // özel "Yüklediğim belge bana aittir ve günceldir." kaydı, bkz.
+  // CUSTOMS_LICENSE_STATEMENT_ID) farklıdır.
+  const customsGroups = useMemo(() => {
+    if (!session || session.role !== "admin") return [];
+    const allDocuments = getAllProviderDocuments();
+    const providerUsers = getAllUsers().filter((user) => user.role === "hizmet-veren");
+    return providerUsers
+      .map((user) => ({
+        user,
+        documents: allDocuments.filter((doc) => doc.userId === user.id && doc.documentType === CUSTOMS_LICENSE_DOCUMENT_TYPE),
+        consent: getProviderDocumentConsent(user.id, CUSTOMS_LICENSE_STATEMENT_ID),
       }))
       .filter((group) => group.documents.length > 0)
       .sort((a, b) => {
@@ -289,6 +333,8 @@ export function AdminProviderDocumentReviewPanel() {
 
   return (
     <div>
+      <AdminNav newContactMessageCount={newContactMessageCount} />
+
       <h1 className="text-2xl font-bold tracking-heading leading-tight text-foreground">Hizmet Veren Belge Kontrolü</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Hizmet Veren hesaplarının yüklediği faaliyet belgelerini inceleyin, onaylayın veya reddedin.
@@ -299,6 +345,30 @@ export function AdminProviderDocumentReviewPanel() {
       ) : (
         <div className="mt-6 flex flex-col gap-6">
           {groups.map((group) => (
+            <ProviderReviewCard
+              key={group.user.id}
+              user={group.user}
+              documents={group.documents}
+              consent={group.consent}
+              onReviewed={() => setRefreshKey((value) => value + 1)}
+            />
+          ))}
+        </div>
+      )}
+
+      <h2 className="mt-10 text-2xl font-bold tracking-heading leading-tight text-foreground">
+        Gümrük Müşavirliği Belgeleri
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Gümrük Müşavirliği hizmeti seçen Hizmet Veren hesaplarının Gümrük Müşaviri İzin Belgesini inceleyin,
+        onaylayın veya reddedin — onay, ilgili hesabın teklif verme yetkisini otomatik olarak açar.
+      </p>
+
+      {customsGroups.length === 0 ? (
+        <p className="mt-6 text-sm text-muted-foreground">Henüz incelenecek Gümrük Müşaviri İzin Belgesi bulunmuyor.</p>
+      ) : (
+        <div className="mt-6 flex flex-col gap-6">
+          {customsGroups.map((group) => (
             <ProviderReviewCard
               key={group.user.id}
               user={group.user}

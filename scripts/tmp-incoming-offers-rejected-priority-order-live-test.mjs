@@ -1,5 +1,22 @@
 // node scripts/tmp-incoming-offers-rejected-priority-order-live-test.mjs
 //
+// SÜPERSEDE EDİLDİ — bkz. scripts/tmp-incoming-offers-hide-settled-status-test.mjs.
+// Bu script'in kök varsayımı ("reddedilen bir teklif Gelen Teklifler'de
+// KALIR, yalnızca en alta iner") sonraki bir görevle KASITLI OLARAK tersine
+// çevrildi: artık `job-requests.ts#isOfferShownInIncomingOffersScreen`
+// gereği "rejected" (ve "agreement_failed") bu ekrandan TAMAMEN kalkıyor —
+// kayıt silinmiyor, yalnızca bu TEK ekranın render listesinden çıkıyor (bkz.
+// o fonksiyonun dokümantasyonu). Bu script BİLEREK değiştirilmedi — "kart
+// sıralaması" özelliğinin o anki (o zaman doğru sanılan) davranışının
+// tarihsel kaydı olarak kalır (bkz. CLAUDE.md "tmp-*.mjs" script
+// konvansiyonu) — bu yüzden aşağıdaki TEST 3/4/6'nın "reddedilen teklif hâlâ
+// görünüyor" beklentileri artık KASITLI OLARAK geçmeyecektir; canlı
+// regresyon kapısı olarak tmp-incoming-offers-hide-settled-status-test.mjs
+// kullanılmalıdır. TEST 1 (kalın başlık) ve TEST 5 (farklı ilan izolasyonu)
+// kavramsal olarak hâlâ doğrudur ama yeni script bunları da kendi
+// senaryosunda ayrıca kapsar.
+//
+// --- Aşağıdaki orijinal açıklama (artık kısmen geçersiz) ---
 // "Gelen Teklifler kart sıralaması" görevini GERÇEK arayüz akışlarıyla (ham
 // localStorage enjeksiyonu YOK) uçtan uca doğrular:
 //   1) Hizmet türü başlığı (ör. "Unlashing") kalın (font-weight >= 700)

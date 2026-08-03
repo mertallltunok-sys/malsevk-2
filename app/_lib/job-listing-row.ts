@@ -7,6 +7,8 @@ import {
   isOfferVisibleInNormalLists,
   type ProviderClosedReason,
 } from "./job-requests";
+import { getNakliyeShortRoute, type NakliyeShortRouteSide } from "./nakliye-route";
+import { formatJobProductInfoLine } from "./product-catalog";
 import { getCategoryDisplayLabel, getServiceCategoryOrderIndex } from "./service-catalog";
 import type { Job, JobPhoto, Offer } from "./types";
 
@@ -22,6 +24,17 @@ export type JobListingRow = {
   availability: { open: boolean; closedReason: ProviderClosedReason | null };
   /** job-location.ts#getJobLocationSummary'nin AYNEN kullanımı — firma/fabrika adı, bölge/tesis(+tür), ilçe/il. Açık adres BİLEREK dışarıda (bu ekran gizlilik gerekçesiyle hiçbir zaman adres göstermez). */
   location: JobLocationSummary;
+  /** product-catalog.ts#formatJobProductInfoLine'ın AYNEN kullanımı — ürün bilgisi yoksa null (bkz. types.ts#Job.productQuantity/productTonnage/productType). */
+  productInfoLine: string | null;
+  /**
+   * Nakliye Güzergâh Yönetimi — nakliye-route.ts#getNakliyeShortRoute'un
+   * AYNEN kullanımı: Nakliye dışı bir ilanda ya da teslimat bilgisi eksikse
+   * null. Tam açık adres KESİNLİKLE içermez (bkz. görev tanımı madde 11) —
+   * her taraf kendi "İl / İlçe" + tesis-ya-da-manuel-ad çiftini taşır;
+   * job-listing-table.tsx/job-listing-cards.tsx doluysa `location` yerine
+   * bunu gösterir.
+   */
+  nakliyeRoute: { pickup: NakliyeShortRouteSide; delivery: NakliyeShortRouteSide } | null;
 };
 
 /**
@@ -51,6 +64,8 @@ export function buildJobListingRows(jobs: Job[], offers: Offer[], providerId: st
       visibleOfferCount,
       availability: getJobAvailabilityForProvider(job, offers, providerId),
       location: getJobLocationSummary(job),
+      productInfoLine: formatJobProductInfoLine(job),
+      nakliyeRoute: getNakliyeShortRoute(job),
     };
   });
 }
@@ -84,7 +99,20 @@ export type OperationServiceSummary = {
 export type OperationListingItem = {
   kind: "operation";
   operationId: string;
-  /** Operasyonun GERÇEK oluşturulma sırasına göre İLK hizmeti (filtreden bağımsız — operasyonun tamamı üzerinden) — kartın başlık/fotoğraf/ilçe/tarihini bundan alır (bkz. "ilk hizmet ilanının başlığı" kuralı). */
+  /**
+   * Kartın başlık/fotoğraf/ilçe/tarihini bundan alır — GERÇEK oluşturulma
+   * sırasına göre, o anki `visibleJobIds`i (filtreyi) GEÇEN İLK hizmet;
+   * hiçbir üye filtreyi geçmiyorsa (teorik olarak imkânsız — bu fonksiyon zaten
+   * `hasVisibleMember` doğruyken çağrılır) GERÇEK ilk hizmete düşer. KÖK NEDEN
+   * DÜZELTMESİ: önceden HER ZAMAN operasyonun gerçek ilk hizmetiydi — bu,
+   * örneğin bir operasyon Nakliye + Gözetim'den oluşup bir izleyici yalnızca
+   * "Gözetim" kategorisiyle filtrelediğinde (ya da job-visibility.ts'in
+   * izolasyon kuralı yüzünden yalnızca Gözetim'i görebildiğinde), kartın
+   * başlığının/bağlantısının HER ZAMAN Nakliye'ye ait kalmasına, yani izleyicinin
+   * kendi eşleştiği hizmetin adını hiç görememesine yol açıyordu. Filtre
+   * uygulanmadığında (`visibleJobIds` operasyonun tüm üyelerini içeriyorsa)
+   * davranış DEĞİŞMEZ — yine gerçek ilk hizmet seçilir.
+   */
   primaryRow: JobListingRow;
   /** Operasyonun TÜM (filtreden bağımsız) hizmet sayısı — job-requests.ts#getOperationStatusSummary'nin `total`'ı. Bkz. Aşama 5.1: filtre yalnızca operasyonun GÖRÜNÜP GÖRÜNMEYECEĞİNİ belirler, kartın içeriğini KÜÇÜLTMEZ. */
   totalCount: number;
@@ -176,7 +204,7 @@ export function groupJobListingRowsByOperation(
       emittedOperationIds.add(operationId);
       const hasVisibleMember = fullGroupRows.some((groupRow) => visibleJobIds.has(groupRow.job.id));
       if (!hasVisibleMember) continue;
-      items.push(buildOperationListingItem(operationId, fullGroupRows, offers));
+      items.push(buildOperationListingItem(operationId, fullGroupRows, offers, visibleJobIds));
       continue;
     }
 
@@ -192,6 +220,7 @@ function buildOperationListingItem(
   operationId: string,
   groupRows: JobListingRow[],
   offers: Offer[],
+  visibleJobIds: ReadonlySet<string>,
 ): OperationListingItem {
   const creationOrderJobIds = getJobsByOperationId(operationId).map((job) => job.id);
   const rankById = new Map(creationOrderJobIds.map((jobId, index) => [jobId, index]));
@@ -204,6 +233,8 @@ function buildOperationListingItem(
     offers,
   );
   const visibleOfferCount = sortedGroupRows.reduce((sum, groupRow) => sum + groupRow.visibleOfferCount, 0);
+  const primaryRow =
+    sortedGroupRows.find((groupRow) => visibleJobIds.has(groupRow.job.id)) ?? sortedGroupRows[0];
 
   // Hizmet Türü rozetinin hemen altındaki kompakt özet — service-catalog.ts
   // sırasına göre (creation/primary sırasından BAĞIMSIZ, ayrı bir sıralama).
@@ -224,7 +255,7 @@ function buildOperationListingItem(
     kind: "operation",
     services,
     operationId,
-    primaryRow: sortedGroupRows[0],
+    primaryRow,
     totalCount: summary.total,
     completedCount: summary.completedCount,
     progressPercent: summary.progressPercent,

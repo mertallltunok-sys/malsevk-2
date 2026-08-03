@@ -1,9 +1,11 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
+import { getCurrencyLabel } from "../_lib/money";
 import { validateOfferForm, type OfferFormErrors } from "../_lib/offer-form-validation";
-import { createOffer } from "../_lib/offers";
+import { createOffer, MAX_COMMITTED_DAYS, MIN_COMMITTED_DAYS } from "../_lib/offers";
+import { isTransportationCategory } from "../_lib/product-catalog";
 import type { Currency, Job, Offer, Session } from "../_lib/types";
 
 const DESCRIPTION_MAX_LENGTH = 1000;
@@ -25,10 +27,15 @@ export function OfferForm({
   const [currency, setCurrency] = useState<Currency>("TRY");
   const [amountInput, setAmountInput] = useState("");
   const [description, setDescription] = useState("");
-  const [estimatedDuration, setEstimatedDuration] = useState("");
+  const [estimatedDuration, setEstimatedDuration] = useState<number | "">("");
   const [errors, setErrors] = useState<OfferFormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const dayOptions = useMemo(
+    () => Array.from({ length: MAX_COMMITTED_DAYS - MIN_COMMITTED_DAYS + 1 }, (_, index) => MIN_COMMITTED_DAYS + index),
+    [],
+  );
 
   function handleAmountChange(event: React.ChangeEvent<HTMLInputElement>) {
     // Yalnızca rakam, nokta ve virgüle izin ver; başka hiçbir karakteri
@@ -37,6 +44,8 @@ export function OfferForm({
     const filtered = event.target.value.replace(/[^0-9.,]/g, "");
     setAmountInput(filtered);
   }
+
+  const requiresEstimatedDuration = isTransportationCategory(job.category);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,12 +56,13 @@ export function OfferForm({
       amountInput,
       description,
       estimatedDuration,
+      category: job.category,
     });
 
     setErrors(fieldErrors);
     setSubmitError(null);
 
-    if (Object.keys(fieldErrors).length > 0 || amount === null) {
+    if (Object.keys(fieldErrors).length > 0 || amount === null || (requiresEstimatedDuration && estimatedDuration === "")) {
       return;
     }
 
@@ -62,7 +72,7 @@ export function OfferForm({
       amount,
       currency,
       description,
-      estimatedDuration,
+      estimatedDuration: requiresEstimatedDuration && estimatedDuration !== "" ? estimatedDuration : undefined,
     });
     setSubmitting(false);
 
@@ -91,6 +101,7 @@ export function OfferForm({
           >
             <option value="TRY">Türk Lirası (TRY)</option>
             <option value="USD">Amerikan Doları (USD)</option>
+            <option value="EUR">Euro (EUR)</option>
           </select>
           {errors.currency && (
             <p id={`${currencyId}-error`} className="mt-2 text-sm text-danger">
@@ -120,7 +131,7 @@ export function OfferForm({
               aria-hidden="true"
               className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground"
             >
-              {currency === "TRY" ? "TL" : "USD"}
+              {getCurrencyLabel(currency)}
             </span>
           </div>
           {errors.amount && (
@@ -158,29 +169,33 @@ export function OfferForm({
         )}
       </div>
 
-      <div>
-        <label htmlFor={durationId} className="text-sm font-medium text-foreground">
-          Tahmini Hizmet Süresi
-        </label>
-        <input
-          id={durationId}
-          type="text"
-          value={estimatedDuration}
-          onChange={(event) => setEstimatedDuration(event.target.value)}
-          maxLength={100}
-          aria-invalid={errors.estimatedDuration ? true : undefined}
-          aria-describedby={
-            errors.estimatedDuration ? `${durationId}-error` : undefined
-          }
-          placeholder="Örnek: 1 iş günü"
-          className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        />
-        {errors.estimatedDuration && (
-          <p id={`${durationId}-error`} className="mt-2 text-sm text-danger">
-            {errors.estimatedDuration}
-          </p>
-        )}
-      </div>
+      {requiresEstimatedDuration && (
+        <div>
+          <label htmlFor={durationId} className="text-sm font-medium text-foreground">
+            Tamamlanması Taahhüt Edilen Gün
+          </label>
+          <select
+            id={durationId}
+            value={estimatedDuration}
+            onChange={(event) => setEstimatedDuration(event.target.value === "" ? "" : Number(event.target.value))}
+            aria-invalid={errors.estimatedDuration ? true : undefined}
+            aria-describedby={errors.estimatedDuration ? `${durationId}-error` : undefined}
+            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <option value="">Gün seçiniz</option>
+            {dayOptions.map((day) => (
+              <option key={day} value={day}>
+                {day} gün
+              </option>
+            ))}
+          </select>
+          {errors.estimatedDuration && (
+            <p id={`${durationId}-error`} className="mt-2 text-sm text-danger">
+              {errors.estimatedDuration}
+            </p>
+          )}
+        </div>
+      )}
 
       {submitError && (
         <p role="alert" className="text-sm text-danger">

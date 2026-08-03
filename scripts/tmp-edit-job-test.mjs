@@ -85,9 +85,9 @@ async function seedJobsWithPhotos(page, requesterId) {
     }
 
     const jobs = [
-      { ...base, id: "edit-job-future", title: "Duzenleme Test - Gelecek Tarih", workDate: "2026-12-01", photos: await makePhotos(2, "future") },
-      { ...base, id: "edit-job-past", title: "Duzenleme Test - Gecmis Tarih", workDate: "2020-01-01", photos: await makePhotos(2, "past") },
-      { ...base, id: "edit-job-offer", title: "Duzenleme Test - Teklifli Ilan", workDate: "2026-12-05", photos: await makePhotos(2, "offer") },
+      { ...base, id: "edit-job-future", title: "Duzenleme Test - Gelecek Tarih", workDate: "2026-12-01", workEndDate: "2026-12-03", photos: await makePhotos(2, "future") },
+      { ...base, id: "edit-job-past", title: "Duzenleme Test - Gecmis Tarih", workDate: "2020-01-01", workEndDate: "2020-01-02", photos: await makePhotos(2, "past") },
+      { ...base, id: "edit-job-offer", title: "Duzenleme Test - Teklifli Ilan", workDate: "2026-12-05", workEndDate: "2026-12-07", photos: await makePhotos(2, "offer") },
     ];
     db.close();
     localStorage.setItem("malsevk.jobs.v1", JSON.stringify(jobs));
@@ -187,10 +187,12 @@ async function main() {
   const descTextarea = page.locator("textarea").first();
   const descValue = await descTextarea.inputValue();
   assert.equal(descValue, "Duzenleme testi icin aciklama metni.", "Açıklama alanı mevcut veriyle dolu gelmeli");
-  const dateInput = page.locator('input[type="date"]');
-  const dateValue = await dateInput.inputValue();
-  assert.equal(dateValue, "2020-01-01", "Tarih alanı mevcut veriyle dolu gelmeli");
-  ok("[5] Düzenleme formu mevcut ilan bilgileriyle (başlık, açıklama, tarih) dolu geliyor");
+  const dateInputs = page.locator('input[type="date"]');
+  const startDateValue = await dateInputs.nth(0).inputValue();
+  const endDateValue = await dateInputs.nth(1).inputValue();
+  assert.equal(startDateValue, "2020-01-01", "Başlangıç tarihi alanı mevcut veriyle dolu gelmeli");
+  assert.equal(endDateValue, "2020-01-02", "Bitiş tarihi alanı mevcut veriyle dolu gelmeli");
+  ok("[5] Düzenleme formu mevcut ilan bilgileriyle (başlık, açıklama, başlangıç/bitiş tarihi) dolu geliyor");
 
   // Fotoğraf kontrolü: 2 mevcut fotoğraf gösteriliyor mu
   const existingPhotoCount = await page.locator('[data-photo-filename]').count();

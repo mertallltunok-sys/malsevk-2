@@ -1,9 +1,10 @@
-import { CalendarDays, CheckCircle2, MapPin } from "lucide-react";
+import { CalendarDays, CheckCircle2, MapPin, Package } from "lucide-react";
 import Link from "next/link";
 import { getProviderClosedReasonLabel } from "../_lib/job-requests";
 import { formatJobDate } from "../_lib/jobs";
 import { getJobListingCategoryBadgeLabel, type JobListingDisplayItem } from "../_lib/job-listing-row";
 import { JobThumbnail } from "./job-thumbnail";
+import { NakliyeListingRoute } from "./nakliye-listing-route";
 import { OperationServiceTags } from "./operation-service-tags";
 
 /**
@@ -43,9 +44,12 @@ import { OperationServiceTags } from "./operation-service-tags";
 export function JobListingCards({
   items,
   onJobClick,
+  showNakliyeRoute,
 }: {
   items: JobListingDisplayItem[];
   onJobClick: (jobId: string) => void;
+  /** İzleyen Hizmet Veren gerçek bir Nakliyeci mi (bkz. provider-job-listing.tsx#viewerIsNakliyeci) — false ise bu satırın Nakliye olup olmadığına bakılmaksızın her zaman standart Firma/Bölge/Konum görünümü kullanılır. */
+  showNakliyeRoute: boolean;
 }) {
   return (
     <ul role="list" className="flex flex-col gap-4">
@@ -81,26 +85,45 @@ export function JobListingCards({
             </div>
 
             <div className="mt-3 flex flex-col gap-1.5 text-xs text-muted-foreground">
-              <span className="flex min-w-0 items-start gap-1.5">
-                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 flex-1">
-                  {row.location.companyOrFactoryName && (
-                    <span className="block truncate font-medium text-foreground">
-                      {row.location.companyOrFactoryName}
+              {/* Nakliyeci güzergâh görünümü — bkz. job-listing-table.tsx'teki AYNI
+                  showNakliyeRoute/row.nakliyeRoute gate ve nakliye-listing-route.tsx. */}
+              {showNakliyeRoute && row.nakliyeRoute ? (
+                <span className="flex min-w-0 items-start gap-1.5">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <NakliyeListingRoute pickup={row.nakliyeRoute.pickup} delivery={row.nakliyeRoute.delivery} />
+                </span>
+              ) : (
+                <span className="flex min-w-0 items-start gap-1.5">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    {row.location.companyOrFactoryName && (
+                      <span className="block truncate font-medium text-foreground">
+                        {row.location.companyOrFactoryName}
+                      </span>
+                    )}
+                    <span className="block truncate">
+                      {row.location.facilityDisplayName && (
+                        <>
+                          {row.location.facilityDisplayName}
+                          {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`} ·{" "}
+                        </>
+                      )}
+                      {row.location.district} / {row.location.province}
                     </span>
-                  )}
-                  <span className="block truncate">
-                    {row.location.facilityDisplayName}
-                    {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`} ·{" "}
-                    {row.location.district} / {row.location.province}
                   </span>
                 </span>
-              </span>
+              )}
               <span className="flex items-center gap-1.5">
                 <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {formatJobDate(job.workDate)}
               </span>
               <span>{item.kind === "operation" ? item.visibleOfferCount : row.visibleOfferCount} teklif</span>
+              {item.kind === "single" && row.productInfoLine && (
+                <span className="flex items-center gap-1.5">
+                  <Package className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {row.productInfoLine}
+                </span>
+              )}
               {item.kind === "operation" &&
                 (item.completedCount === item.totalCount ? (
                   <span className="flex items-center gap-1 font-medium text-muted-foreground">
