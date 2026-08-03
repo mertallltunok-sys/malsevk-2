@@ -3,8 +3,9 @@
 import { LogOut } from "lucide-react";
 import { getProfileInfo } from "../_lib/profile";
 import { useSession } from "../_lib/use-session";
-import { findUserById } from "../_lib/users";
+import { useUserById } from "../_lib/use-users";
 import { AuthGateNotice } from "./auth-gate-notice";
+import { ContactVisibilitySettings } from "./contact-visibility-settings";
 import { handleLogout } from "./profile-menu";
 import { ProfileInfoCard } from "./profile-info-card";
 import { ProviderProfileEditor } from "./provider-profile-editor";
@@ -48,6 +49,9 @@ function ComingSoonAction({
  */
 export function AccountSettingsContent() {
   const session = useSession();
+  // Hook, koşulsuz (Rules of Hooks) her render'da çağrılır — session henüz
+  // yokken `null` geçilir, useUserById bunu zaten `null` olarak ele alır.
+  const user = useUserById(session?.id ?? null);
 
   if (!session) {
     return (
@@ -57,8 +61,6 @@ export function AccountSettingsContent() {
       />
     );
   }
-
-  const user = findUserById(session.id);
 
   return (
     <div>
@@ -81,6 +83,8 @@ export function AccountSettingsContent() {
         {user && session.role === "hizmet-veren" && (
           <ProviderProfileEditor session={session} user={user} />
         )}
+
+        {user && <ContactVisibilitySettings session={session} user={user} />}
 
         <div className="rounded-card border border-border bg-surface p-6">
           <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Güvenlik</h2>

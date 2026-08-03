@@ -1,4 +1,4 @@
-import { readJson, writeJson } from "./local-storage";
+import { readJson, STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { getProviderDocumentById, updateProviderDocumentReviewFields } from "./provider-documents";
 import type { ProviderDocumentReviewStatus, Session } from "./types";
 
@@ -114,7 +114,31 @@ export function recordProviderDocumentReview(
     note: trimmedNote,
     createdAt: updated.reviewedAt ?? new Date().toISOString(),
   };
-  writeAll([...readAll(), logRow]);
+  // DÜZELTME (Y4, veritabanı geçişi öncesi denetim): eskiden bu yazımın
+  // dönüş değeri hiç kontrol edilmiyordu — günlük satırı yazılamasa bile
+  // fonksiyon koşulsuz {ok:true} dönüyordu; admin ekranında "başarılı"
+  // görünüyordu ama inceleme geçmişi sessizce kayboluyordu (belge durumu ile
+  // günlük arasında kalıcı bir "yarım başarı" oluşuyordu). localStorage
+  // mimarisinde gerçek bir transaction olmadığı için tam atomiklik mümkün
+  // değil — en yakın pratik yaklaşım olarak, günlük yazımı başarısız olursa
+  // az önce yazılan denormalize durum en iyi çabayla ESKİ (değişiklik
+  // öncesi) değerine geri alınır (deleteJobWithOffers'ın kendi best-effort
+  // ikincil yazım deseniyle AYNI felsefe) ve kullanıcıya/admin arayüzüne
+  // gerçek bir hata döner.
+  if (!writeAll([...readAll(), logRow])) {
+    const rolledBack = updateProviderDocumentReviewFields({
+      documentId: input.documentId,
+      status: document.reviewStatus,
+      note: document.reviewNote,
+      adminId: document.reviewedByAdminId ?? session.id,
+    });
+    if (!rolledBack) {
+      console.error(
+        "recordProviderDocumentReview: inceleme günlüğü yazılamadı VE geri alma da başarısız oldu — belge durumu artık günlükle tutarsız olabilir.",
+      );
+    }
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
 
   return { ok: true, documentId: input.documentId, status: input.status };
 }

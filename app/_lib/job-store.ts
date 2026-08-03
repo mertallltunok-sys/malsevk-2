@@ -1,12 +1,16 @@
+import { isCustomsBrokerageCategory } from "./customs-brokerage-catalog";
+import { isSimplifiedLocationCategory } from "./job-location";
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "./job-requests";
 import { createPublishWindow, isJobListingExpired } from "./job-publish-window";
 import { isJobClosureReason, isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE } from "./job-closure";
 import { isJobDateInPast } from "./jobs";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
+import { isFacilityInProvinceDistrict, isTransportationCategory } from "./nakliye-route";
 import { deletePhotoBlob, deletePhotoBlobs, getPhotoBlob, putPhotoBlob } from "./photo-blob-store";
 import { MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
+import { requiresProductInfo } from "./product-catalog";
 import { getServiceCategoryLabel, isServiceCategoryId } from "./service-catalog";
-import type { Job, JobClosureReason, JobPhoto, JobStatus, Offer, Session } from "./types";
+import type { Job, JobClosureReason, JobCustomsDocument, JobPhoto, JobStatus, Offer, Session } from "./types";
 
 const USER_JOBS_STORAGE_KEY = "malsevk.jobs.v1";
 
@@ -64,6 +68,10 @@ function normalizeStoredJob(value: unknown): Job | null {
   const record = value as Record<string, unknown>;
   const rawPhotos = record.photos;
   const photos = Array.isArray(rawPhotos) ? rawPhotos.filter(isJobPhoto) : [];
+  // Gümrük Müşavirliği'ne özel evraklar JobPhoto ile AYNI şekli paylaşır
+  // (bkz. types.ts#JobCustomsDocument) — isJobPhoto aynen tekrar kullanılır.
+  const rawCustomsDocuments = record.customsDocuments;
+  const customsDocuments = Array.isArray(rawCustomsDocuments) ? rawCustomsDocuments.filter(isJobPhoto) : [];
   return {
     ...(value as Omit<Job, "photos">),
     photos,
@@ -80,6 +88,39 @@ function normalizeStoredJob(value: unknown): Job | null {
     directionsNote: typeof record.directionsNote === "string" ? record.directionsNote : undefined,
     operationId: typeof record.operationId === "string" ? record.operationId : undefined,
     workEndDate: typeof record.workEndDate === "string" ? record.workEndDate : undefined,
+    // "Ürün Bilgileri": bu üç alan da AYNI "eksikliği hata sayma" ilkesiyle
+    // (bkz. facilityId/photos üstündeki not) normalize edilir — bu
+    // alanlardan önce oluşturulmuş ya da ilgisiz bir kategoride oluşturulmuş
+    // ilanlarda hiçbiri yoktur, bu bir hata değildir.
+    productQuantity: typeof record.productQuantity === "number" && Number.isFinite(record.productQuantity)
+      ? record.productQuantity
+      : undefined,
+    productTonnage: typeof record.productTonnage === "number" && Number.isFinite(record.productTonnage)
+      ? record.productTonnage
+      : undefined,
+    productType: typeof record.productType === "string" ? record.productType : undefined,
+    // Gümrük Müşavirliği'ne özel "Operasyon Bilgileri": AYNI "eksikliği hata
+    // sayma" ilkesiyle (bkz. productQuantity üstündeki not) normalize edilir
+    // — bu alanlardan önce oluşturulmuş ya da ilgisiz bir kategoride
+    // oluşturulmuş ilanlarda hiçbiri yoktur, bu bir hata değildir.
+    customsTransactionType: typeof record.customsTransactionType === "string" ? record.customsTransactionType : undefined,
+    customsOfficeId: typeof record.customsOfficeId === "string" ? record.customsOfficeId : undefined,
+    customsRequestedServices:
+      Array.isArray(record.customsRequestedServices) &&
+      record.customsRequestedServices.every((item): item is string => typeof item === "string")
+        ? record.customsRequestedServices
+        : undefined,
+    customsProductType: typeof record.customsProductType === "string" ? record.customsProductType : undefined,
+    customsGtipCode: typeof record.customsGtipCode === "string" ? record.customsGtipCode : undefined,
+    customsDeclarationItemCount:
+      typeof record.customsDeclarationItemCount === "number" && Number.isFinite(record.customsDeclarationItemCount)
+        ? record.customsDeclarationItemCount
+        : undefined,
+    customsContainerCount:
+      typeof record.customsContainerCount === "number" && Number.isFinite(record.customsContainerCount)
+        ? record.customsContainerCount
+        : undefined,
+    customsDocuments,
     // İlan Yayın Süresi Yönetimi: bu dört alan bu özellikten önce oluşturulmuş
     // TÜM ilanlarda (sabit örnek ilanlar dahil) yoktur — eksikliği bir hata
     // değildir, job-publish-window.ts bu durumu "yayın süresi kuralından
@@ -94,6 +135,19 @@ function normalizeStoredJob(value: unknown): Job | null {
     // ilkesiyle (bkz. photos/facilityId) undefined'a normalize edilir.
     closedAt: typeof record.closedAt === "string" ? record.closedAt : undefined,
     closureReason: isJobClosureReason(record.closureReason) ? record.closureReason : undefined,
+    // Nakliye Güzergâh Yönetimi — "Teslim Edilecek Yer": AYNI "eksikliği hata
+    // sayma" ilkesiyle (bkz. productQuantity/customsTransactionType üstündeki
+    // notlar) normalize edilir — bu alanlardan önce oluşturulmuş ya da Nakliye
+    // dışı bir kategoride oluşturulmuş ilanlarda hiçbiri yoktur.
+    deliveryProvince: typeof record.deliveryProvince === "string" ? record.deliveryProvince : undefined,
+    deliveryDistrict: typeof record.deliveryDistrict === "string" ? record.deliveryDistrict : undefined,
+    deliveryLocationType:
+      record.deliveryLocationType === "facility" || record.deliveryLocationType === "open_address"
+        ? record.deliveryLocationType
+        : undefined,
+    deliveryFacilityId: typeof record.deliveryFacilityId === "string" ? record.deliveryFacilityId : undefined,
+    deliveryFacilityName: typeof record.deliveryFacilityName === "string" ? record.deliveryFacilityName : undefined,
+    deliveryAddressText: typeof record.deliveryAddressText === "string" ? record.deliveryAddressText : undefined,
   } as Job;
 }
 
@@ -240,13 +294,11 @@ export type ProcessedPhotoInput = {
 
 /** createJob/updateJob'ın ortak aldığı, locationMode'a bağlı ham konum alanları. */
 type LocationInput = {
+  category: string;
   workLocationType: string;
   facilityId?: string;
   addressText: string;
   locationMode?: "catalog" | "custom";
-  neighborhood?: string;
-  locationUrl?: string;
-  directionsNote?: string;
 };
 
 /**
@@ -255,30 +307,231 @@ type LocationInput = {
  * "custom" modda facilityId HER ZAMAN temizlenir (sahte/yanlış bir
  * Facility.id asla kalıcı hâle gelmez — bkz. job-location.ts#resolveJobFacility'nin
  * locationMode "custom" için katalog eşleştirmesini de bilerek atlaması).
- * "catalog" modda (ya da locationMode hiç verilmemişse, geriye dönük
- * varsayılan) yalnızca "custom"a özgü alanlar (neighborhood/locationUrl/
- * directionsNote) temizlenir.
  *
- * companyOrFactoryName ("Firma / Fabrika Adı") BİLEREK bu fonksiyonun
- * döndürdüğü nesnede YOK — alan create/edit formlarından tamamen kaldırıldı
- * (MALSEVK'in Kocaeli-odaklı sadeleştirmesi). Yeni ilanlarda hiç yazılmaz;
- * updateJob'daki `{...existing, ...resolveLocationFields(input)}` sıralaması
- * sayesinde bu alandan önce oluşturulmuş bir ilanın mevcut companyOrFactoryName
- * değeri (varsa) burada hiç dokunulmadığı için düzenleme sonrasında da
- * kaybolmadan aynen korunur — veri kaybı yoktur, yalnızca artık aktif
- * formlardan toplanmaz/gösterilmez.
+ * Depolama (Kapalı/Açık Saha) VE Gümrük Müşavirliği (bkz. job-location.ts#
+ * isSimplifiedLocationCategory) için lokasyon artık yalnızca İl/İlçe'den
+ * oluşur — bu iki grup için workLocationType/facilityId/addressText/
+ * locationMode HER ZAMAN temizlenir (girdi olarak ne gelirse gelsin, ör.
+ * kategori değiştirilmeden önceki bir değer), `resolveProductInfoFields`/
+ * `resolveCustomsBrokerageFields`/`resolveDeliveryLocationFields` İLE AYNI
+ * "kapsam dışıysa aktif olarak temizle" ilkesi — bu alanlar HÂLÂ diğer
+ * kategoriler (Lashing, Gözetim, Forklift, vb.) için anlamlı olduğundan,
+ * "eski değeri koru" değil "aktif temizle" doğru davranıştır (aksi halde bir
+ * Depolama/Gümrük ilanı düzenlenip kaydedildiğinde bu değişiklikten ÖNCEKİ
+ * eski tesis/adres bilgisi sessizce sürüklenmeye devam ederdi).
+ *
+ * companyOrFactoryName ("Firma / Fabrika Adı") ve neighborhood/locationUrl/
+ * directionsNote ("Bölge / Mahalle"/"Konum Bağlantısı"/"Adres Tarifi")
+ * BİLEREK bu fonksiyonun döndürdüğü nesnede HİÇ YOK — hiçbir kategorinin
+ * formu artık bunları toplamıyor (Gümrük Müşavirliği'nin eski "custom" konum
+ * bloğu da yukarıdaki sadeleştirmeyle kaldırıldı), bu üçü de alan döndürülen
+ * nesneden BİLEREK dışarıda bırakılır — updateJob'daki
+ * `{...existing, ...resolveLocationFields(input)}` sıralaması sayesinde bu
+ * alanlardan önce oluşturulmuş bir ilanın mevcut değeri (varsa) burada hiç
+ * dokunulmadığı için düzenleme sonrasında da kaybolmadan aynen korunur — veri
+ * kaybı yoktur, yalnızca artık aktif formlardan toplanmaz/gösterilmez.
  */
 function resolveLocationFields(input: LocationInput) {
+  if (isSimplifiedLocationCategory(input.category)) {
+    return {
+      workLocationType: "",
+      facilityId: undefined,
+      addressText: undefined,
+      locationMode: undefined,
+    };
+  }
   const isCustom = input.locationMode === "custom";
   return {
     workLocationType: input.workLocationType.trim(),
     facilityId: isCustom ? undefined : input.facilityId?.trim() || undefined,
     addressText: input.addressText.trim(),
     locationMode: input.locationMode,
-    neighborhood: isCustom ? input.neighborhood?.trim() || undefined : undefined,
-    locationUrl: isCustom ? input.locationUrl?.trim() || undefined : undefined,
-    directionsNote: isCustom ? input.directionsNote?.trim() || undefined : undefined,
   };
+}
+
+/** createJob/createJobsForOperation/updateJob'ın ortak aldığı ham "Ürün Bilgileri" girdisi — form tarafında zaten sayıya ayrıştırılmış/doğrulanmıştır (bkz. product-catalog.ts#parseProductQuantity/parseProductTonnage). */
+type ProductInfoInput = {
+  productQuantity?: number;
+  productTonnage?: number;
+  productType?: string;
+};
+
+/**
+ * `resolveLocationFields` ile AYNI "TEK yer, kopyalanmaz" ilkesi — kategori
+ * `product-catalog.ts#requiresProductInfo` kapsamı DIŞINDAYSA üç alan da
+ * HER ZAMAN temizlenir (girdi olarak ne gelirse gelsin), bu yüzden bir ilan
+ * düzenlemede ilgisiz bir kategoriye geçirilirse eski ürün bilgisi sessizce
+ * kaybolur, yanlış kategoriyle birlikte sürüklenmez.
+ */
+function resolveProductInfoFields(category: string, input: ProductInfoInput) {
+  if (!requiresProductInfo(category)) {
+    return { productQuantity: undefined, productTonnage: undefined, productType: undefined };
+  }
+  return {
+    productQuantity: input.productQuantity,
+    productTonnage: input.productTonnage,
+    productType: input.productType?.trim() || undefined,
+  };
+}
+
+/**
+ * createJob/createJobsForOperation/updateJob'ın ortak aldığı ham Gümrük
+ * Müşavirliği "Operasyon Bilgileri" girdisi — form tarafında zaten
+ * doğrulanmış/ayrıştırılmıştır (bkz. job-form-validation.ts#
+ * validateCustomsBrokerageFields). `customsDocuments` burada ZATEN
+ * IndexedDB'ye yazılmış (persistPhotosOrRollback ile), storageKey'leri
+ * hazır kayıtlardır — bu fonksiyon yalnızca kategori kapsam dışıysa bu
+ * dizinin Job'a hiç yazılmamasına karar verir, blob'ların kendisiyle
+ * ilgilenmez (bkz. createJob/createJobsForOperation/updateJob'ın kendi
+ * persist/rollback sırası).
+ */
+type CustomsBrokerageInput = {
+  customsTransactionType?: string;
+  customsRequestedServices?: string[];
+  customsProductType?: string;
+  customsDocuments?: JobCustomsDocument[];
+};
+
+/**
+ * `resolveLocationFields`/`resolveProductInfoFields` ile AYNI "TEK yer,
+ * kopyalanmaz" ilkesi — kategori `isCustomsBrokerageCategory` kapsamı
+ * DIŞINDAYSA dört alan da HER ZAMAN temizlenir (girdi olarak ne gelirse
+ * gelsin, evraklar dahil), bu yüzden bir ilan düzenlemede ilgisiz bir
+ * kategoriye geçirilirse eski Gümrük Müşavirliği bilgisi sessizce kaybolur,
+ * yanlış kategoriyle birlikte sürüklenmez. Çoklu Hizmet Operasyonu'nda da
+ * AYNI koruma her hizmet için ayrı ayrı uygulanır — bu, "yalnızca Gümrük
+ * Müşavirliği hizmet kartı bu alanları taşır, kardeşlere kopyalanmaz"
+ * kuralının tek uygulama noktasıdır.
+ *
+ * `customsGtipCode`/`customsDeclarationItemCount`/`customsContainerCount`/
+ * `customsOfficeId` (Gümrük Müdürlüğü — sonradan kaldırıldı, eski yerinde
+ * artık Ürün Cinsi var, bkz. customs-brokerage-fields.tsx) BİLEREK bu
+ * fonksiyonun döndürdüğü nesnede HİÇ YOK — hiçbir kategorinin formu artık
+ * bunları toplamıyor, `resolveLocationFields`'in
+ * companyOrFactoryName/neighborhood/locationUrl/directionsNote'u dışarıda
+ * bırakmasıyla AYNI ilke: `updateJob`daki `{...existing, ...resolved}`
+ * sıralaması sayesinde bu dört alanı zaten taşıyan eski bir Gümrük
+ * Müşavirliği ilanının değeri, o ilan sonradan düzenlense bile dokunulmadan
+ * korunur — veri kaybı yoktur, yalnızca artık toplanmaz/gösterilmez.
+ */
+function resolveCustomsBrokerageFields(category: string, input: CustomsBrokerageInput) {
+  if (!isCustomsBrokerageCategory(category)) {
+    return {
+      customsTransactionType: undefined,
+      customsRequestedServices: undefined,
+      customsProductType: undefined,
+      customsDocuments: undefined,
+    };
+  }
+  return {
+    customsTransactionType: input.customsTransactionType,
+    customsRequestedServices:
+      input.customsRequestedServices && input.customsRequestedServices.length > 0
+        ? input.customsRequestedServices
+        : undefined,
+    customsProductType: input.customsProductType?.trim() || undefined,
+    customsDocuments: input.customsDocuments && input.customsDocuments.length > 0 ? input.customsDocuments : undefined,
+  };
+}
+
+/**
+ * createJob/createJobsForOperation/updateJob'ın ortak aldığı ham Nakliye
+ * "Teslim Edilecek Yer" girdisi. `deliveryLocationType` `""` kabul eder
+ * (form tarafında "henüz yöntem seçilmedi" durumunu temsil eder,
+ * job-form-validation.ts#ServiceItemFields/JobFormFields ile AYNI gevşek
+ * tip) — `resolveDeliveryLocationFields` bunu Job'a yazmadan önce
+ * `undefined`e normalize eder (bkz. aşağıdaki fonksiyon).
+ */
+type DeliveryLocationInput = {
+  deliveryProvince?: string;
+  deliveryDistrict?: string;
+  deliveryLocationType?: "facility" | "open_address" | "";
+  deliveryFacilityId?: string;
+  deliveryFacilityName?: string;
+  deliveryAddressText?: string;
+};
+
+/**
+ * Veri kayıt katmanı doğrulaması (görev tanımı madde 5: "Bu doğrulama
+ * yalnızca form arayüzünde değil, veri kayıt katmanında da yapılmalıdır") —
+ * verilen il/ilçe kapsamında GERÇEKTEN var olmayan bir facilityId SESSİZCE
+ * reddedilir (undefined'a düşürülür, hem id hem denormalize edilmiş ad).
+ * Yalnızca Nakliye'nin pickup/delivery alanları için çağrılır; Nakliye
+ * dışındaki kategorilerin `job.facilityId`i (job-location.ts#resolveJobFacility
+ * zaten kendi ad/takma-ad eşleştirmesini yapıyor) BUNDAN HİÇ ETKİLENMEZ.
+ */
+function verifyNakliyeFacility(
+  province: string | undefined,
+  district: string | undefined,
+  facilityId: string | undefined,
+): boolean {
+  if (!facilityId || !province || !district) return false;
+  return isFacilityInProvinceDistrict(province, district, facilityId);
+}
+
+/**
+ * `resolveLocationFields`/`resolveProductInfoFields`/`resolveCustomsBrokerageFields`
+ * ile AYNI "TEK yer, kopyalanmaz" ilkesi — kategori `isTransportationCategory`
+ * kapsamı DIŞINDAYSA altı alan da HER ZAMAN temizlenir (girdi olarak ne
+ * gelirse gelsin), bu yüzden bir ilan düzenlemede ilgisiz bir kategoriye
+ * geçirilirse eski teslimat bilgisi sessizce kaybolur, yanlış kategoriyle
+ * birlikte sürüklenmez. `deliveryFacilityName` artık seçilen yönteme
+ * bakılmaksızın doldurulur — "facility" modunda katalogdan çözümlenmiş
+ * (VE il/ilçe kapsamında doğrulanmış — bkz. verifyNakliyeFacility) tesis
+ * adı, "open_address" modunda kullanıcının serbestçe yazdığı GERÇEK ad
+ * (doğrulama gerekmez, serbest metindir). `deliveryAddressText` da artık
+ * yönteme bakılmaksızın HER ZAMAN taşınır (bkz. görev tanımı madde 2/3/7) —
+ * eski "ya tesis adı ya açık adres" karşılıklı dışlama kuralı KALDIRILDI.
+ */
+function resolveDeliveryLocationFields(category: string, input: DeliveryLocationInput) {
+  if (!isTransportationCategory(category)) {
+    return {
+      deliveryProvince: undefined,
+      deliveryDistrict: undefined,
+      deliveryLocationType: undefined,
+      deliveryFacilityId: undefined,
+      deliveryFacilityName: undefined,
+      deliveryAddressText: undefined,
+    };
+  }
+  const deliveryProvince = input.deliveryProvince?.trim() || undefined;
+  const deliveryDistrict = input.deliveryDistrict?.trim() || undefined;
+  const deliveryLocationType = input.deliveryLocationType || undefined;
+  const isOpenAddress = deliveryLocationType === "open_address";
+  const rawFacilityId = isOpenAddress ? undefined : input.deliveryFacilityId?.trim() || undefined;
+  const facilityVerified = verifyNakliyeFacility(deliveryProvince, deliveryDistrict, rawFacilityId);
+  return {
+    deliveryProvince,
+    deliveryDistrict,
+    deliveryLocationType,
+    deliveryFacilityId: facilityVerified ? rawFacilityId : undefined,
+    deliveryFacilityName: isOpenAddress
+      ? input.deliveryFacilityName?.trim() || undefined
+      : facilityVerified
+        ? input.deliveryFacilityName?.trim() || undefined
+        : undefined,
+    deliveryAddressText: input.deliveryAddressText?.trim() || undefined,
+  };
+}
+
+/**
+ * Nakliye "Yük Alınacak Yer" (pickup) İÇİN — `resolveLocationFields`in
+ * kendisi (yukarıda) Nakliye DAHİL HER kategori için paylaşılan/değişmemiş
+ * kalır; bu fonksiyon SADECE Nakliye ilanlarında, `resolveLocationFields`in
+ * ürettiği `facilityId`yi il/ilçe kapsamında AYRICA doğrular (görev tanımı
+ * madde 5 — veri kayıt katmanı doğrulaması). Nakliye dışı kategorilerde
+ * (ya da locationMode "custom" olduğunda, ki resolveLocationFields zaten
+ * facilityId'yi orada temizliyor) girdi olduğu gibi geri döner/undefined
+ * kalır — mevcut davranış hiç etkilenmez.
+ */
+function verifiedPickupFacilityId(
+  category: string,
+  province: string,
+  district: string,
+  facilityId: string | undefined,
+): string | undefined {
+  if (!isTransportationCategory(category) || !facilityId) return facilityId;
+  return isFacilityInProvinceDistrict(province, district, facilityId) ? facilityId : undefined;
 }
 
 export type CreateJobInput = {
@@ -293,12 +546,26 @@ export type CreateJobInput = {
   addressText: string;
   /** Bkz. types.ts#Job.locationMode. */
   locationMode?: "catalog" | "custom";
-  neighborhood?: string;
-  locationUrl?: string;
-  directionsNote?: string;
   workDate: string;
   /** Bkz. types.ts#Job.workEndDate. Opsiyonel: bu alandan önceki çağıranlar/kayıtlar için geriye dönük uyumlu; yeni form akışı bunu doldurup zorunlu kılar. */
   workEndDate?: string;
+  /** Bkz. types.ts#Job.productQuantity/productTonnage/productType. Yalnızca category product-catalog.ts#requiresProductInfo kapsamındaysa anlamlıdır — aksi halde resolveProductInfoFields tarafından yok sayılır. */
+  productQuantity?: number;
+  productTonnage?: number;
+  productType?: string;
+  /** Bkz. types.ts#Job.customsTransactionType/vb. Yalnızca category customs-brokerage-catalog.ts#isCustomsBrokerageCategory kapsamındaysa anlamlıdır — aksi halde resolveCustomsBrokerageFields tarafından yok sayılır. */
+  customsTransactionType?: string;
+  customsRequestedServices?: string[];
+  customsProductType?: string;
+  /** Henüz IndexedDB'ye yazılmamış, doğrulanmış evraklar (bkz. JobCustomsDocumentUpload) — `photos` ile AYNI ertelenmiş-yazma deseni. */
+  customsDocuments?: ProcessedPhotoInput[];
+  /** Bkz. types.ts#Job.deliveryProvince/vb. Yalnızca category nakliye-route.ts#isTransportationCategory kapsamındaysa anlamlıdır — aksi halde resolveDeliveryLocationFields tarafından yok sayılır. */
+  deliveryProvince?: string;
+  deliveryDistrict?: string;
+  deliveryLocationType?: "facility" | "open_address" | "";
+  deliveryFacilityId?: string;
+  deliveryFacilityName?: string;
+  deliveryAddressText?: string;
   operationDetails: string;
   photos: ProcessedPhotoInput[];
 };
@@ -373,19 +640,38 @@ export async function createJob(
     return { ok: false, error: "Fotoğraflar kaydedilemedi. Lütfen tekrar deneyin." };
   }
 
+  // Gümrük Müşavirliği'ne özel evraklar: yalnızca kategori kapsamdaysa VE
+  // gerçekten evrak varsa persist edilir. Fotoğraflar zaten yazıldıktan
+  // SONRA denenir — burada başarısız olursa yukarıda yazılmış fotoğraf
+  // blob'ları da geri alınır (yarım bir kayıt hiçbir zaman kalıcı olmaz).
+  let customsDocuments: JobCustomsDocument[] = [];
+  if (isCustomsBrokerageCategory(input.category) && input.customsDocuments && input.customsDocuments.length > 0) {
+    const persistedDocuments = await persistPhotosOrRollback(input.customsDocuments);
+    if (!persistedDocuments) {
+      await deletePhotoBlobs(photos.map((photo) => photo.storageKey));
+      return { ok: false, error: "Belgeler kaydedilemedi. Lütfen tekrar deneyin." };
+    }
+    customsDocuments = persistedDocuments;
+  }
+
   // İlan Yayın Süresi Yönetimi: kullanıcı yayın süresi seçemez/değiştiremez —
   // sistem `createdAt`/`publishEndAt`i burada, formdan tamamen bağımsız
   // olarak belirler (bkz. job-publish-window.ts, tek doğruluk kaynağı).
   const { createdAt, publishEndAt } = createPublishWindow();
+  const jobProvince = input.province.trim();
+  const jobDistrict = input.district.trim();
   const job: Job = {
     id: crypto.randomUUID(),
     title: input.title.trim(),
     category: input.category,
-    province: input.province.trim(),
-    district: input.district.trim(),
+    province: jobProvince,
+    district: jobDistrict,
     ...resolveLocationFields(input),
     workDate: input.workDate,
     workEndDate: input.workEndDate,
+    ...resolveProductInfoFields(input.category, input),
+    ...resolveCustomsBrokerageFields(input.category, { ...input, customsDocuments }),
+    ...resolveDeliveryLocationFields(input.category, input),
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),
     status: "yayinda",
@@ -394,13 +680,15 @@ export async function createJob(
     createdAt,
     publishEndAt,
   };
+  job.facilityId = verifiedPickupFacilityId(job.category, jobProvince, jobDistrict, job.facilityId);
 
   const all = readUserCreatedJobsSnapshot();
   if (!writeUserCreatedJobs([...all, job])) {
-    // Fotoğraflar zaten IndexedDB'ye yazıldı (yukarıda) ama ilan kaydı
-    // hiçbir yere bağlanamadı — sahipsiz blob bırakmamak için geri alınır
-    // (persistPhotosOrRollback'teki kısmi-yazım geri alma ile aynı gerekçe).
-    await deletePhotoBlobs(photos.map((photo) => photo.storageKey));
+    // Fotoğraflar/evraklar zaten IndexedDB'ye yazıldı (yukarıda) ama ilan
+    // kaydı hiçbir yere bağlanamadı — sahipsiz blob bırakmamak için geri
+    // alınır (persistPhotosOrRollback'teki kısmi-yazım geri alma ile aynı
+    // gerekçe).
+    await deletePhotoBlobs([...photos, ...customsDocuments].map((item) => item.storageKey));
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 
@@ -412,7 +700,8 @@ export async function createJob(
  * itibarıyla `category`/`workDate`/`workEndDate`nin yanı sıra `title`/
  * `description`/konum alanları da (bkz. types.ts#Job'un aynı adlı alanları)
  * artık PER-SERVICE'tir; hiçbiri operasyon genelinde paylaşılmaz. Yalnızca
- * `province` (her zaman "Kocaeli"), `operationDetails` ve `photos` gerçekten
+ * `province` (Türkiye geneli serbestçe seçilebilir, yalnızca Kocaeli
+ * varsayılan başlangıç değeridir), `operationDetails` ve `photos` gerçekten
  * ortaktır (bkz. CreateJobsForOperationInput).
  */
 export type OperationServiceInput = {
@@ -422,6 +711,16 @@ export type OperationServiceInput = {
   description: string;
   workDate: string;
   workEndDate: string;
+  /**
+   * Bu hizmetin KENDİ ili — YALNIZCA isTransportationCategory(category) true
+   * iken anlamlıdır (Nakliye'nin Yük Alınacak Yer'i artık serbestçe
+   * seçilebilir, operasyonun paylaşılan `province`sinden BAĞIMSIZDIR). Diğer
+   * kardeş hizmetler bu alanı hiç göndermez — bu durumda job-store.ts kendi
+   * içinde operasyonun paylaşılan `province`sini (`CreateJobsForOperationInput.province`,
+   * artık Türkiye geneli serbestçe seçilebilir) kullanmaya devam eder;
+   * mevcut davranış hiç değişmez.
+   */
+  province?: string;
   district: string;
   workLocationType: string;
   /** turkey-locations.ts#Facility.id — yalnızca katalogdan seçildiyse; "Listede yok / Diğer" seçilmişse yoktur. */
@@ -429,9 +728,23 @@ export type OperationServiceInput = {
   addressText: string;
   /** Bkz. types.ts#Job.locationMode. */
   locationMode?: "catalog" | "custom";
-  neighborhood?: string;
-  locationUrl?: string;
-  directionsNote?: string;
+  /** Bkz. types.ts#Job.productQuantity/productTonnage/productType — her hizmet kendi ürün bilgisini bağımsız taşır. */
+  productQuantity?: number;
+  productTonnage?: number;
+  productType?: string;
+  /** Bkz. types.ts#Job.customsTransactionType/vb. — YALNIZCA isCustomsBrokerageCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveCustomsBrokerageFields). */
+  customsTransactionType?: string;
+  customsRequestedServices?: string[];
+  customsProductType?: string;
+  /** Henüz IndexedDB'ye yazılmamış, doğrulanmış evraklar — bkz. CreateJobInput.customsDocuments. */
+  customsDocuments?: ProcessedPhotoInput[];
+  /** Bkz. types.ts#Job.deliveryProvince/vb. — YALNIZCA isTransportationCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveDeliveryLocationFields). */
+  deliveryProvince?: string;
+  deliveryDistrict?: string;
+  deliveryLocationType?: "facility" | "open_address" | "";
+  deliveryFacilityId?: string;
+  deliveryFacilityName?: string;
+  deliveryAddressText?: string;
 };
 
 /**
@@ -560,15 +873,40 @@ export async function createJobsForOperation(
   // dokümantasyon notu) — biri başarısız olursa o ana kadar yazılmış
   // olanlar geri alınır, hiçbir Job kaydı yazılmadan hata döner.
   const persistedPhotoSets: JobPhoto[][] = [];
+  // Gümrük Müşavirliği'ne özel evraklar: YALNIZCA o kategorideki hizmet
+  // kartı için persist edilir (bkz. resolveCustomsBrokerageFields'ın kendi
+  // dokümantasyonu — "kardeşlere kopyalanmaz" kuralının uygulama noktası
+  // burasıdır). Diğer her hizmet için bu dizide her zaman boş bir set
+  // bulunur — `persistedPhotoSets` ile AYNI index sırasını takip eder ki
+  // aşağıdaki `jobs` haritalamasında ikisi birlikte güvenle okunabilsin.
+  const persistedCustomsDocumentSets: JobCustomsDocument[][] = [];
   for (let index = 0; index < input.services.length; index++) {
+    const service = input.services[index];
     const photos = await persistPhotosOrRollback(input.photos);
     if (!photos) {
-      await Promise.all(
-        persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
-      );
+      await Promise.all([
+        ...persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
+        ...persistedCustomsDocumentSets.map((set) => deletePhotoBlobs(set.map((doc) => doc.storageKey))),
+      ]);
       return { ok: false, error: "Fotoğraflar kaydedilemedi. Lütfen tekrar deneyin." };
     }
     persistedPhotoSets.push(photos);
+
+    const rawCustomsDocuments =
+      isCustomsBrokerageCategory(service.category) && service.customsDocuments ? service.customsDocuments : [];
+    if (rawCustomsDocuments.length === 0) {
+      persistedCustomsDocumentSets.push([]);
+      continue;
+    }
+    const documents = await persistPhotosOrRollback(rawCustomsDocuments);
+    if (!documents) {
+      await Promise.all([
+        ...persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
+        ...persistedCustomsDocumentSets.map((set) => deletePhotoBlobs(set.map((doc) => doc.storageKey))),
+      ]);
+      return { ok: false, error: "Belgeler kaydedilemedi. Lütfen tekrar deneyin." };
+    }
+    persistedCustomsDocumentSets.push(documents);
   }
 
   // İlan Yayın Süresi Yönetimi: aynı operasyondaki TÜM hizmetler aynı
@@ -578,33 +916,48 @@ export async function createJobsForOperation(
   // notu: burada hepsinin oluşturulma zamanı gerçekten aynı andır, bu yüzden
   // paylaşmak veri uydurmak değildir).
   const { createdAt, publishEndAt } = createPublishWindow();
-  const jobs: Job[] = input.services.map((service, index) => ({
-    id: crypto.randomUUID(),
-    title: service.title.trim(),
-    category: service.category,
-    province,
-    district: service.district.trim(),
-    ...resolveLocationFields(service),
-    workDate: service.workDate,
-    workEndDate: service.workEndDate,
-    description: service.description.trim(),
-    operationDetails,
-    status: "yayinda",
-    requesterId: session.id,
-    operationId,
-    photos: persistedPhotoSets[index],
-    createdAt,
-    publishEndAt,
-  }));
+  const jobs: Job[] = input.services.map((service, index) => {
+    const serviceProvince =
+      isTransportationCategory(service.category) && service.province?.trim() ? service.province.trim() : province;
+    const serviceDistrict = service.district.trim();
+    const job: Job = {
+      id: crypto.randomUUID(),
+      title: service.title.trim(),
+      category: service.category,
+      province: serviceProvince,
+      district: serviceDistrict,
+      ...resolveLocationFields(service),
+      workDate: service.workDate,
+      workEndDate: service.workEndDate,
+      ...resolveProductInfoFields(service.category, service),
+      ...resolveCustomsBrokerageFields(service.category, {
+        ...service,
+        customsDocuments: persistedCustomsDocumentSets[index],
+      }),
+      ...resolveDeliveryLocationFields(service.category, service),
+      description: service.description.trim(),
+      operationDetails,
+      status: "yayinda",
+      requesterId: session.id,
+      operationId,
+      photos: persistedPhotoSets[index],
+      createdAt,
+      publishEndAt,
+    };
+    job.facilityId = verifiedPickupFacilityId(job.category, serviceProvince, serviceDistrict, job.facilityId);
+    return job;
+  });
 
   const all = readUserCreatedJobsSnapshot();
   if (!writeUserCreatedJobs([...all, ...jobs])) {
-    // Her hizmet için ayrı ayrı persistlenmiş TÜM fotoğraf setleri (yukarıda)
-    // hiçbir ilana bağlanamadan sahipsiz kalmasın diye geri alınır — "hepsi ya
-    // da hiçbiri" atomikliğinin yazma başarısızlığına da uygulanmış hali.
-    await Promise.all(
-      persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
-    );
+    // Her hizmet için ayrı ayrı persistlenmiş TÜM fotoğraf/evrak setleri
+    // (yukarıda) hiçbir ilana bağlanamadan sahipsiz kalmasın diye geri
+    // alınır — "hepsi ya da hiçbiri" atomikliğinin yazma başarısızlığına da
+    // uygulanmış hali.
+    await Promise.all([
+      ...persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
+      ...persistedCustomsDocumentSets.map((set) => deletePhotoBlobs(set.map((doc) => doc.storageKey))),
+    ]);
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 
@@ -622,18 +975,34 @@ export type UpdateJobInput = {
   addressText: string;
   /** Bkz. types.ts#Job.locationMode. */
   locationMode?: "catalog" | "custom";
-  neighborhood?: string;
-  locationUrl?: string;
-  directionsNote?: string;
   workDate: string;
   /** Bkz. types.ts#Job.workEndDate. Opsiyonel: verilmezse (undefined) mevcut kayıttaki değer korunur — job-edit-form.tsx her zaman bir değer gönderir, bu yalnızca geriye dönük uyumluluk içindir. */
   workEndDate?: string;
+  /** Bkz. types.ts#Job.productQuantity/productTonnage/productType. category artık ürün bilgisi gerektirmiyorsa (kategori değiştirildiyse) resolveProductInfoFields üçünü de temizler. */
+  productQuantity?: number;
+  productTonnage?: number;
+  productType?: string;
+  /** Bkz. types.ts#Job.customsTransactionType/vb. category artık Gümrük Müşavirliği değilse (kategori değiştirildiyse) resolveCustomsBrokerageFields dördünü de (evraklar dahil) temizler. */
+  customsTransactionType?: string;
+  customsRequestedServices?: string[];
+  customsProductType?: string;
+  /** Bkz. types.ts#Job.deliveryProvince/vb. category artık Nakliye değilse (kategori değiştirildiyse) resolveDeliveryLocationFields yedisini de temizler. */
+  deliveryProvince?: string;
+  deliveryDistrict?: string;
+  deliveryLocationType?: "facility" | "open_address" | "";
+  deliveryFacilityId?: string;
+  deliveryFacilityName?: string;
+  deliveryAddressText?: string;
   description: string;
   operationDetails: string;
   /** Korunacak mevcut fotoğrafların id'leri (silinenler bu listede olmaz). */
   keptPhotoIds: string[];
   /** Bu düzenlemede eklenen, henüz IndexedDB'ye yazılmamış yeni fotoğraflar. */
   newPhotos: ProcessedPhotoInput[];
+  /** Korunacak mevcut Gümrük Müşavirliği evraklarının id'leri (bkz. keptPhotoIds ile AYNI desen). */
+  keptCustomsDocumentIds: string[];
+  /** Bu düzenlemede eklenen, henüz IndexedDB'ye yazılmamış yeni evraklar (bkz. newPhotos ile AYNI desen). */
+  newCustomsDocuments: ProcessedPhotoInput[];
 };
 
 /**
@@ -692,41 +1061,84 @@ export async function updateJob(
     return { ok: false, error: "Fotoğraflar kaydedilemedi. Lütfen tekrar deneyin." };
   }
 
+  // Gümrük Müşavirliği evrakları: fotoğraflarla AYNI kept+new deseni.
+  // `newCustomsDocuments` boşsa persistPhotosOrRollback hiç çağrılmaz (boş
+  // dizi zaten geçerli bir "başarı" sonucudur, gereksiz bir IndexedDB
+  // turu atlanır).
+  const keptCustomsDocuments = (existing.customsDocuments ?? []).filter((doc) =>
+    input.keptCustomsDocumentIds.includes(doc.id),
+  );
+  const newlyPersistedCustomsDocuments =
+    input.newCustomsDocuments.length > 0 ? await persistPhotosOrRollback(input.newCustomsDocuments) : [];
+  if (!newlyPersistedCustomsDocuments) {
+    // Yukarıda zaten persistlenmiş YENİ fotoğraflar da geri alınır — bu
+    // düzenleme isteği bir bütün olarak başarısız sayılır (bkz. createJob'daki
+    // AYNI "fotoğraf başarılı, evrak başarısız" geri alma sırası).
+    await deletePhotoBlobs(newlyPersisted.map((photo) => photo.storageKey));
+    return { ok: false, error: "Belgeler kaydedilemedi. Lütfen tekrar deneyin." };
+  }
+
   const combinedPhotos: JobPhoto[] = [...keptPhotos, ...newlyPersisted].map((photo, index) => ({
     ...photo,
     order: index,
   }));
+  const combinedCustomsDocuments: JobCustomsDocument[] = [...keptCustomsDocuments, ...newlyPersistedCustomsDocuments];
 
+  const updatedProvince = input.province.trim();
+  const updatedDistrict = input.district.trim();
   const updated: Job = {
     ...existing,
     title: input.title.trim(),
     category: input.category,
-    province: input.province.trim(),
-    district: input.district.trim(),
+    province: updatedProvince,
+    district: updatedDistrict,
     ...resolveLocationFields(input),
     workDate: input.workDate,
     workEndDate: input.workEndDate ?? existing.workEndDate,
+    ...resolveProductInfoFields(input.category, input),
+    ...resolveCustomsBrokerageFields(input.category, { ...input, customsDocuments: combinedCustomsDocuments }),
+    ...resolveDeliveryLocationFields(input.category, input),
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),
     photos: combinedPhotos,
   };
+  updated.facilityId = verifiedPickupFacilityId(updated.category, updatedProvince, updatedDistrict, updated.facilityId);
 
   const all = readUserCreatedJobsSnapshot();
   if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
-    // Bu düzenlemede eklenen YENİ fotoğraflar (yukarıda persistlenmiş) hiçbir
-    // ilana bağlanamadan sahipsiz kalmasın diye geri alınır. Mevcut (korunan)
-    // fotoğraflara hiç dokunulmaz — eski kayıt localStorage'da olduğu gibi
-    // durur, kullanıcı hâlâ eski hâline erişebilir.
-    await deletePhotoBlobs(newlyPersisted.map((photo) => photo.storageKey));
+    // Bu düzenlemede eklenen YENİ fotoğraflar/evraklar (yukarıda persistlenmiş)
+    // hiçbir ilana bağlanamadan sahipsiz kalmasın diye geri alınır. Mevcut
+    // (korunan) fotoğraflara/evraklara hiç dokunulmaz — eski kayıt
+    // localStorage'da olduğu gibi durur, kullanıcı hâlâ eski hâline erişebilir.
+    await deletePhotoBlobs([...newlyPersisted, ...newlyPersistedCustomsDocuments].map((item) => item.storageKey));
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 
   // Kayıt başarıyla güncellendikten SONRA artık kullanılmayan eski
-  // fotoğraf blob'larını sil — sıra önemli: kayıt önce, silme sonra, ki
-  // arada bir hata olsa bile kullanıcı eski fotoğraflarına erişebilsin.
+  // fotoğraf/evrak blob'larını sil — sıra önemli: kayıt önce, silme sonra, ki
+  // arada bir hata olsa bile kullanıcı eski fotoğraflarına/evraklarına erişebilsin.
   const removedPhotos = existing.photos.filter((photo) => !input.keptPhotoIds.includes(photo.id));
   if (removedPhotos.length > 0) {
     await deletePhotoBlobs(removedPhotos.map((photo) => photo.storageKey));
+  }
+  // DÜZELTME (O7, veritabanı geçişi öncesi denetim): eskiden bu liste yalnızca
+  // `input.keptCustomsDocumentIds`e bakıyordu — kategori Gümrük
+  // Müşavirliği'nden BAŞKA bir kategoriye değiştirildiğinde ise
+  // `resolveCustomsBrokerageFields` (yukarıda) `updated.customsDocuments`ı
+  // SESSİZCE `undefined` yapar, ama form hâlâ eski belge id'lerini "kept"
+  // olarak gönderiyorsa `removedCustomsDocuments` BOŞ çıkıyordu — evraklar
+  // artık hiçbir kayıt tarafından referans edilmediği hâlde blob'ları hiç
+  // silinmiyordu (sahipsiz/orphan kalıyordu). Artık ESKİ belgeler (+ bu
+  // çağrıda yeni yüklenmiş ama nihai sonuçta kullanılmayan belgeler)
+  // `updated.customsDocuments`ın GERÇEK/NİHAİ (resolveCustomsBrokerageFields
+  // sonrası) haliyle karşılaştırılıyor — kategori değişikliği dahil her
+  // durumda doğru sonuç verir.
+  const finalCustomsDocumentIds = new Set((updated.customsDocuments ?? []).map((doc) => doc.id));
+  const orphanedCustomsDocuments = [...(existing.customsDocuments ?? []), ...newlyPersistedCustomsDocuments].filter(
+    (doc) => !finalCustomsDocumentIds.has(doc.id),
+  );
+  if (orphanedCustomsDocuments.length > 0) {
+    await deletePhotoBlobs(orphanedCustomsDocuments.map((doc) => doc.storageKey));
   }
 
   return { ok: true, job: updated };
@@ -825,6 +1237,19 @@ export async function deleteJob(session: Session | null, jobId: string): Promise
 
   if (existing.photos.length > 0) {
     await deletePhotoBlobs(existing.photos.map((photo) => photo.storageKey));
+  }
+  // DÜZELTME (Y5, veritabanı geçişi öncesi denetim): eskiden yalnızca
+  // fotoğraf blob'ları temizleniyordu — Gümrük Müşavirliği evrakları
+  // (customsDocuments) hiç silinmiyordu, ilan silindiğinde bu evrakların
+  // IndexedDB blob'ları hiçbir kayıt tarafından referans edilmeden kalıcı
+  // olarak sahipsiz (orphan) kalıyordu. `updateJob` bunu zaten doğru
+  // yapıyordu (bkz. aşağıdaki removedCustomsDocuments) — bu, o desenle
+  // tutarlı hale getirir. Yalnızca O6 düzeltmesiyle (republishJob artık
+  // evrakları da bağımsız storageKey'lerle kopyalıyor) birlikte GÜVENLİDİR
+  // — aksi halde yeniden yayınlanmış bir ilanın (eski storageKey'leri
+  // PAYLAŞAN) evrakları da kırılırdı.
+  if (existing.customsDocuments && existing.customsDocuments.length > 0) {
+    await deletePhotoBlobs(existing.customsDocuments.map((doc) => doc.storageKey));
   }
 
   return { ok: true };
@@ -992,6 +1417,23 @@ export async function republishJob(
     return { ok: false, error: "Fotoğraflar kopyalanamadı. Lütfen tekrar deneyin." };
   }
 
+  // DÜZELTME (O6, veritabanı geçişi öncesi denetim): Gümrük Müşavirliği
+  // evrakları da (varsa) fotoğraflarla BİREBİR AYNI gerekçeyle (yukarıdaki
+  // duplicateJobPhotos doküman notu) YENİ storageKey'lerle kopyalanır —
+  // eskiden `...existing` spread'i customsDocuments'ı ESKİ storageKey'lerle
+  // olduğu gibi taşıyordu, bu da eski ilan "Kalıcı Olarak Sil" ile
+  // silindiğinde (bkz. Y5 düzeltmesi) yeniden yayınlanan yeni ilanın
+  // evraklarının da kırılmasına yol açardı.
+  const existingCustomsDocuments = existing.customsDocuments ?? [];
+  const duplicatedCustomsDocuments =
+    existingCustomsDocuments.length > 0 ? await duplicateJobPhotos(existingCustomsDocuments) : [];
+  if (!duplicatedCustomsDocuments) {
+    // Yukarıda zaten kopyalanmış fotoğraflar da geri alınır — createJob'daki
+    // AYNI "fotoğraf başarılı, evrak başarısız" geri alma sırası.
+    await deletePhotoBlobs(duplicatedPhotos.map((photo) => photo.storageKey));
+    return { ok: false, error: "Belgeler kopyalanamadı. Lütfen tekrar deneyin." };
+  }
+
   const { createdAt, publishEndAt } = createPublishWindow();
   const newJobId = crypto.randomUUID();
   const republished: Job = {
@@ -1000,6 +1442,7 @@ export async function republishJob(
     workDate: input.workDate,
     workEndDate: input.workEndDate,
     photos: duplicatedPhotos,
+    ...(existingCustomsDocuments.length > 0 ? { customsDocuments: duplicatedCustomsDocuments } : {}),
     createdAt,
     publishEndAt,
     republishedFromJobId: existing.id,
@@ -1015,10 +1458,10 @@ export async function republishJob(
       republished,
     ])
   ) {
-    // Yeni ilan için kopyalanmış fotoğraflar (yukarıda) hiçbir kayda
+    // Yeni ilan için kopyalanmış fotoğraflar/evraklar (yukarıda) hiçbir kayda
     // bağlanamadan sahipsiz kalmasın diye geri alınır; eski ilan hiç
     // değiştirilmediği için ona dokunmaya gerek yok.
-    await deletePhotoBlobs(duplicatedPhotos.map((photo) => photo.storageKey));
+    await deletePhotoBlobs([...duplicatedPhotos, ...duplicatedCustomsDocuments].map((item) => item.storageKey));
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 

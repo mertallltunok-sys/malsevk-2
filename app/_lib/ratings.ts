@@ -1,4 +1,5 @@
 import { findJobById } from "./jobs-lookup";
+import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { getAllOffers } from "./offers";
 import type { Offer, Rating, Session } from "./types";
 
@@ -81,12 +82,23 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-function writeAllRatings(ratings: Rating[]): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(RATINGS_STORAGE_KEY, JSON.stringify(ratings));
+/**
+ * DÜZELTME (K3, veritabanı geçişi öncesi denetim): eskiden `window.localStorage.
+ * setItem` doğrudan çağrılıyordu (try/catch yok, `void` dönüyordu) — kod
+ * tabanındaki TEK bu şekilde kalan tablo. Kota aşımı/kısıtlı gizlilik modu
+ * gibi nedenlerle `setItem` fırlatırsa hata `submitRating`'i çağıran
+ * `job-rating-modal.tsx`nin tıklama işleyicisinden yakalanmadan dışarı
+ * çıkıyor, `submitting` state hiç `false`'a dönmüyor ve kullanıcı kapatılamayan
+ * bir modalda kilitli kalıyordu. Artık diğer TÜM tablolarla (job-store.ts,
+ * offers.ts, users.ts, ...) AYNI `local-storage.ts#writeJson` (catch + boolean
+ * dönüş) deseni kullanılıyor.
+ */
+function writeAllRatings(ratings: Rating[]): boolean {
+  if (!writeJson(RATINGS_STORAGE_KEY, ratings)) return false;
   cachedRaw = null;
   hasCached = false;
   notify();
+  return true;
 }
 
 export const ratingsStore = {
@@ -218,6 +230,8 @@ export function submitRating(
     stars,
     createdAt: new Date().toISOString(),
   };
-  writeAllRatings([...all, rating]);
+  if (!writeAllRatings([...all, rating])) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
   return { ok: true, rating };
 }

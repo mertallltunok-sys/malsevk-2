@@ -312,14 +312,22 @@ export const COMPLETION_AUTO_APPROVE_DAYS = 7;
  * Bir ilana kilitli (bkz. ENGAGED_OFFER_STATUSES) bir teklif olup olmadığını
  * söyler. Job.status'ta bunun karşılığı yok (bkz. types.ts: JobStatus
  * yalnızca "yayinda" | "tamamlandi" | "iptal") — kabul/iş başlama kararı
- * yalnızca Offer kayıtlarında tutuluyor. TEK KULLANIM YERİ artık
- * offers.ts#deleteJobWithOffers'ın "aktif/tamamlanmış bir işi olan ilan
- * silinemez" korumasıdır. Kasıtlı olarak YENİ teklif verilebilirliği
- * belirlemek için KULLANILMAZ — bir ilana teklif kabul edilmiş olması artık
- * o ilanı diğer Hizmet Verenlere kapatmıyor (bkz. getJobOfferAvailability,
- * offers.ts#createOffer); aynı anda yalnızca TEK bir teklifin anlaşma
- * sürecinin ilerleyebilmesi kuralı artık yalnızca isOfferPendingActionBlocked
- * ile (Kabul Et/Reddet aksiyonları üzerinde) uygulanır.
+ * yalnızca Offer kayıtlarında tutuluyor. Kasıtlı olarak YENİ teklif
+ * verilebilirliği belirlemek için KULLANILMAZ — bir ilana teklif kabul
+ * edilmiş olması artık o ilanı diğer Hizmet Verenlere kapatmıyor (bkz.
+ * getJobOfferAvailability, offers.ts#createOffer); aynı anda yalnızca TEK
+ * bir teklifin anlaşma sürecinin ilerleyebilmesi kuralı artık yalnızca
+ * isOfferPendingActionBlocked ile (Kabul Et/Reddet aksiyonları üzerinde)
+ * uygulanır.
+ *
+ * DÜZELTME (K2, veritabanı geçişi öncesi denetim): eskiden BURADAKİ TEK
+ * KULLANIM YERİ offers.ts#deleteJobWithOffers'ın "aktif/tamamlanmış bir işi
+ * olan ilan silinemez" korumasıydı — ama ENGAGED_OFFER_STATUSES kendi tanımı
+ * gereği "completed"i BİLEREK dışarıda bırakır, bu yüzden tamamlanmış bir
+ * işin ilanı yanlışlıkla silinebiliyordu. `deleteJobWithOffers` artık bunun
+ * yerine `getSettledOfferForJob`i (ENGAGED ∪ COMPLETED) kullanıyor — bu
+ * fonksiyonun bugün hiçbir çağıranı yok, yalnızca geriye dönük API
+ * uyumluluğu/dokümantasyon amacıyla korunuyor.
  */
 export function jobHasAcceptedOffer(jobId: string, offers: Offer[]): boolean {
   return offers.some(

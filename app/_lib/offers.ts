@@ -4,21 +4,23 @@ import {
   getEngagedOfferForJob,
   getOperationStatusBucket,
   getProviderOfferFilter,
+  getSettledOfferForJob,
   isJobClosedToNewOffers,
   OFFER_PENDING_BLOCKED_MESSAGE,
   REOFFER_COOLDOWN_DAYS,
   isOfferPendingActionBlocked,
   isReofferCooldownStatus,
-  jobHasAcceptedOffer,
 } from "./job-requests";
 import { isJobListingExpired } from "./job-publish-window";
 import { isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE, JOB_CLOSURE_BLOCKED_MESSAGE } from "./job-closure";
 import { closeJob as closeJobRecord, deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
 import { isJobVisibleToSession } from "./job-visibility";
+import { canSubmitOffersAsCustomsBroker } from "./customs-license";
 import { findJobById } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
-import { MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
+import { isValidCurrency, MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
+import { isTransportationCategory } from "./product-catalog";
 import { hasReachedActiveJobLimit } from "./provider-capacity";
 import type { Currency, DisagreementReason, Job, JobClosureReason, Offer, OfferStatus, Session } from "./types";
 
@@ -50,9 +52,11 @@ function isOffer(value: unknown): value is Offer {
     typeof offer.jobId === "string" &&
     typeof offer.providerId === "string" &&
     typeof offer.amount === "number" &&
-    (offer.currency === "TRY" || offer.currency === "USD") &&
+    isValidCurrency(offer.currency) &&
     typeof offer.description === "string" &&
-    typeof offer.estimatedDuration === "string" &&
+    (offer.estimatedDuration === undefined ||
+      typeof offer.estimatedDuration === "string" ||
+      typeof offer.estimatedDuration === "number") &&
     (offer.status === "pending" ||
       offer.status === "accepted" ||
       offer.status === "rejected" ||
@@ -189,6 +193,39 @@ export function getOfferForJob(jobId: string, providerId: string): Offer | null 
   );
 }
 
+/** "Tamamlanması Taahhüt Edilen Gün" alanının izin verilen aralığı — offer-form.tsx'in açılır listesi ve createOffer'ın doğrulaması AYNI bu iki sabiti kullanır, aralık iki yerde ayrı ayrı hardcode edilmez. */
+export const MIN_COMMITTED_DAYS = 1;
+export const MAX_COMMITTED_DAYS = 60;
+
+/**
+ * `offer.estimatedDuration`in gösterim biçimi — TEK doğruluk kaynağı, üç
+ * gösterim yeri de (incoming-offer-card.tsx, offer-panel.tsx, my-offers-panel.tsx)
+ * bunu çağırır; her üçü de bunu yalnızca Nakliye kategorisindeki ilanların
+ * teklifleri için çağırır (bkz. product-catalog.ts#isTransportationCategory)
+ * — bu yüzden `undefined` girdisi pratikte hiç oluşmaz, yine de savunma
+ * amaçlı "-" döner (asla çökmez). Sayıysa doğrudan "N gün"; eski (bu
+ * özellikten önce serbest metin olarak toplanmış) bir `string` kayıtsa VE
+ * güvenle 1-60 aralığında bir tam sayıya çevrilebiliyorsa yine "N gün"
+ * gösterilir, ÇEVRİLEMİYORSA (ör. "1 iş günü", "yaklaşık 2 hafta") ham metin
+ * OLDUĞU GİBİ gösterilir — eski kayıt asla çökmez/kaybolmaz, yalnızca yeni
+ * biçimle gösterilemez.
+ */
+export function formatCommittedDays(value: string | number | undefined): string {
+  if (value === undefined) return "-";
+  if (typeof value === "number") return `${value} gün`;
+  const trimmed = value.trim();
+  const asNumber = Number(trimmed);
+  if (
+    /^\d+$/.test(trimmed) &&
+    Number.isInteger(asNumber) &&
+    asNumber >= MIN_COMMITTED_DAYS &&
+    asNumber <= MAX_COMMITTED_DAYS
+  ) {
+    return `${asNumber} gün`;
+  }
+  return value;
+}
+
 export function getOfferStatusLabel(status: Offer["status"]): string {
   switch (status) {
     case "pending":
@@ -286,6 +323,10 @@ export function canProviderSubmitNewOffer(
   // (aşağıdaki createOffer'da tekrar) uygulanır — arayüz atlanabilir bir tek
   // nokta değildir.
   if (!isJobVisibleToSession(session, job)) return false;
+  // Gümrük Müşavirliği'ne özel ek kapı (bkz. customs-license.ts) — Gümrük
+  // Müşavirliği seçili olmayan bir Hizmet Veren için her zaman `true` döner,
+  // diğer hiçbir hizmetin teklif verme davranışını etkilemez.
+  if (!canSubmitOffersAsCustomsBroker(session.id)) return false;
   if (!isJobOpenForOffers(job.status)) return false;
   if (isJobClosedToNewOffers(job.id, offers)) return false;
   // İlan Kapatma: Hizmet Alan bu ilanı manuel olarak kapattıysa (bkz.
@@ -508,7 +549,14 @@ export type CreateOfferInput = {
   amount: number;
   currency: Currency;
   description: string;
-  estimatedDuration: string;
+  /**
+   * "Tamamlanması Taahhüt Edilen Gün" — yalnızca Nakliye kategorisindeki
+   * ilanlar için: 1-60 arası tam sayı, `createOffer` doğrular ve zorunlu
+   * kılar. Nakliye DIŞINDAKİ kategorilerde bu alan hiç gönderilmez
+   * (undefined) — createOffer bu durumda hiç doğrulamaz, yazılan `Offer`
+   * kaydında bu alan hiç olmaz (bkz. types.ts#Offer.estimatedDuration).
+   */
+  estimatedDuration?: number;
 };
 
 export type CreateOfferResult =
@@ -554,6 +602,17 @@ export function createOffer(
   // getirilir — ilanın var olduğu ama erişilemediği bilgisi bile sızmaz.
   if (!isJobVisibleToSession(session, job)) {
     return { ok: false, error: "İlan bulunamadı veya artık yayında değil." };
+  }
+
+  // Gümrük Müşavirliği'ne özel ek kapı (bkz. customs-license.ts) — Gümrük
+  // Müşaviri İzin Belgesi onaylanana kadar hiçbir teklif oluşturulamaz;
+  // Gümrük Müşavirliği seçili olmayan bir Hizmet Veren için bu kontrol her
+  // zaman geçer, davranışı hiç etkilemez.
+  if (!canSubmitOffersAsCustomsBroker(session.id)) {
+    return {
+      ok: false,
+      error: "Gümrük Müşaviri İzin Belgeniz onaylanana kadar teklif veremezsiniz.",
+    };
   }
 
   // Teklif oluşturmanın tek yetkilendirme noktası burasıdır — arayüz bu
@@ -642,7 +701,7 @@ export function createOffer(
     };
   }
 
-  if (input.currency !== "TRY" && input.currency !== "USD") {
+  if (!isValidCurrency(input.currency)) {
     return { ok: false, error: "Geçersiz para birimi." };
   }
 
@@ -660,9 +719,17 @@ export function createOffer(
     return { ok: false, error: "Teklif açıklaması geçersiz." };
   }
 
-  const estimatedDuration = input.estimatedDuration.trim();
-  if (estimatedDuration.length < 2 || estimatedDuration.length > 100) {
-    return { ok: false, error: "Tahmini hizmet süresi geçersiz." };
+  // "Tamamlanması Taahhüt Edilen Gün" artık yalnızca Nakliye kategorisindeki
+  // ilanlar için toplanır/doğrulanır (bkz. types.ts#Offer.estimatedDuration'ın
+  // dokümanı) — Nakliye dışı bir ilana verilen teklifte bu alan hiç yazılmaz.
+  const requiresEstimatedDuration = isTransportationCategory(job.category);
+  if (
+    requiresEstimatedDuration &&
+    (!Number.isInteger(input.estimatedDuration) ||
+      (input.estimatedDuration as number) < MIN_COMMITTED_DAYS ||
+      (input.estimatedDuration as number) > MAX_COMMITTED_DAYS)
+  ) {
+    return { ok: false, error: "Tamamlanması taahhüt edilen gün sayısı 1 ile 60 arasında olmalıdır." };
   }
 
   const now = new Date().toISOString();
@@ -673,7 +740,7 @@ export function createOffer(
     amount: input.amount,
     currency: input.currency,
     description,
-    estimatedDuration,
+    estimatedDuration: requiresEstimatedDuration ? input.estimatedDuration : undefined,
     status: "pending",
     createdAt: now,
     updatedAt: now,
@@ -950,7 +1017,13 @@ export async function deleteJobWithOffers(
   }
 
   const all = readAllOffersSnapshot();
-  if (job.status === "tamamlandi" || jobHasAcceptedOffer(jobId, all)) {
+  // DÜZELTME (K2): önceki hâli `jobHasAcceptedOffer`/ENGAGED_OFFER_STATUSES kullanıyordu,
+  // ki bu küme kendi tanımı gereği "completed"i BİLEREK dışarıda bırakır (iş bittiği için
+  // artık "meşgul" sayılmaz) — sonuçta tamamlanmış (ve puanlanmış) bir işin ilanı, hata
+  // mesajının vaat ettiği korumanın aksine, hiçbir engelle karşılaşmadan silinebiliyordu.
+  // `getSettledOfferForJob` (ENGAGED ∪ COMPLETED, "cancelled"/"rejected"/"withdrawn"/
+  // "agreement_failed"/"pending" hariç) bu ilanın silinebilirliği için doğru eşiktir.
+  if (job.status === "tamamlandi" || getSettledOfferForJob(jobId, all) !== null) {
     return {
       ok: false,
       error: "Bu ilana bağlı aktif veya tamamlanmış bir iş bulunduğu için ilan silinemez.",

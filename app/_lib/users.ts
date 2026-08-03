@@ -1,13 +1,27 @@
 import { isCompanyType, type CompanyType } from "./company-type";
-import { readJson, STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
+import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { deletePhotoBlob, putPhotoBlob } from "./photo-blob-store";
 import { isPasswordValid } from "./password-rules";
 import { normalizePhoneNumber } from "./phone";
-import { recordProviderDocumentConsent, hasAcceptedProviderDocumentDeclaration } from "./provider-document-consents";
-import { addProviderDocuments, getProviderDocumentsForUser, updateProviderDocumentReviewFields } from "./provider-documents";
+import {
+  recordProviderDocumentConsent,
+  hasAcceptedProviderDocumentDeclaration,
+  CUSTOMS_LICENSE_STATEMENT_ID,
+} from "./provider-document-consents";
+import {
+  addProviderDocuments,
+  getProviderDocumentsForUser,
+  updateProviderDocumentReviewFields,
+  CUSTOMS_LICENSE_DOCUMENT_TYPE,
+} from "./provider-documents";
 import { getProviderServiceCategoryIds, setProviderServiceCategoryIds } from "./provider-services";
 import { validateProviderProfileForm } from "./provider-profile";
-import { NAKLIYE_SERVICE_CATEGORY_ID, isExperienceRange, isServiceFeature } from "./service-catalog";
+import {
+  GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID,
+  NAKLIYE_SERVICE_CATEGORY_ID,
+  isExperienceRange,
+  isServiceFeature,
+} from "./service-catalog";
 import type { ExperienceRange, ProviderProfile, ServiceFeature, Session, UserRole } from "./types";
 
 const USERS_STORAGE_KEY = "malsevk.users.v1";
@@ -53,6 +67,20 @@ export type StoredUser = {
   district?: string;
   /** Yalnızca hizmet-veren kullanıcılarda anlamlıdır; opsiyoneldir (bkz. normalizeStoredUser). */
   providerProfile?: ProviderProfile;
+  /**
+   * "İletişim Bilgisi Görünürlüğü" (Hesap Ayarları) — bu kullanıcının
+   * e-postasının, bir teklif kabul edildikten sonra karşı tarafa gösterilip
+   * gösterilmeyeceği (bkz. contact-access.ts, zamanlama kapısı DEĞİŞMEDİ,
+   * yalnızca bunun ÜZERİNE eklenen bir tercih katmanı). `undefined` = kullanıcı
+   * henüz bir tercih belirlemedi — bu, bu alandan ÖNCEKİ (özelliğin var
+   * olmadığı dönemdeki) davranışla AYNI sonucu (görünür) vermek için `true`
+   * gibi ele alınır, böylece mevcut kullanıcıların iletişim akışı beklenmedik
+   * şekilde bozulmaz. Hem hizmet-alan hem hizmet-veren kullanabilir — role
+   * göre kısıtlanmaz. Bu alandan önce oluşturulmuş kayıtlarda hiç yoktur.
+   */
+  showEmailAfterAgreement?: boolean;
+  /** Bkz. showEmailAfterAgreement üstündeki doküman — AYNI kural, telefon numarası için. */
+  showPhoneAfterAgreement?: boolean;
 };
 
 function isStoredUserCore(value: unknown): value is Record<string, unknown> {
@@ -91,9 +119,10 @@ function isValidProviderProfile(value: unknown): value is ProviderProfile {
 
 /**
  * `createdAt`/`providerProfile`/`companyName`/`companyType`/`province`/
- * `district` bu özelliklerden önce oluşturulmuş kayıtlarda hiç yoktur.
- * Geriye dönük uyumluluk için hepsi opsiyonel kabul edilir ve eksik/bozuksa
- * sessizce `undefined`a normalize edilir — kayıt yine de geçerli sayılır
+ * `district`/`showEmailAfterAgreement`/`showPhoneAfterAgreement` bu
+ * özelliklerden önce oluşturulmuş kayıtlarda hiç yoktur. Geriye dönük
+ * uyumluluk için hepsi opsiyonel kabul edilir ve eksik/bozuksa sessizce
+ * `undefined`a normalize edilir — kayıt yine de geçerli sayılır
  * (job-store.ts#normalizeStoredJob'daki "photos" alanıyla aynı desen); tek
  * başına bu alanların eksikliği bir kullanıcı kaydının tamamen
  * kaybolmasına (filtrelenip silinmesine) asla yol açmaz.
@@ -106,10 +135,32 @@ function normalizeStoredUser(value: unknown): StoredUser | null {
   const companyType = isCompanyType(value.companyType) ? value.companyType : undefined;
   const province = typeof value.province === "string" ? value.province : undefined;
   const district = typeof value.district === "string" ? value.district : undefined;
+  let showEmailAfterAgreement =
+    typeof value.showEmailAfterAgreement === "boolean" ? value.showEmailAfterAgreement : undefined;
+  let showPhoneAfterAgreement =
+    typeof value.showPhoneAfterAgreement === "boolean" ? value.showPhoneAfterAgreement : undefined;
+  // Güvenli veri migrasyonu: en az biri her zaman açık kalmalı kuralından
+  // ÖNCE yazılmış bir kayıt ikisini de `false` olarak sakladıysa (artık
+  // updateContactVisibility bunu asla üretmez, bkz. CONTACT_VISIBILITY_MIN_ONE_MESSAGE),
+  // okuma anında her ikisi de `true`ya onarılır — job-store.ts#normalizeStoredJob'daki
+  // "bozuk alanı sessizce düzelt" desenin AYNISI, storage'a geri YAZILMAZ,
+  // yalnızca her okuyuşta yeniden uygulanır. Kullanıcının başka hiçbir alanına
+  // dokunulmaz.
+  if (showEmailAfterAgreement === false && showPhoneAfterAgreement === false) {
+    showEmailAfterAgreement = true;
+    showPhoneAfterAgreement = true;
+  }
   return {
     ...(value as Omit<
       StoredUser,
-      "createdAt" | "providerProfile" | "companyName" | "companyType" | "province" | "district"
+      | "createdAt"
+      | "providerProfile"
+      | "companyName"
+      | "companyType"
+      | "province"
+      | "district"
+      | "showEmailAfterAgreement"
+      | "showPhoneAfterAgreement"
     >),
     createdAt,
     providerProfile,
@@ -117,18 +168,85 @@ function normalizeStoredUser(value: unknown): StoredUser | null {
     companyType,
     province,
     district,
+    showEmailAfterAgreement,
+    showPhoneAfterAgreement,
   };
 }
 
+// DÜZELTME (Y3, veritabanı geçişi öncesi denetim): eskiden bu tabloda hiçbir
+// modül önbelleği/storage-event dinleyicisi yoktu (job-store.ts/offers.ts/
+// ratings.ts/... tablolarının AKSİNE) — bir sekmede profil/iletişim-
+// görünürlüğü değişikliği yapıldığında başka açık bir sekme bunu HİÇBİR
+// ZAMAN görmüyordu. Aşağıdaki `listeners`/`cachedRaw`/`notify`/`usersStore`
+// bloğu, diğer tüm tablolarla BİREBİR aynı deseni uygular (bkz. ratings.ts).
+const listeners = new Set<() => void>();
+let cachedRaw: string | null = null;
+let cachedUsers: StoredUser[] = [];
+let hasCached = false;
+
 function readUsers(): StoredUser[] {
-  const raw = readJson<unknown[]>(USERS_STORAGE_KEY);
-  if (!Array.isArray(raw)) return [];
-  return raw.map(normalizeStoredUser).filter((user): user is StoredUser => user !== null);
+  if (typeof window === "undefined") return [];
+
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(USERS_STORAGE_KEY);
+  } catch {
+    raw = null;
+  }
+
+  // useSyncExternalStore, getSnapshot'ın değişmediğinde aynı referansı
+  // döndürmesini bekler; bu yüzden ham metin değişmediyse önbelleklenmiş
+  // dizi döndürülür (session.ts/job-store.ts ile AYNI gerekçe).
+  if (hasCached && raw === cachedRaw) return cachedUsers;
+
+  let parsed: StoredUser[] = [];
+  if (raw) {
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (Array.isArray(value)) parsed = value.map(normalizeStoredUser).filter((user): user is StoredUser => user !== null);
+    } catch {
+      parsed = [];
+    }
+  }
+
+  cachedRaw = raw;
+  cachedUsers = parsed;
+  hasCached = true;
+  return parsed;
 }
 
 function writeUsers(users: StoredUser[]): boolean {
-  return writeJson(USERS_STORAGE_KEY, users);
+  if (!writeJson(USERS_STORAGE_KEY, users)) return false;
+  cachedRaw = null;
+  hasCached = false;
+  notify();
+  return true;
 }
+
+const EMPTY_USERS: StoredUser[] = [];
+function getServerUsersSnapshot(): StoredUser[] {
+  return EMPTY_USERS;
+}
+
+function subscribeToUsers(onStoreChange: () => void): () => void {
+  listeners.add(onStoreChange);
+  window.addEventListener("storage", onStoreChange);
+  return () => {
+    listeners.delete(onStoreChange);
+    window.removeEventListener("storage", onStoreChange);
+  };
+}
+
+function notify(): void {
+  for (const listener of listeners) listener();
+}
+
+/** use-users.ts#useAllUsers/useUserById'ın useSyncExternalStore ile bağlandığı reaktif kaynak. */
+export const usersStore = {
+  subscribe: subscribeToUsers,
+  getSnapshot: readUsers,
+  getServerSnapshot: getServerUsersSnapshot,
+};
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -226,6 +344,12 @@ export async function registerUser(input: RegisterInput): Promise<RegisterResult
     companyType: input.companyType,
     province: input.province?.trim() || undefined,
     district: input.district?.trim() || undefined,
+    // Yeni kayıtta her iki iletişim görünürlüğü de varsayılan olarak açık
+    // (bkz. görev tanımı) — `?? true` geriye dönük okuma fallback'iyle zaten
+    // aynı sonucu verir, ama burada AÇIKÇA yazılır ki kural niyeti (varsayılan
+    // "açık", "henüz tercih yok" değil) veride de görünür olsun.
+    showEmailAfterAgreement: true,
+    showPhoneAfterAgreement: true,
   };
 
   if (!writeUsers([...readUsers(), user])) {
@@ -296,6 +420,23 @@ const DEV_ACCOUNTS: RegisterInput[] = [
     companyType: "limited-sirket",
     province: "Kocaeli",
     district: "Gebze",
+  },
+  {
+    // Gümrük Müşavirliği belge doğrulama akışını (bkz. customs-license.ts)
+    // elle veri hazırlamadan test edebilmek için — bu hesabın hizmet seçimi
+    // (yalnızca Gümrük Müşavirliği), belgesi (ONAYLANMIŞ durumda) ve her iki
+    // beyanı `seedGumrukMusaviriProviderProfileIfNeeded` tarafından, bu döngü
+    // tamamlandıktan SONRA ayrıca kurulur (bkz. aşağıda) — Nakliyeci demo
+    // hesabıyla BİREBİR aynı desen.
+    name: "Ahmet Yılmaz",
+    email: "gumrukdemo@malsevk.demo",
+    phone: "+905325555555",
+    password: "Demo1234!",
+    role: "hizmet-veren",
+    companyName: "Marmara Gümrük Müşavirliği Ltd. Şti.",
+    companyType: "limited-sirket",
+    province: "Kocaeli",
+    district: "Dilovası",
   },
   {
     // Yalnızca app/admin (Hizmet Veren Belge Kontrolü) panelini test etmek için —
@@ -419,6 +560,28 @@ const NAKLIYECI_DEMO_DOCUMENT: { originalFileName: string; mimeType: string; ext
   extension: "pdf",
 };
 
+const GUMRUK_DEMO_EMAIL = "gumrukdemo@malsevk.demo";
+/**
+ * Ahmet Yılmaz'ın "Yetki Belgeleri" — iki AYRI belge (görev gereksinimi:
+ * "Yetkilendirilmiş Gümrük Müşaviri" + "Gümrük Müşavirliği Ruhsatı"), ikisi
+ * de `CUSTOMS_LICENSE_DOCUMENT_TYPE` ile etiketlenir ve ikisi de doğrudan
+ * "approved" işaretlenir. `customs-license.ts#getCustomsLicenseDocumentForUser`
+ * zaten birden fazla yüklemeyi (en sonuncusunu esas alarak) desteklediği için
+ * bu, veri modelinde HİÇBİR değişiklik gerektirmez.
+ */
+const GUMRUK_DEMO_DOCUMENTS: { originalFileName: string; mimeType: string; extension: string }[] = [
+  {
+    originalFileName: "yetkilendirilmis-gumruk-musaviri-belgesi.pdf",
+    mimeType: "application/pdf",
+    extension: "pdf",
+  },
+  {
+    originalFileName: "gumruk-musavirligi-ruhsati.pdf",
+    mimeType: "application/pdf",
+    extension: "pdf",
+  },
+];
+
 /**
  * Nakliyeci demo hesabının (bkz. DEV_ACCOUNTS'taki "nakliyeci@test.com"
  * girdisi) provider-services.ts/provider-documents.ts/
@@ -503,6 +666,134 @@ async function seedNakliyeciProviderProfileIfNeeded(): Promise<void> {
   }
 }
 
+/**
+ * Ahmet Yılmaz / Gümrük demo hesabının (bkz. DEV_ACCOUNTS'taki
+ * "gumrukdemo@malsevk.demo" girdisi) provider-services.ts/provider-documents.ts/
+ * provider-document-consents.ts/StoredUser.providerProfile kayıtlarını kurar
+ * — `seedNakliyeciProviderProfileIfNeeded` ile AYNI yapı/idempotentlik
+ * garantisi, üç fark: (1) hizmet seçimi Nakliye yerine Gümrük Müşavirliği'dir,
+ * (2) her ikisi de `CUSTOMS_LICENSE_DOCUMENT_TYPE` ile etiketlenen İKİ AYRI
+ * "Yetki Belgesi" (bkz. GUMRUK_DEMO_DOCUMENTS) yüklenir ve genel "Belge
+ * Doğruluk Beyanı"na EK olarak Gümrük'e özel "Yüklediğim belge bana aittir ve
+ * günceldir." beyanı da (bkz. CUSTOMS_LICENSE_STATEMENT_ID) ayrıca kaydedilir
+ * — gerçek kayıt formunun (login-form.tsx) ürettiği durumla birebir aynı
+ * olsun diye; her iki belge de doğrudan "approved" (Onaylandı) olarak
+ * işaretlenir (görev gereksinimi) — bu hesap hiçbir admin onayı beklemeden
+ * teklif verebilir durumda test edilebilir. (3) demo tanıtım metninde
+ * belirtilen zengin firma profili (bio/hizmet bölgeleri/çalışma alanları/
+ * deneyim aralığı) yalnızca hiç yoksa BİR KEZ kurulur — kullanıcı Hesap
+ * Ayarları > Firma Profili'nden bunu sonradan elle değiştirirse bir sonraki
+ * seed çalıştırmasında ÜZERİNE YAZILMAZ (aynı "yalnızca eksikse kur" ilkesi).
+ * Profil fotoğrafı/logosu kasıtlı olarak HİÇ ayarlanmaz — diğer tüm demo
+ * hesaplarla (Nakliyeci/Mert/Zeynep/Mehmet Demir) AYNI şekilde, gerçek bir
+ * logo yüklenmemiş her hesabın zaten kullandığı mevcut baş harf-avatarı
+ * (bkz. profile.ts#getInitials) otomatik olarak devreye girer — yeni bir
+ * "kapak görseli" alanı/özelliği İCAT EDİLMEZ (bu, mevcut veri modelinde hiç
+ * yoktur).
+ */
+async function seedGumrukMusaviriProviderProfileIfNeeded(): Promise<void> {
+  const user = findUserByEmail(GUMRUK_DEMO_EMAIL);
+  if (!user) return;
+
+  const currentServiceIds = getProviderServiceCategoryIds(user.id);
+  if (currentServiceIds.length !== 1 || currentServiceIds[0] !== GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID) {
+    setProviderServiceCategoryIds(user.id, [GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID]);
+  }
+
+  const hasCustomsDocument = getProviderDocumentsForUser(user.id).some(
+    (doc) => doc.documentType === CUSTOMS_LICENSE_DOCUMENT_TYPE,
+  );
+  if (!hasCustomsDocument) {
+    for (const demoDocument of GUMRUK_DEMO_DOCUMENTS) {
+      const storageKey = crypto.randomUUID();
+      const demoBlob = new Blob(
+        [
+          `Marmara Gümrük Müşavirliği Ltd. Şti. - ${demoDocument.originalFileName} (geliştirme ortamı demo hesabı için otomatik oluşturuldu).`,
+        ],
+        { type: demoDocument.mimeType },
+      );
+      try {
+        await putPhotoBlob(storageKey, demoBlob);
+      } catch {
+        // IndexedDB bu ortamda kullanılamıyorsa (ör. bazı test/SSR bağlamları)
+        // yarım bir belge metadata kaydı bırakmamak için burada durulur —
+        // hizmet seçimi yine de yukarıda zaten kurulmuş olur.
+        return;
+      }
+
+      if (
+        !addProviderDocuments(user.id, [
+          {
+            originalFileName: demoDocument.originalFileName,
+            mimeType: demoDocument.mimeType,
+            extension: demoDocument.extension,
+            size: demoBlob.size,
+            indexedDbStorageKey: storageKey,
+            documentType: CUSTOMS_LICENSE_DOCUMENT_TYPE,
+          },
+        ])
+      ) {
+        await deletePhotoBlob(storageKey);
+        return;
+      }
+
+      const created = getProviderDocumentsForUser(user.id).find(
+        (doc) => doc.indexedDbStorageKey === storageKey,
+      );
+      if (created) {
+        // Görev gereksinimi: "Belge durumu: Onaylandı" — hiçbir admin onayı
+        // beklemeden test edilebilir kılmak için doğrudan "approved" olarak
+        // işaretlenir (Nakliyeci demo hesabıyla AYNI gerekçe/desen).
+        const admin = findUserByEmail(ADMIN_DEMO_EMAIL);
+        updateProviderDocumentReviewFields({
+          documentId: created.id,
+          status: "approved",
+          adminId: admin?.id ?? user.id,
+        });
+      }
+    }
+  }
+
+  if (!hasAcceptedProviderDocumentDeclaration(user.id)) {
+    recordProviderDocumentConsent(user.id);
+  }
+  if (!hasAcceptedProviderDocumentDeclaration(user.id, CUSTOMS_LICENSE_STATEMENT_ID)) {
+    recordProviderDocumentConsent(user.id, CUSTOMS_LICENSE_STATEMENT_ID);
+  }
+
+  // Zengin demo firma profili — yalnızca hiç profil yoksa kurulur (bkz. bu
+  // fonksiyonun üstündeki dokümantasyon). Mevcut ProviderProfile alanları
+  // (types.ts) dışında HİÇBİR yeni alan kullanılmaz: "15 yıl sektör
+  // deneyimi" -> `experienceRange: "10+"` (service-catalog.ts#
+  // EXPERIENCE_RANGE_OPTIONS'taki en yakın/en üst aralık), "Çalışma
+  // Alanları" -> `expertise` (Hesap Ayarları > Firma Profili'nin hâlâ
+  // gösterdiği "Uzmanlık Alanları" chip'leri, bkz. types.ts#ProviderProfile.expertise'in
+  // kendi dokümantasyonu — burada yalnızca DEMO GÖRÜNTÜLEME amaçlı
+  // doldurulur, hizmet kategorisi/görünürlük/teklif yetkisi HÂLÂ yalnızca
+  // yukarıdaki provider-services.ts kaydından gelir, bu alan onu asla
+  // etkilemez).
+  if (!user.providerProfile) {
+    const demoProfile: ProviderProfile = {
+      companyName: "Marmara Gümrük Müşavirliği Ltd. Şti.",
+      bio:
+        "15 yıllık sektör tecrübesiyle ithalat, ihracat, transit ve antrepo işlemlerinde profesyonel gümrük müşavirliği hizmeti sunuyoruz. Liman operasyonları ve dış ticaret süreçlerinde hızlı ve güvenilir çözümler üretiyoruz.",
+      regions: ["Kocaeli", "İstanbul", "Sakarya"],
+      expertise: [
+        "İthalat Gümrükleme",
+        "İhracat Gümrükleme",
+        "Transit İşlemleri",
+        "Antrepo İşlemleri",
+        "Gümrük Danışmanlığı",
+        "Evrak Takibi",
+        "Tescil İşlemleri",
+        "Beyanname Hazırlama",
+      ],
+      experienceRange: "10+",
+    };
+    writeUsers(readUsers().map((u) => (u.id === user.id ? { ...u, providerProfile: demoProfile } : u)));
+  }
+}
+
 let inFlightSeeding: Promise<void> | null = null;
 
 export function seedDevAccountsIfNeeded(): Promise<void> {
@@ -515,6 +806,7 @@ export function seedDevAccountsIfNeeded(): Promise<void> {
         await upsertDevAccount(account);
       }
       await seedNakliyeciProviderProfileIfNeeded();
+      await seedGumrukMusaviriProviderProfileIfNeeded();
     })().finally(() => {
       inFlightSeeding = null;
     });
@@ -553,7 +845,17 @@ export async function updateProviderProfile(
   if (!session) {
     return { ok: false, error: "Profilinizi güncellemek için giriş yapmalısınız." };
   }
-  if (session.role !== "hizmet-veren") {
+
+  const existing = findUserById(session.id);
+  if (!existing) {
+    return { ok: false, error: "Kullanıcı bulunamadı." };
+  }
+  // DÜZELTME (Y2, veritabanı geçişi öncesi denetim): eskiden `session.role`
+  // (tarayıcı localStorage'ında sahtelenebilir) kontrol ediliyordu — bir
+  // hizmet-alan kendi `session.role`ünü tarayıcıda elle "hizmet-veren" yapıp
+  // gerçek hesabı hâlâ hizmet-alan olduğu hâlde bu fonksiyonu çağırabiliyordu.
+  // Artık gerçek kayıttan (`existing`, yukarıda zaten okundu) doğrulanıyor.
+  if (existing.role !== "hizmet-veren") {
     return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar firma profili düzenleyebilir." };
   }
 
@@ -561,11 +863,6 @@ export async function updateProviderProfile(
   const firstError = Object.values(errors)[0];
   if (firstError) {
     return { ok: false, error: firstError };
-  }
-
-  const existing = findUserById(session.id);
-  if (!existing) {
-    return { ok: false, error: "Kullanıcı bulunamadı." };
   }
 
   const previousLogoStorageKey = existing.providerProfile?.logoStorageKey;
@@ -620,6 +917,69 @@ export async function updateProviderProfile(
   return { ok: true, profile };
 }
 
+export type UpdateContactVisibilityInput = {
+  showEmailAfterAgreement: boolean;
+  showPhoneAfterAgreement: boolean;
+};
+
+export type UpdateContactVisibilityResult =
+  | { ok: true; user: StoredUser }
+  | { ok: false; error: string };
+
+/**
+ * Telefon/e-posta görünürlüğünden EN AZ birinin her zaman açık kalması
+ * gereken kuralın TEK, paylaşılan uyarı metni — hem arayüz (contact-visibility-
+ * settings.tsx, ikinci seçeneği de kapatmaya çalışırken) hem bu dosyanın
+ * kendi `updateContactVisibility`'si (arayüze güvenmeyen, atlanamaz asıl
+ * doğrulama) AYNI metni gösterir, hiçbiri kendi versiyonunu icat etmez.
+ */
+export const CONTACT_VISIBILITY_MIN_ONE_MESSAGE =
+  "Teklif kabul edildiğinde iletişim kurulabilmesi için telefon veya e-posta bilgilerinden en az biri görünür olmalıdır.";
+
+/**
+ * "İletişim Bilgisi Görünürlüğü" tercihini günceller — `updateProviderProfile`
+ * ile AYNI oku-değiştir-yaz şekli, ama BİLEREK rol kontrolü YOK: hem
+ * hizmet-alan hem hizmet-veren kendi tercihini kendi hesabından yönetebilir
+ * (bkz. görev tanımı). Bu iki alan yalnızca contact-access.ts#getRevealedContactForOffer
+ * tarafından, teklif zaten kabul edildikten SONRA (ENGAGED_OFFER_STATUSES
+ * zamanlaması hiç değişmedi) okunur — bu fonksiyonun kendisi telefon/e-posta
+ * DEĞERLERİNE hiç dokunmaz, yalnızca görünürlük tercihini yazar.
+ *
+ * İkisi birden `false` olan bir istek reddedilir — arayüz (aşağıdaki bileşen)
+ * bunu zaten önceden engeller, ama veri katmanı burada AYRICA ve atlanamaz
+ * şekilde tekrar kontrol eder (yalnızca UI kontrolüne güvenilmez, bkz. görev
+ * tanımı), tıpkı offers.ts#updateOfferStatus'un kendi yetki kontrolünü UI'dan
+ * bağımsız tekrarlaması gibi.
+ */
+export function updateContactVisibility(
+  session: Session | null,
+  input: UpdateContactVisibilityInput,
+): UpdateContactVisibilityResult {
+  if (!session) {
+    return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
+  }
+
+  if (!input.showEmailAfterAgreement && !input.showPhoneAfterAgreement) {
+    return { ok: false, error: CONTACT_VISIBILITY_MIN_ONE_MESSAGE };
+  }
+
+  const existing = findUserById(session.id);
+  if (!existing) {
+    return { ok: false, error: "Kullanıcı bulunamadı." };
+  }
+
+  const updated: StoredUser = {
+    ...existing,
+    showEmailAfterAgreement: input.showEmailAfterAgreement,
+    showPhoneAfterAgreement: input.showPhoneAfterAgreement,
+  };
+  if (!writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)))) {
+    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  }
+
+  return { ok: true, user: updated };
+}
+
 export type UpdateProviderServiceInfoInput = {
   regions: string[];
   serviceCategories: string[];
@@ -654,13 +1014,15 @@ export async function updateProviderServiceInfo(
   if (!session) {
     return { ok: false, error: "Hizmet bilgilerinizi güncellemek için giriş yapmalısınız." };
   }
-  if (session.role !== "hizmet-veren") {
-    return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar hizmet bilgilerini düzenleyebilir." };
-  }
 
   const existing = findUserById(session.id);
   if (!existing) {
     return { ok: false, error: "Kullanıcı bulunamadı." };
+  }
+  // DÜZELTME (Y2, veritabanı geçişi öncesi denetim) — updateProviderProfile
+  // ile AYNI gerekçe: session.role yerine gerçek kayıttan (existing) doğrulanır.
+  if (existing.role !== "hizmet-veren") {
+    return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar hizmet bilgilerini düzenleyebilir." };
   }
 
   // Hizmet seçimleri artık provider-services.ts (userId -> serviceCategoryId

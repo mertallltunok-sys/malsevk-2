@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { STORAGE_WRITE_ERROR_MESSAGE } from "../_lib/local-storage";
 import { getInitials } from "../_lib/profile";
 import { submitRating } from "../_lib/ratings";
 import type { Offer, Session } from "../_lib/types";
@@ -72,13 +73,25 @@ export function JobRatingModal({
     }
     setSubmitting(true);
     setError(null);
-    const result = submitRating(session, offer.id, selectedStars);
-    setSubmitting(false);
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    // DÜZELTME (K3, veritabanı geçişi öncesi denetim): submitRating artık
+    // yazma hatasında (ratings.ts#writeAllRatings, local-storage.ts#writeJson
+    // üzerinden) fırlatmak yerine her zaman { ok: false, error } döndürüyor —
+    // ama bu try/catch/finally, beklenmedik bir hata (ör. ileride bu akışa
+    // eklenecek başka bir kod yolu) hâlâ fırlatsa bile `submitting`in HER
+    // durumda false'a dönmesini, kullanıcının kapatılamayan bir modalda
+    // kilitli kalmamasını garanti eder.
+    try {
+      const result = submitRating(session, offer.id, selectedStars);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      onClose(true);
+    } catch {
+      setError(STORAGE_WRITE_ERROR_MESSAGE);
+    } finally {
+      setSubmitting(false);
     }
-    onClose(true);
   }
 
   return (
