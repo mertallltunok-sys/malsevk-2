@@ -27,6 +27,8 @@ Her index'in tam gerekçesi `supabase/migrations/0011_indexes.sql`'de, kendi `CR
 | `idx_recently_viewed_jobs_user_id_viewed_at` | recently_viewed_jobs | user_id, viewed_at desc | — | — | Top-15 okuma |
 | `idx_ratings_provider_id` | ratings | provider_id | `deleted_at is null` | — | `provider_rating_summary` view |
 | — (unique kısıt) | provider_services | provider_id, service_category_id | — | — | `provider_id`-only lookup zaten prefix olarak karşılanıyor |
+| `idx_contact_messages_user_id` | contact_messages | user_id | `user_id is not null` | — | Kullanıcının kendi Bize Ulaşın mesajlarını listeleme (0021, yerel dry-run'da eklendi) |
+| `idx_contact_messages_status_created_at` | contact_messages | status, created_at desc | — | — | Admin filtre panelinin durum bazlı listelemesi (0021) |
 
 ## Kasıtlı olarak inşa edilmeyenler
 

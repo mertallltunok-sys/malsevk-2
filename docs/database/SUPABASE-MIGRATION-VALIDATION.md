@@ -601,6 +601,31 @@ Sağlık kontrolü: 9 testin hiçbiri paylaşılan test verisinde kalıcı bir y
 - Edge Functions ve Realtime bu migration setinde hiç kullanılmıyor, bu yüzden test edilmedi (kapsam dışı, eksiklik değil).
 - Madde 2'deki (`storage.buckets`/`storage.objects` sahiplik hatası) bulgu **yerel ortama özgü değil** — gerçek/hosted bir Supabase projesinde aynı `postgres` rolü aynı şekilde bu tabloların sahibi olmadığından, birebir aynı hatayla karşılaşılırdı. Madde 1 ve 3'teki bulgular da mimari olarak ortam-bağımsızdır (plpgsql'in kendi dil kuralı; Supabase'in kendi varsayılan yetki modeli, yerel VE hosted'da aynı).
 
+## Dokümantasyon Senkronizasyonu
+
+> Bu bölüm, `docs/database/**` altındaki tüm `.md` dosyalarının yerel dry-run ile doğrulanmış `supabase/migrations/0001`–`0021` şemasıyla senkronize edildiği ayrı bir turu belgeler (2026-08-03, aynı gün). Kaynak önceliği: (1) yerel dry-run ile doğrulanmış migration dosyaları, (2) bu belge, (3) mevcut uygulama kodu, (4) eski `docs/database` belgeleri — çelişki olduğunda eski belge asla doğru kabul edilmedi. Hiçbir migration dosyası, uygulama kodu, `.env`, `package.json`/lockfile değiştirilmedi; hiçbir uzak Supabase bağlantısı kurulmadı; bu tur salt dokümantasyon senkronizasyonudur.
+
+**Sayısal doğrulama (bu turda migration dosyalarından yeniden sayılarak doğrulandı — önceki rapordan körü körüne kopyalanmadı):** `grep -c "create table if not exists public\."` → **19** temel tablo (Faz 1); `create view`/`create or replace view` → **15**; `create policy` → **32**; `create trigger` → **15**; `create (or replace) function public.` → **69**. Bu dört sayı, yerel dry-run'ın canlı veritabanı sorgularıyla bulduğu sayılarla BİREBİR eşleşti — statik dosya sayımı ile gerçek çalıştırma sonucu arasında hiçbir fark bulunmadı. Toplam tablo sayısı (Faz 1 + Faz 2 taslağı 9 + Faz 3 taslağı 7) = **35** (önceki `schema-reference.md`/`architecture.md`'nin "34" ve "38" değerleri YANLIŞTI — `contact_messages`'ın 0021'de eklenmesiyle Faz 1 18'den 19'a çıktı).
+
+| Dosya | İncelendi mi? | Değiştirildi mi? | Hangi konular güncellendi? | Açık kalan çelişki var mı? |
+|---|---|---|---|---|
+| `schema-reference.md` | ✅ | ✅ | Tablo sayısı 34→35, Faz 1 18→19 tablo (`contact_messages` eklendi), `currency` CHECK'ine EUR, `estimated_duration` alan-tipi kararı satırı eklendi, `0001–0020`→`0001–0021` | Yok |
+| `rls-matrix.md` | ✅ | ✅ | `contact_messages` bölümü eklendi, `jobs`/`profiles`/`provider_profiles`'daki gerçek TRUNCATE yetki sızıntısı bulgusu ve düzeltmesi eklendi | Yok |
+| `rpc-reference.md` | ✅ | ✅ | `delete_job`, `record_provider_document_consent`, `record_legal_consent`, `submit_contact_message`, `review_contact_message` eklendi; `create_offer`'ın `estimated_duration` yeniden tasarımı; MLK66'nın yeniden kullanımı; MLK92–99 hata kodları eklendi | Yok |
+| `architecture.md` | ✅ | ✅ | "Hiçbir migration hiç uygulanmadı" iddiası düzeltildi (yerel dry-run gerçekleşti, uzak hâlâ yok); tablo sayısı 34→35; §8'e yerel dry-run'da bulunan 4 hata eklendi; doküman indeksine bu validation belgesi eklendi | Yok |
+| `storage-plan.md` | ✅ | ✅ | `has_admin_permission('documents.view')` (Faz 2 kavramı) → `is_admin()` (Faz 1 gerçeği) düzeltildi; 0019'un sahiplik hatası bulgusu eklendi; Storage HTTP akışının doğrulanmadığı açıkça belirtildi | Yok |
+| `admin-permissions.md` | ✅ | ✅ | `review_contact_message()` admin yeteneği tablosuna eklendi | Yok |
+| `migration-strategy.md` | ✅ | ✅ | `0001–0020`→`0001–0021`, `contact_messages`'ın veri göçü kapsamı dışında olma gerekçesi eklendi | Yok — "hiçbir gerçek kullanıcı verisi göçü hiç yapılmadı" iddiası hâlâ doğru (bu doküman şema dry-run'ından tamamen ayrı bir konuyu, kullanıcı VERİSİ göçünü kapsar) |
+| `relationship-map.md` | ✅ | ✅ | `contact_messages`'ın FK ilişkileri (user_id, reviewed_by_admin_id, ikisi de nullable) grafiğe eklendi | Yok |
+| `index-plan.md` | ✅ | ✅ | `contact_messages`'ın 2 index'i eklendi | Yok |
+| `test-plan.md` | ✅ | ✅ | §1'in artık gerçekten çalıştırıldığı ve geçtiği belirtildi; hangi negatif testlerin gerçekten doğrulandığı işaretlendi; `contact_messages` için 2 yeni test satırı eklendi; `0001–0020`→`0001–0021` | Yok |
+| `rollback-strategy.md` | ✅ | ✅ | Yerel dry-run'ın atılabilir/geçici olduğu netleştirildi (kalıcı bir dağıtım YOK); `contact_messages` (0021) rollback satırı eklendi; `0001–0020`→`0001–0021` | Yok |
+| `future-escrow-architecture.md` | ✅ | ✅ | Yalnız `0001–0020`→`0001–0021` sürüm referansı (bu belgenin escrow tasarımı içeriği Faz 1'den tamamen bağımsız, başka değişiklik gerekmedi) | Yok |
+| `subscriptions-and-quotas.md` | ✅ | ❌ (zaten doğru) | — | Yok — Faz 1'in `get_active_job_limit()` sabit-5 davranışı ve günlük-kota-yokluğu iddiaları hâlâ doğru, güncel `create_offer()`'daki `estimated_duration` değişikliğine hiç değinmiyordu (o zaten konusu değil) |
+| `payment-readiness.md` | ✅ | ❌ (zaten doğru) | — | Yok — tamamen Faz 3 kapsamlı, Faz 1'in hiçbir tablosuna/RPC'sine referans vermiyor |
+| `future-migrations/MANIFEST.md` | ❌ | ❌ | — | İncelenmedi — görev kapsamı `docs/database/**`'in `.md` dosyalarını kapsıyordu ama bu dosya Faz 2/3'ün devreye alma sırasını belgeler, Faz 1'in bugünkü şemasına dair bir iddiası yok; ayrı bir turda gözden geçirilebilir |
+| `future-migrations/phase2/*.sql`, `phase3/*.sql` | — | ❌ | — | SQL dosyaları, `.md` değil — görev kapsamı dışında; zaten hiçbir zaman Faz 1'e uygulanmadılar |
+
 ## 21. Önerilen Nihai Migration Sırası
 
 Dosya numaralandırması (0001–0020) zaten bağımlılık sırasına uygun ve değiştirilmemeli. Yukarıdaki düzeltmeler **var olan dosyaların içinde** yapılmalı (görev talimatı gereği bu belge onları değiştirmiyor) — yeni bir tablo gerekiyorsa (`contact_messages`) `0021` olarak eklenmeli, mevcut hiçbir dosyanın numarası değişmemeli. Düzeltmeler tamamlandıktan sonra sıralama aynen korunur: `0001→0020` (+varsa `0021`), her biri `supabase db reset` ile boş bir yerel/test projesine karşı sırayla denenmeli.

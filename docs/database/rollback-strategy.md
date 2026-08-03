@@ -1,8 +1,8 @@
 # MALSEVK — Rollback Strategy (Faz 1)
 
-None of this has been applied yet, so there is nothing to roll back today — this document is the plan for **if/when** part of this schema is applied for real and later needs to be reverted. No migration file in `supabase/migrations/` contains a `DROP TABLE`, `DROP COLUMN`, or any other destructive statement, per the explicit instruction — rollback statements are described here, as a runbook, never bundled into the forward migrations themselves.
+**Hiçbir gerçek/hosted Supabase projesine hiç uygulanmadı, bu yüzden bugün geri alınacak gerçek bir dağıtım yok** — bu doküman **if/when** bu şemanın gerçek bir projeye uygulanıp sonradan geri alınması gerektiği plandır. (Tamamen yerel, izole, atılabilir bir Docker + Supabase CLI ortamına karşı bir dry-run yapıldı — bkz. [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md) — ama o ortam test bitince tamamen kapatıldı/silindi, kalıcı hiçbir dağıtım yok; aşağıdaki plan yine de değişmeden geçerlidir.) No migration file in `supabase/migrations/` contains a `DROP TABLE`, `DROP COLUMN`, or any other destructive statement, per the explicit instruction — rollback statements are described here, as a runbook, never bundled into the forward migrations themselves.
 
-**Faz kapsamı**: bu doküman yalnız Faz 1'i (`supabase/migrations/0001`–`0020`) kapsar. Faz 2/Faz 3 taslakları hiçbir zaman `supabase/migrations/`'a uygulanmadığı için onların "rollback"ı basitçe o dosyaları hiç kopyalamamaktır — bkz. `docs/database/future-migrations/MANIFEST.md`.
+**Faz kapsamı**: bu doküman yalnız Faz 1'i (`supabase/migrations/0001`–`0021`) kapsar. Faz 2/Faz 3 taslakları hiçbir zaman `supabase/migrations/`'a uygulanmadığı için onların "rollback"ı basitçe o dosyaları hiç kopyalamamaktır — bkz. `docs/database/future-migrations/MANIFEST.md`.
 
 ## General principle
 
@@ -21,6 +21,7 @@ Every forward migration in this set is purely additive (new tables, new columns,
 | Scheduled jobs | 0018 | `SELECT cron.unschedule('malsevk-...')` per job name (see the `cron.schedule` calls in that file for the exact names) — instantaneous, no data impact beyond the sweep simply no longer running. |
 | Storage policies | 0019 | `DROP POLICY` on `storage.objects`; bucket rows in `storage.buckets` can be left in place (an unused bucket costs nothing) or removed via the Supabase dashboard once confirmed empty. |
 | Seed data | 0020 | `DELETE FROM service_categories WHERE ...` — safe only if no `jobs`/`provider_services` row references the category id being removed (FK would reject it anyway). |
+| Bize Ulaşın | 0021 | `DROP TABLE contact_messages CASCADE` — tamamen ek-yalnız, başka hiçbir tablo buna FK vermiyor; tek başına geri alınması güvenli. |
 
 ### Faz 2 / Faz 3 (yalnız bunlar gerçekten devreye alındıysa)
 

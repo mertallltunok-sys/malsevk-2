@@ -1,6 +1,6 @@
 # MALSEVK — Future Escrow / Pooled-Funds Architecture (Documentation Only)
 
-**No SQL migration exists for anything in this document.** This is a design-on-paper for a feature that does not exist in the source app, was not requested to be built now, and — per explicit instruction — must not be added to the "today" migration set even in skeleton form. This holds across all three phases: it is not in Faz 1 (`supabase/migrations/0001`–`0020`), nor in the Faz 2/Faz 3 drafts (`docs/database/future-migrations/`). If/when a pooled-funds feature is greenlit, this document is the starting point for a **separate, dedicated migration group**, not an extension of any of the above.
+**No SQL migration exists for anything in this document.** This is a design-on-paper for a feature that does not exist in the source app, was not requested to be built now, and — per explicit instruction — must not be added to the "today" migration set even in skeleton form. This holds across all three phases: it is not in Faz 1 (`supabase/migrations/0001`–`0021`), nor in the Faz 2/Faz 3 drafts (`docs/database/future-migrations/`). If/when a pooled-funds feature is greenlit, this document is the starting point for a **separate, dedicated migration group**, not an extension of any of the above.
 
 ## This is not just a technical feature
 

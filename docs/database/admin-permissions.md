@@ -18,6 +18,7 @@ Faz 1'in TEK admin kapısı `is_admin()`'dir (`profiles.role = 'admin'` — `sup
 | Şikâyet/itiraz kayıtlarını incelemek | `admin_dispute_queue` view (`0017`) |
 | Audit log görüntülemek | `audit_logs_select_admins_only` policy (`0013_rls_policies.sql`), `admin_audit_log_search()` (`0017`) |
 | Son admin'in kaybolmasını engellemek | `prevent_last_admin_loss()` tetikleyicisi (`0012`, profiles.role/deleted_at) + `suspend_user()`'ın kendi son-AKTİF-admin kontrolü (`0016`) |
+| Bize Ulaşın (contact) mesajlarını incelemek | `review_contact_message()` (`0021_contact_messages.sql` — yerel dry-run'da EKLENDİ, bkz. SUPABASE-MIGRATION-VALIDATION.md §20 madde 5) |
 
 **Neden bu yeterli**: Faz 1'de `profiles.role`/`account_status`/`onboarding_completed`'i değiştirebilen HİÇBİR client-callable RPC yoktur (kolon grant'ı bunu zaten engelliyor — `0003_profiles_and_provider_catalog.sql`) ve `suspend_user`/`reinstate_user` DIŞINDA hiçbir RPC bir hesabın admin durumunu değiştirmez. Bu yüzden Faz 1'in "son admin korunmalı" gereksinimi, JWT'ye/oturuma değil, doğrudan DB-yazımına karşı bir savunma-derinliği tetikleyicisidir — normal işleyişte hiç tetiklenmez, yalnızca kazara bir doğrudan-DB hatasına karşı bir güvenlik ağıdır.
 

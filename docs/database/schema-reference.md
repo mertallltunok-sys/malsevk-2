@@ -1,12 +1,12 @@
 # MALSEVK — Schema Reference
 
-Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/migrations/0001`–`0020`; Faz 2/3 taslakları: `docs/database/future-migrations/`); bu doküman bir indeks + tasarlanırken ortaya çıkan her **Açık Karar**'ın tek toplandığı yerdir. Rehber ilkeler için [architecture.md](architecture.md)'ye bakın.
+Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/migrations/0001`–`0021`; Faz 2/3 taslakları: `docs/database/future-migrations/`); bu doküman bir indeks + tasarlanırken ortaya çıkan her **Açık Karar**'ın tek toplandığı yerdir. Rehber ilkeler için [architecture.md](architecture.md)'ye bakın.
 
-**Toplam tablo sayısı: 34** (önceki "38" ve ara-dönem "35" sayıları YANLIŞ — bkz. altta, `notification_states`'in birleştirilmesi bu sayıyı 35'ten 34'e indirdi).
+**Toplam tablo sayısı: 35** (önceki "38"/"34" sayıları YANLIŞ — `notification_states`'in birleştirilmesi 35'i 34'e indirmişti, `0021_contact_messages.sql`'in eklenmesi Faz 1'i 19 tabloya çıkarıp toplamı tekrar 35'e getirdi). Bu sayı, `supabase/migrations/`'daki `create table` ifadeleri tek tek sayılarak VE tamamen yerel, izole bir Supabase CLI ortamına karşı gerçek bir `supabase db reset` ile doğrulandı (bkz. [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md)'in "Yerel Migration Dry-Run Sonucu" bölümü) — statik bir tahmin değil.
 
 ## Tablo indeksi (faz sınıflandırmasıyla)
 
-### Faz 1 — Çekirdek Pazaryeri (18 tablo, `supabase/migrations/`)
+### Faz 1 — Çekirdek Pazaryeri (19 tablo, `supabase/migrations/`)
 
 | Tablo | Migration | Kaynak eşlemesi | Not |
 |---|---|---|---|
@@ -28,6 +28,7 @@ Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/mi
 | `recently_viewed_jobs` | 0009 | `recently-viewed-jobs.ts` | Aktif yazma yolu doğrulandı, korundu |
 | `job_activity_events` | 0010 | Kaynakta karşılığı yok — yeni, SADELEŞTİRİLMİŞ | Yalnız 5 ilan-seviyeli olay (teklif olayları YOK — bkz. offer_status_history ile tekrar önleme) |
 | `audit_logs` | 0010 | Kaynakta karşılığı yok — yeni | Faz 1'in "Gerekli audit kaydı" ihtiyacı |
+| `contact_messages` | 0021 | `app/_lib/contact-messages.ts#StoredContactMessage` | Yerel dry-run'da EKLENDİ (SUPABASE-MIGRATION-VALIDATION.md §20 madde 5, KRİTİK) — önceki 0001-0020 setinde hiç yoktu. `read_at`/`responded_at` kaynakta karşılığı olmayan, ileriye dönük iki nullable alan (hiçbir RPC otomatik doldurmuyor) |
 
 ### Faz 2 — Gelişmiş Yönetim ve Abonelik (9 tablo, `docs/database/future-migrations/phase2/`)
 
@@ -55,7 +56,7 @@ Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/mi
 | `payment_webhook_events` | `0002_payment_webhook_events_and_outbox.sql` |
 | `outbox_events` | `0002_payment_webhook_events_and_outbox.sql` |
 
-**18 + 9 + 7 = 34.**
+**19 + 9 + 7 = 35.**
 
 ## Silinen/birleştirilen yapılar (Faz 1 sadeleştirmesinin sonucu)
 
@@ -69,7 +70,8 @@ Alan bazlı DDL, migration dosyalarının kendisinde yaşar (Faz 1: `supabase/mi
 |---|---|---|
 | ID'ler | `uuid default gen_random_uuid()` | `crypto.randomUUID()` ile birebir eşleşir |
 | Para | `numeric(12,2)`, asla `float`/`double` | `MAX_OFFER_AMOUNT = 999,999,999`'u rahatça kapsar (doğrulanmış) |
-| Para birimi | `text check (in ('TRY','USD'))` | `types.ts#Currency` ile birebir |
+| Para birimi | `text check (in ('TRY','USD','EUR'))` | `money.ts#CURRENCY_VALUES` ile birebir — yerel dry-run'da EUR eksikti, düzeltildi ve `offers_currency_check` üzerinden gerçek bir negatif testle (`GBP` reddi) doğrulandı |
+| `offers.estimated_duration` | `integer`, nullable, `check (1-60 arası veya null)` | `app/_lib/offers.ts#MIN_COMMITTED_DAYS`/`MAX_COMMITTED_DAYS` ile birebir. Önceki tasarımda `text not null` (2-100 karakter serbest metin) idi — yalnız Nakliye kategorisinde `create_offer()` RPC'si tarafından zorunlu kılınır (`MLK66`), diğer her kategoride her zaman `NULL` yazılır. Gerçek dry-run'da eksik-değer reddi ve geçerli-değerle başarılı teklif oluşturma ikisi de test edildi — bkz. [rpc-reference.md](rpc-reference.md) |
 | Telefon | `text check (phone ~ '^\+905\d{9}$')`, nullable | `phone.ts#normalizePhoneNumber` çıktısıyla birebir |
 | Tarihler (`work_date`/`work_end_date`) | `date` | Kaynağın `<input type="date">`'i de zaman bileşeni taşımıyor |
 | Diğer her zaman damgası | `timestamptz` | Asla naive/local timestamp değil |

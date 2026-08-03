@@ -1,8 +1,8 @@
 # MALSEVK — Supabase/PostgreSQL Database Architecture
 
-**Status: design draft, faz ayrımına tabi.** Hiçbir migration gerçek bir Supabase projesine uygulanmadı. `supabase/migrations/` yalnızca **Faz 1 (Çekirdek Pazaryeri)** dosyalarını içerir ve Supabase CLI ile ilk göçte olduğu gibi çalıştırılabilir; **Faz 2 (Gelişmiş Yönetim ve Abonelik)** ve **Faz 3 (Ödeme ve Finans)** taslakları bilinçli olarak `docs/database/future-migrations/` altında, otomatik taranmayan bir konumda tutulur. Bkz. [migration-strategy.md](migration-strategy.md) (veri göçü) ve `docs/database/future-migrations/MANIFEST.md` (faz devreye alma sırası).
+**Status: design draft, faz ayrımına tabi — ama artık gerçek, yerel bir ortamda doğrulanmış.** `supabase/migrations/` (Faz 1, `0001`–`0021`) tamamen izole, yerel bir Docker + Supabase CLI ortamına karşı gerçek bir `supabase db reset` ile baştan sona uygulandı, idempotency için ardışık kez tekrarlandı, ve 9 negatif güvenlik testi + 1 pozitif kontrolle doğrulandı — bkz. [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md)'in "Yerel Migration Dry-Run Sonucu" bölümü. **Hiçbir uzak/hosted Supabase projesine hâlâ hiç bağlanılmadı** (`supabase link`/`db push` hiç çalıştırılmadı) — bu, gerçek bir production/staging uygulamasından tamamen farklıdır ve o adım hâlâ ayrı, açıkça yetkilendirilmesi gereken bir sonraki iştir. **Faz 2 (Gelişmiş Yönetim ve Abonelik)** ve **Faz 3 (Ödeme ve Finans)** taslakları bilinçli olarak `docs/database/future-migrations/` altında, otomatik taranmayan bir konumda tutulur — hiçbiri hiçbir ortama (yerel dahil) hiç uygulanmadı. Bkz. [migration-strategy.md](migration-strategy.md) (veri göçü) ve `docs/database/future-migrations/MANIFEST.md` (faz devreye alma sırası).
 
-**Tablo sayısı: 34** (35 değil — bkz. §8, `notification_states`'in `notifications`'a birleştirilmesi).
+**Tablo sayısı: 35** (34/38 değil — bkz. §8, `notification_states`'in `notifications`'a birleştirilmesi 35'i 34'e indirmişti, `0021_contact_messages.sql`'in yerel dry-run'da eklenmesi Faz 1'i 19 tabloya çıkarıp toplamı tekrar 35'e getirdi).
 
 ## 1. Kapsam ve faz yapısı
 
@@ -10,7 +10,7 @@ Bu doküman seti, MALSEVK'in bugün çalışan localStorage/IndexedDB veri katma
 
 | Faz | Konum | Otomatik çalışır mı | İçerik |
 |---|---|---|---|
-| **Faz 1 — Çekirdek Pazaryeri** | `supabase/migrations/0001`–`0020` | **Evet** (ilk gerçek göç) | Kullanıcı hesapları, ilan/teklif/operasyon yaşam döngüsü, bildirimler, belgeler, puanlama, minimum admin, temel audit |
+| **Faz 1 — Çekirdek Pazaryeri** | `supabase/migrations/0001`–`0021` | **Evet** (yerel olarak gerçek çalıştırıldı ve doğrulandı — bkz. SUPABASE-MIGRATION-VALIDATION.md) | Kullanıcı hesapları, ilan/teklif/operasyon yaşam döngüsü, bildirimler, belgeler, puanlama, minimum admin, temel audit, Bize Ulaşın (`contact_messages`, 0021) |
 | **Faz 2 — Gelişmiş Yönetim ve Abonelik** | `docs/database/future-migrations/phase2/` | **Hayır** | İnce taneli admin RBAC (4 tablo), abonelik/kota sistemi (5 tablo) |
 | **Faz 3 — Ödeme ve Finans** | `docs/database/future-migrations/phase3/` | **Hayır** | Ödeme sağlayıcı-agnostik altyapı (7 tablo) |
 | **Escrow/emanet** | `future-escrow-architecture.md` | — | Yalnız dokümantasyon, hiçbir fazda SQL yok |
@@ -71,11 +71,13 @@ Bir önceki teknik denetim raporunun bulgularına dayanarak:
 - **`job_activity_events` sadeleştirildi** — yalnız ilan-seviyeli 5 olay tipi kaldı, teklif olaylarıyla `offer_status_history` arasındaki tekrar giderildi (`0010_job_activity_and_audit.sql`).
 - **`notification_states` `notifications`'a birleştirildi** (§3).
 - **`recently_viewed_jobs` KORUNDU** — kaynak kodda hâlâ aktif bir yazma yolu olduğu doğrulandı (`provider-job-listing.tsx#handleJobClick`).
+- **Yerel dry-run'da bulunan ve düzeltilen 4 gerçek hata** (statik incelemenin YAKALAYAMAYACAĞI türden — yalnız gerçek `supabase db reset` ile ortaya çıktı): (1) `0015`'teki 8 fonksiyonda plpgsql'in "record değişken INTO listesinde tek başına olmalı" kuralı ihlali; (2) `0019`'da `storage.buckets`/`storage.objects` üzerinde tablo sahipliği gerektiren `COMMENT`/`ALTER TABLE` ifadeleri (hosted bir projede de aynı şekilde başarısız olurdu); (3) `jobs`/`profiles`/`provider_profiles`'da eksik `revoke all` — `anon`/`authenticated`'in RLS'e hiç tabi olmayan `TRUNCATE` yetkisine sahip olduğu gerçek bir yetki sızıntısı. Tam ayrıntı: [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md).
 
 ## 9. Document index
 
 | Document | Covers |
 |---|---|
+| [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md) | Faz 1'in kod-karşı-SQL statik doğrulaması + tamamen yerel, izole bir ortamda gerçek `supabase db reset` dry-run sonucu (bulunan gerçek hatalar, düzeltmeleri, negatif güvenlik testleri) — bu belge setinin GEÇERLİLİK kaynağı |
 | [schema-reference.md](schema-reference.md) | Her tablo, alan bazlı, faz sınıflandırmasıyla birlikte |
 | [relationship-map.md](relationship-map.md) | FK grafiği, kardinaliteler, cross-table tetikleyiciler |
 | [rls-matrix.md](rls-matrix.md) | Faz 1'in tablo × rol SELECT/INSERT/UPDATE/DELETE matrisi |

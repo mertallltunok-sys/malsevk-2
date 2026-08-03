@@ -6,6 +6,8 @@ Legend: **own** = yalnız çağıranın taraf olduğu satırlar; **visible** = j
 
 **Faz 2 notu**: `has_admin_permission(code)` (ince taneli izin katmanı) Faz 1'de YOKTUR — bu tablodaki her "admin" sütunu `is_admin()`'i ifade eder. Faz 2 devreye alındığında, `docs/database/future-migrations/phase2/0005_views_and_rls_and_indexes.sql`'in kendi yorum bloğu, aşağıdaki hangi policy/view'ın hangi spesifik izin koduna geçirileceğini belgeler.
 
+**Yerel dry-run bulgusu (`SUPABASE-MIGRATION-VALIDATION.md`'nin "Yerel Migration Dry-Run Sonucu" bölümü):** `jobs`/`profiles`/`provider_profiles` (0004/0003), diğer tüm tabloların (`operations`/`job_photos`/`ratings`/`provider_services` vb.) aksine, dosyalarında hiçbir zaman açık bir `revoke all ... from authenticated, anon;` almamıştı — canlı bir Supabase projesine karşı gerçek bir `db reset` çalıştırılana kadar bu, statik SQL incelemesiyle GÖRÜNMEYEN bir yetki sızıntısıydı: `anon`/`authenticated`, Supabase'in proje bootstrap'inin varsayılan yetkileri üzerinden bu üç tabloda `TRUNCATE`/`REFERENCES`/`TRIGGER`'a sahipti — **`TRUNCATE` RLS politikalarına tabi değildir**, yani bu haliyle herhangi bir `authenticated` kullanıcı tüm tabloyu tek komutla silebilirdi. Düzeltildi: üçüne de açık `revoke all` eklendi, yalnız aşağıdaki tabloda belgelenen SELECT açıkça geri verildi. Gerçek bir negatif güvenlik testiyle (`anon` → `TRUNCATE public.jobs` → `permission denied`) doğrulandı.
+
 ## Kimlik & profil
 
 | Tablo | anon | authenticated (SELECT) | authenticated (INSERT/UPDATE/DELETE) | admin |
@@ -54,6 +56,15 @@ Legend: **own** = yalnız çağıranın taraf olduğu satırlar; **visible** = j
 | `recently_viewed_jobs` | SELECT/write (RPC ile) yalnız own | — |
 | `job_activity_events` | SELECT `visibility` kolonuna göre (`public`/`requester_only` — `offer_parties_only` KALDIRILDI, bkz. sadeleştirme) | SELECT all |
 | `audit_logs` | — | `is_admin()` (Faz 2'de `has_admin_permission('audit_logs.view')`'a geçirilebilir, opt-in) |
+
+## Bize Ulaşın (`contact_messages`, 0021)
+
+| Tablo | anon | authenticated (own) | admin |
+|---|---|---|---|
+| `contact_messages` | — (yazma yalnız RPC ile, okuma hiç yok) | SELECT own (`user_id = auth.uid()`) — misafir gönderimlerin `user_id`'si NULL olduğu için misafir kendi mesajını bu şema üzerinden geri okuyamaz (kaynak uygulamada da böyle bir ekran yok) | SELECT all |
+| ↳ yazımlar | RPC only: `submit_contact_message(...)` (hem `anon` hem `authenticated`'e açık — misafir gönderimi desteklenir; `user_id`/`user_role` her zaman sunucu tarafında `auth.uid()`/`current_user_role()` ile belirlenir) | | RPC only: `review_contact_message(...)` (yalnız `is_admin()`) |
+
+`contact_messages` yerel dry-run'da eklendi (0021) — önceki 0001-0020 setinde hiç yoktu (SUPABASE-MIGRATION-VALIDATION.md §20 madde 5, KRİTİK).
 
 ## RLS recursion — nasıl önleniyor
 

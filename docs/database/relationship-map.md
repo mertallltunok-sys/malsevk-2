@@ -25,7 +25,8 @@ auth.users (Supabase-managed)
         ├── legal_consents (1:N, user_id nullable)
         ├── notifications (1:N, recipient_id — read_at/dismissed_at AYNI SATIRDA, ayrı tablo YOK)
         ├── recently_viewed_jobs (1:N)
-        └── audit_logs (N:1 actor_id, nullable)
+        ├── audit_logs (N:1 actor_id, nullable)
+        └── contact_messages (1:N, user_id NULLABLE — misafir gönderimi; N:1 reviewed_by_admin_id, nullable) [0021, yerel dry-run'da eklendi]
 ```
 
 ## Kardinalite notları

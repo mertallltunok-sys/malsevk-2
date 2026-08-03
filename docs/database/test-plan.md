@@ -1,17 +1,17 @@
 # MALSEVK — Pre-Apply Test Plan (Faz 1)
 
-None of these have been run — this document is the plan for validating this schema **before** it is ever applied to a real Supabase project, per the explicit instruction not to execute anything in this design pass.
+**GÜNCELLEME — §1'in dört kontrolü artık gerçekten çalıştırıldı ve geçti** (tamamen yerel, izole bir Docker + Supabase CLI ortamına karşı — hiçbir uzak/hosted Supabase projesine hiç bağlanılmadı): migration dry-run, fresh install, second-run safety (idempotency) hepsi doğrulandı; ayrıca §3/§8/§9'un TAM matrisinden temsili bir alt küme (9 negatif güvenlik testi + 1 pozitif kontrol) de gerçekten çalıştırıldı. Tam sonuç: [SUPABASE-MIGRATION-VALIDATION.md](SUPABASE-MIGRATION-VALIDATION.md)'in "Yerel Migration Dry-Run Sonucu" bölümü. **Bu belgenin geri kalanı (§2, §4-7, §10-11, tam RLS matrisi, performans testleri) hâlâ ÇALIŞTIRILMAMIŞ bir plandır** — aşağıdaki metnin geri kalanı bu ayrımı yansıtacak şekilde değiştirilmedi (hâlâ gelecekteki, daha kapsamlı bir test turunun planıdır).
 
-**Faz kapsamı**: bu plan yalnız Faz 1'i (`supabase/migrations/0001`–`0020`) kapsar. §4 ve §14'teki günlük-teklif-kotası testleri (eski MLK66) Faz 1'de UYGULANAMAZ — Faz 1'de günlük kota yok (doğrulanmış bugünkü davranış); bu testler Faz 2 devreye alındığında, `docs/database/future-migrations/MANIFEST.md`'nin köprü adımından sonra geçerli olur, aşağıda buna göre işaretlendi.
+**Faz kapsamı**: bu plan yalnız Faz 1'i (`supabase/migrations/0001`–`0021`) kapsar. §4 ve §14'teki günlük-teklif-kotası testleri (eski MLK66) Faz 1'de UYGULANAMAZ — Faz 1'de günlük kota yok (doğrulanmış bugünkü davranış); bu testler Faz 2 devreye alındığında, `docs/database/future-migrations/MANIFEST.md`'nin köprü adımından sonra geçerli olur, aşağıda buna göre işaretlendi.
 
-## 1. Static / pre-flight checks
+## 1. Static / pre-flight checks (✅ ÇALIŞTIRILDI — bkz. yukarıdaki güncelleme)
 
-| Check | How |
-|---|---|
-| SQL lint | Run every file in `supabase/migrations/` through `sqlfluff` (postgres dialect) or the Supabase CLI's own `supabase db lint` — catches syntax issues, naming inconsistencies, missing `IF NOT EXISTS` guards. |
-| Migration dry-run | `supabase db reset` (or `supabase start` against a fresh local Postgres via the Supabase CLI) applies `0001`→`0024` in order against an empty local database — the actual "does this even run top to bottom" test. |
-| Fresh install | Same as above, verified against a **completely empty** Supabase project (no pre-existing tables) — the realistic first-apply target. |
-| Second-run safety | Re-run the entire migration set a second time against the now-populated database. Every `CREATE TABLE IF NOT EXISTS`/`CREATE OR REPLACE FUNCTION`/`ON CONFLICT DO NOTHING` seed insert should make this a no-op with zero errors — this is the concrete test for "idempotent migration mantığıyla oluştur." |
+| Check | How | Sonuç |
+|---|---|---|
+| SQL lint | Run every file in `supabase/migrations/` through `sqlfluff` (postgres dialect) or the Supabase CLI's own `supabase db lint` — catches syntax issues, naming inconsistencies, missing `IF NOT EXISTS` guards. | Ayrı çalıştırılmadı (dry-run'ın kendisi zaten sözdizimini uçtan uca doğruladı) |
+| Migration dry-run | `supabase db reset`/`supabase start` `0001`→`0021`'i sırayla, boş yerel bir veritabanına karşı uygular. | ✅ Geçti (3 gerçek hata bulunup düzeltildikten sonra) |
+| Fresh install | Aynısı, tamamen boş bir Docker Postgres konteynerine karşı. | ✅ Geçti |
+| Second-run safety | Migrasyon setinin tamamı, artık dolu olan veritabanına karşı ikinci (ve üçüncü) kez çalıştırıldı. | ✅ Geçti — her `DROP ... IF EXISTS` beklenen zararsız `NOTICE` verdi, sıfır hata |
 
 ## 2. Constraint & FK tests
 
@@ -100,3 +100,9 @@ Once seeded with a realistic synthetic dataset (recommended minimum: 10k profile
 | 13c | **[Faz 2, Faz 1'de N/A]** Sistemde tek `admin_roles.manage` sahibi X | Başka bir yetkili (yoksa X'in kendisi) `revoke_admin_role(X, 'super_admin')` çağırır | Rejected | MLK89 | none |
 | 14 | **[Faz 2, Faz 1'de N/A]** Provider with `daily_offer_limit = 5` override, 5 offers already created today (Europe/Istanbul day) | Calls `create_offer(...)` on a 6th job | Rejected | MLK66 | none |
 | 15 | **[Faz 2, Faz 1'de N/A]** Same as #14, but at 00:01 Europe/Istanbul the next day | Calls `create_offer(...)` | Succeeds | — | offers, offer_status_history, notifications |
+| 16 | Nakliye kategorisinde bir ilan, `hizmet-veren` sağlayıcı | `create_offer(...)` çağrısında `estimated_duration` eksik (`NULL`) | Rejected | MLK66 | none — ✅ gerçek dry-run'da doğrulandı |
+| 17 | Aynı, geçerli `estimated_duration` (1-60 arası) ve `currency='TRY'` | `create_offer(...)` | Succeeds | — | offers — ✅ gerçek dry-run'da doğrulandı (pozitif kontrol) |
+| 18 | Herhangi bir ilan, `hizmet-veren` sağlayıcı | `create_offer(...)` çağrısında `currency='GBP'` (desteklenmeyen) | Rejected | `offers_currency_check` CHECK ihlali (bir MLK kodu değil — tablo seviyesinde) | none — ✅ gerçek dry-run'da doğrulandı |
+| 19 | Job J, sahibi A değil kullanıcı D | D calls `delete_job(J)` | Rejected | MLK56 | none — ✅ gerçek dry-run'da doğrulandı |
+| 20 | Misafir (anon) veya oturum açık kullanıcı | `submit_contact_message(...)` geçerli parametrelerle | Succeeds | — | contact_messages — doğrulanmadı (dry-run'ın 9 testi bu RPC'yi kapsamadı) |
+| 21 | Admin olmayan bir kullanıcı | `review_contact_message(...)` | Rejected | MLK50 | none — ✅ gerçek dry-run'da doğrulandı |
