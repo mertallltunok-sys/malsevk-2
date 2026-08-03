@@ -84,6 +84,20 @@ comment on function public.set_updated_at() is
 -- updated_at    timestamptz not null default now()  (mutable tables only)
 -- deleted_at    timestamptz null                     (soft-delete tables only)
 -- money amounts numeric(12,2)  — see 0005_offers_and_status_history.sql
--- currency      text not null check (currency in ('TRY','USD'))
+-- currency      text not null check (currency in ('TRY','USD','EUR'))
+--               (EUR eklendi — bkz. 0005 başlığı ve SUPABASE-MIGRATION-
+--               VALIDATION.md §6.3: app/_lib/money.ts#CURRENCY_VALUES üç
+--               değeri de destekliyor, önceki taslak yalnızca ikisini
+--               kabul ediyordu.)
 -- phone         text check (phone ~ '^\+905\d{9}$')
 -- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 9 — EXECUTE
+-- izinleri): set_updated_at() yalnızca bir BEFORE UPDATE tetikleyicisi
+-- olarak çağrılmak üzere tasarlanmıştır (NEW/OLD, yalnızca tetikleyici
+-- bağlamında var olur) — hiçbir client/RPC bunu doğrudan çağırmamalıdır.
+-- PostgreSQL, fonksiyonlara varsayılan olarak PUBLIC'e EXECUTE verdiği için
+-- bu, en dar kapsamlı düzeltme olarak açıkça geri alınır.
+-- -----------------------------------------------------------------------------
+revoke all on function public.set_updated_at() from public, anon, authenticated;

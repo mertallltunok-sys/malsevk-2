@@ -36,6 +36,10 @@ comment on table public.service_categories is
 comment on column public.service_categories.visibility_scope is
   'standard = visible to every hizmet-veren (subject to their own selected categories); isolated = a provider who selects this category can ONLY see isolated-category jobs matching their own selection (job-visibility.ts rule, currently: nakliye + gumruk-musavirligi).';
 
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 10 — idempotency):
+-- DROP IF EXISTS + CREATE, ikinci çalıştırmada "trigger already exists"
+-- hatasını önler (PostgreSQL'de CREATE TRIGGER IF NOT EXISTS yoktur).
+drop trigger if exists trg_service_categories_set_updated_at on public.service_categories;
 create trigger trg_service_categories_set_updated_at
   before update on public.service_categories
   for each row execute function public.set_updated_at();

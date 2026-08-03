@@ -24,6 +24,7 @@ create table if not exists public.ratings (
 comment on table public.ratings is
   'One row per completed Offer, submitted once by the job''s requester. Immutable after creation in the source app (no update path exists).';
 
+drop trigger if exists trg_ratings_set_updated_at on public.ratings;
 create trigger trg_ratings_set_updated_at
   before update on public.ratings
   for each row execute function public.set_updated_at();
@@ -56,9 +57,12 @@ begin
 end;
 $$;
 
+drop trigger if exists trg_ratings_matches_completed_offer on public.ratings;
 create trigger trg_ratings_matches_completed_offer
   before insert on public.ratings
   for each row execute function public.ensure_rating_matches_completed_offer();
+
+revoke all on function public.ensure_rating_matches_completed_offer() from public, anon, authenticated;
 
 revoke all on public.ratings from authenticated, anon;
 grant select on public.ratings to authenticated, anon;

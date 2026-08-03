@@ -44,6 +44,12 @@
 --     plan_limit (abonelik tablolarına bağımlı) Faz 2'ye taşındı — bkz.
 --     docs/database/future-migrations/phase2/.
 --
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 8 - KRITIK):
+-- create_notification()/append_job_activity_event() artik `authenticated`e
+-- DOGRUDAN grant edilmiyor -- log_audit_event() (0012) ile AYNI desen,
+-- yalniz ayni sahibin diger SECURITY DEFINER fonksiyonlari icinden
+-- cagrilabilirler. Bkz. asagidaki iki fonksiyonun kendi notlari.
+--
 -- Hata kodu aralığı: MLK71, MLK75-77 (0020'den, değişmedi), MLK82, MLK84-85,
 -- MLK91 (yeni — son admin koruması).
 -- =============================================================================
@@ -75,8 +81,17 @@ begin
 end;
 $$;
 
-revoke all on function public.create_notification(uuid, uuid, text, uuid, uuid, uuid, text, text, jsonb) from public, anon;
-grant execute on function public.create_notification(uuid, uuid, text, uuid, uuid, uuid, text, text, jsonb) to authenticated;
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 8 - KRITIK):
+-- onceki taslak bunu DOGRUDAN `authenticated`e grant ediyordu, ic govdede
+-- HICBIR yetki/sahiplik kontrolu olmadan -- herhangi bir authenticated
+-- kullanici, PostgREST uzerinden bunu dogrudan cagirip keyfi bir
+-- recipient_id/type/message ile baska bir kullanicinin bildirim akisina
+-- kayit ekleyebilirdi. Gercek her cagiran zaten baska bir SECURITY DEFINER
+-- RPC'nin (create_offer, accept_offer, close_job, ...) GOVDESINDEN
+-- `perform` ile cagiriyor -- bu, log_audit_event() (0012) ile AYNI desen:
+-- ayni sahibin fonksiyonlari birbirini cagirmak icin ayrica bir client
+-- grant'ina ihtiyac duymaz. Client'a hicbir dogrudan grant YOK.
+revoke all on function public.create_notification(uuid, uuid, text, uuid, uuid, uuid, text, text, jsonb) from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- append_job_activity_event — the ONLY INSERT path into job_activity_events
@@ -101,8 +116,9 @@ begin
 end;
 $$;
 
-revoke all on function public.append_job_activity_event(uuid, uuid, uuid, text, text, text, jsonb, text) from public, anon;
-grant execute on function public.append_job_activity_event(uuid, uuid, uuid, text, text, text, jsonb, text) to authenticated;
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 8 - KRITIK):
+-- create_notification() ile AYNI gerekce/duzeltme -- bkz. yukaridaki not.
+revoke all on function public.append_job_activity_event(uuid, uuid, uuid, text, text, text, jsonb, text) from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- review_provider_document

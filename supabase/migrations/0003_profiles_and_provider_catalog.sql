@@ -64,9 +64,30 @@ comment on table public.profiles is
 comment on column public.profiles.role is
   'NULL until registration completes. Never client-writable after being set once by the completion RPC — see column-level GRANT/REVOKE below.';
 
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 10 — idempotency):
+-- DROP IF EXISTS + CREATE.
+drop trigger if exists trg_profiles_set_updated_at on public.profiles;
 create trigger trg_profiles_set_updated_at
   before update on public.profiles
   for each row execute function public.set_updated_at();
+
+-- DUZELTME (yerel dry-run, gercek bulgu): asagidaki "grant select"/"grant
+-- update (...)" ifadeleri hicbir zaman public.profiles uzerinde acik bir
+-- "revoke all" ile ONCELENMEMISTI -- Supabase'in kendi proje bootstrap'i
+-- (yerel VEYA hosted, ikisi de ayni) anon+authenticated'e (PUBLIC rolu
+-- uzerinden) TRUNCATE/REFERENCES/TRIGGER dahil genis varsayilan yetkiler
+-- verir; bu dosya hicbir zaman bunlari geri almiyordu. Sonuc: canli
+-- veritabaninda authenticated (ve TRUNCATE ozelinde hatta anon bile)
+-- public.profiles uzerinde TRUNCATE yetkisine sahipti -- TRUNCATE RLS
+-- politikalarina TABI DEGILDIR, yani herhangi bir kullanici (giris yapmis
+-- olmasi bile sart degil, cunku TRUNCATE PUBLIC rolunden miras aliniyordu)
+-- TUM profiles tablosunu tek komutla silebilirdi. Bu, statik SQL
+-- incelemesiyle degil yalniz gercek bir Supabase projesine karsi calistirarak
+-- yakalanabilecek bir bulguydu (migration dosyalari bu yetkiyi ACIKCA hic
+-- vermiyordu -- eksiklik, olmayan bir "revoke all"din). Duzeltme: en dar
+-- kapsam icin once TUM yetkiler geri alinir, sonra yalniz gerekenler
+-- (asagidaki select/update) acikca geri verilir.
+revoke all on public.profiles from public, authenticated, anon;
 
 -- Column-level privilege split: `authenticated` may update their own
 -- "self-service" fields, but role/account_status/onboarding_completed are
@@ -82,6 +103,17 @@ grant update (full_name, phone, company_name, company_type, province, district)
 -- write path to these columns. A future complete_registration() RPC
 -- (role/onboarding_completed) 1:1 mirrors provider-registration.ts's
 -- existing, unchanged validation rules and is out of scope for this pass.
+
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 1 — KRİTİK): bu
+-- dosyada daha önce `public.profiles`e HİÇBİR `grant select` verilmiyordu —
+-- `profiles_select_own_or_admin` RLS politikası (0013_rls_policies.sql) satır
+-- filtrelemesi tanımlıyordu, ama tablo-seviyesi SELECT izni olmadan RLS'e
+-- hiç ulaşılamıyordu (authenticated bir SELECT * FROM profiles denemesi
+-- doğrudan "permission denied for table profiles" ile başarısız oluyordu —
+-- kullanıcı kendi profilini bile okuyamıyordu). En dar kapsam: yalnızca
+-- `authenticated` (RLS politikası de yalnızca `to authenticated`, `anon`
+-- hiç kapsanmıyor — bkz. 0013).
+grant select on public.profiles to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- provider_profiles
@@ -122,15 +154,27 @@ comment on column public.provider_profiles.logo_path is
 comment on column public.provider_profiles.verification_status is
   'Not read/written by any Faz 1 RPC today — a future admin verify_provider() capability was designed but deferred (no verified UI need). See docs/database/schema-reference.md Open Decisions.';
 
+drop trigger if exists trg_provider_profiles_set_updated_at on public.provider_profiles;
 create trigger trg_provider_profiles_set_updated_at
   before update on public.provider_profiles
   for each row execute function public.set_updated_at();
+
+-- DUZELTME (yerel dry-run, gercek bulgu): profiles ile birebir ayni
+-- eksiklik/gerekce -- bkz. yukaridaki profiles notu. En dar kapsam icin
+-- once tum yetkiler geri alinir.
+revoke all on public.provider_profiles from public, authenticated, anon;
 
 revoke update on public.provider_profiles from authenticated;
 grant update (bio, founded_year, experience_range, regions, service_features, logo_path)
   on public.provider_profiles to authenticated;
 -- verification_status is intentionally excluded — no Faz 1 write path exists
 -- for it at all (see comment above).
+
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 1 — KRİTİK): aynı
+-- eksiklik `provider_profiles` için de vardı — bkz. yukarıdaki `profiles`
+-- notu, birebir aynı gerekçe. `provider_profiles_select_own_or_admin`
+-- politikası da yalnız `to authenticated`.
+grant select on public.provider_profiles to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- provider_services

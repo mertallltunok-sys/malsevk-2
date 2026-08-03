@@ -37,6 +37,7 @@ create table if not exists public.provider_documents (
 comment on table public.provider_documents is
   'Metadata only — file lives in Supabase Storage (provider-documents bucket, docs/database/storage-plan.md). document_type discriminates "genel" (Faaliyet Belgesi/Raporu — required for every registration except customs-only) from "gumruk-musaviri-izin-belgesi" (Gümrük Müşaviri İzin Belgesi). 15 MB cap matches app/_lib/document-validation.ts#MAX_DOCUMENT_SIZE_BYTES exactly.';
 
+drop trigger if exists trg_provider_documents_set_updated_at on public.provider_documents;
 create trigger trg_provider_documents_set_updated_at
   before update on public.provider_documents
   for each row execute function public.set_updated_at();
@@ -81,3 +82,56 @@ comment on table public.provider_document_consents is
 
 revoke all on public.provider_document_consents from authenticated, anon;
 grant select on public.provider_document_consents to authenticated;
+
+-- -----------------------------------------------------------------------------
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 3 - KRITIK):
+-- provider_document_consents'in bu dosyada (ve 0013'te) hicbir yazma yolu
+-- yoktu - yalniz SELECT grant/policy vardi, ne INSERT grant'i ne bir RPC.
+-- Ama kaynagin provider-registration.ts#registerProviderAccount'u her
+-- Gumruk Musaviri disi Hizmet Veren kaydinda recordProviderDocumentConsent()
+-- cagiriyor - bu tablo yazilamadan kayit akisi tamamlanamiyordu. Asagidaki
+-- RPC, mevcut mimariye uygun sekilde (SECURITY DEFINER, auth.uid()
+-- dogrulamasi, en dar kapsamli GRANT) tek yazma yolunu acar.
+-- -----------------------------------------------------------------------------
+create or replace function public.record_provider_document_consent(
+  p_statement_id text, p_statement_version text
+)
+returns public.provider_document_consents
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row public.provider_document_consents;
+begin
+  if auth.uid() is null then
+    raise exception 'MLK93: sign-in required to record a document consent' using errcode = 'MLK93';
+  end if;
+  if p_statement_id not in ('belge-dogruluk-beyani', 'gumruk-musaviri-belge-beyani') then
+    raise exception 'MLK94: invalid statement_id' using errcode = 'MLK94';
+  end if;
+  if p_statement_version is null or char_length(trim(p_statement_version)) = 0 then
+    raise exception 'MLK94: statement_version is required' using errcode = 'MLK94';
+  end if;
+
+  -- provider_id HER ZAMAN auth.uid() -- cagiran hicbir sekilde baska bir
+  -- kullanici adina onay kaydi olusturamaz (parametre olarak alinmiyor).
+  insert into public.provider_document_consents (provider_id, statement_id, statement_version)
+  values (auth.uid(), p_statement_id, trim(p_statement_version))
+  on conflict on constraint provider_document_consents_no_duplicate do nothing
+  returning * into v_row;
+
+  if v_row is null then
+    select * into v_row from public.provider_document_consents
+      where provider_id = auth.uid() and statement_id = p_statement_id and statement_version = trim(p_statement_version);
+  end if;
+
+  return v_row;
+end;
+$$;
+
+comment on function public.record_provider_document_consent(text, text) is
+  'provider_document_consents icin TEK yazma yolu. provider_id HER ZAMAN sunucu tarafinda auth.uid() ile belirlenir -- baska bir kullanici adina onay kaydi olusturulamaz. statement_version cagiran tarafindan verilir (guncel surum, legal-documents.ts/customs-license.ts benzeri bir istemci-taraflI kayittan gelir -- bu semada ayri bir "guncel surum" tablosu yoktur).';
+
+revoke all on function public.record_provider_document_consent(text, text) from public, anon;
+grant execute on function public.record_provider_document_consent(text, text) to authenticated;

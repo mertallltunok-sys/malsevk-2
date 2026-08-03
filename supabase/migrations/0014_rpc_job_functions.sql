@@ -18,7 +18,13 @@
 -- bir transaction içinde çalışır — kaynak uygulamanın elle yazdığı
 -- rollback-on-partial-failure kodu burada ücretsizdir.
 --
--- Hata kodu aralığı: MLK50-59 (bu dosya).
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 7 - KRITIK):
+-- delete_job(p_job_id uuid) RPC'si EKLENDI -- sirradan Hizmet Alan
+-- kullanicinin kendi ilanini silmesi icin (mevcut delete_job_as_admin,
+-- 0016, yalniz admin icindir). Kaynagin deleteJobWithOffers'i ile birebir.
+--
+-- Hata kodu aralığı: MLK50-59, MLK92 (bu dosya, delete_job icin -- MLK50-59
+-- zaten tamamen dolu, bkz. rpc-reference.md'nin kod tablosu).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -333,6 +339,11 @@ as $$
   end;
 $$;
 
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 9): yalniz
+-- close_job()/close_job_as_admin() (owner-to-owner) kullaniyor -- hicbir
+-- client'a dogrudan grant gerekmiyor.
+revoke all on function public.get_job_closure_notification_message(text) from public, anon, authenticated;
+
 -- -----------------------------------------------------------------------------
 -- republish_job
 -- -----------------------------------------------------------------------------
@@ -406,6 +417,67 @@ $$;
 
 revoke all on function public.republish_job(uuid, date, date, jsonb) from public, anon;
 grant execute on function public.republish_job(uuid, date, date, jsonb) to authenticated;
+
+-- -----------------------------------------------------------------------------
+-- delete_job — DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20,
+-- madde 7 - KRITIK): sirradan bir kullanicinin KENDI ilanini silmesi icin
+-- hicbir RPC yoktu -- yalniz admin-only delete_job_as_admin() (0016) vardi.
+-- Kaynagin app/_lib/offers.ts#deleteJobWithOffers'i (Hizmet Alan'in kendi
+-- ilanini, "aktif/tamamlanmis isi yoksa" kosuluyla silmesi) burada
+-- karsiligini buluyor: fiziksel DELETE degil, semanin geri kalaniyla ayni
+-- soft-delete deseni (deleted_at). Operasyon altindaki kardes ilanlarin
+-- butunlugu BOZULMAZ -- deleted_at UPDATE'i zaten var olan
+-- trg_jobs_after_change_recompute_operation tetikleyicisini (0004) otomatik
+-- tetikler, bu yuzden operations.closed_at/completed_at kalan kardesler
+-- uzerinden dogru sekilde yeniden hesaplanir; digerlerine hicbir dogrudan
+-- yazim yapilmaz (kaynaktaki "sibling jobs are fully independent" ilkesiyle
+-- birebir).
+-- -----------------------------------------------------------------------------
+create or replace function public.delete_job(p_job_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs;
+  v_offer record;
+  v_updated integer;
+begin
+  select * into v_job from public.jobs where id = p_job_id and deleted_at is null;
+  if v_job is null or v_job.requester_id <> auth.uid() then
+    raise exception 'MLK56: not the owner of this job' using errcode = 'MLK56';
+  end if;
+
+  -- Mirrors offers.ts#deleteJobWithOffers'in koruma esigi: `job.status ===
+  -- "tamamlandi" || getSettledOfferForJob(...) !== null`.
+  if v_job.listing_status = 'tamamlandi' or public.get_settled_offer_id_for_job(p_job_id) is not null then
+    raise exception 'MLK92: a job with an active or completed offer cannot be deleted' using errcode = 'MLK92';
+  end if;
+
+  update public.jobs set deleted_at = now() where id = p_job_id and deleted_at is null;
+
+  -- Kaynak uygulamanin deleteJobWithOffers'i ile ayni desen: hala pending
+  -- olan kardes teklifler reddedilir (silinmez), zaten terminal durumdaki
+  -- teklifler dokunulmadan kalir. close_job()'daki compare-and-set ile ayni
+  -- desen (TOCTOU'ya karsi korumali).
+  for v_offer in select * from public.offers where job_id = p_job_id and status = 'pending' loop
+    update public.offers set status = 'rejected', rejected_at = now() where id = v_offer.id and status = 'pending';
+    get diagnostics v_updated = row_count;
+    if v_updated > 0 then
+      insert into public.offer_status_history (offer_id, previous_status, new_status, changed_by, reason)
+        values (v_offer.id, 'pending', 'rejected', auth.uid(), 'job_deleted_by_owner');
+      perform public.create_notification(v_offer.provider_id, auth.uid(), 'hizmet_kalemi_kaldirildi', p_job_id, v_offer.id, v_job.operation_id,
+        'Hizmet Talebi Kaldırıldı', 'İlan sahibi ilgili hizmet talebini yayından kaldırdı.', null);
+    end if;
+  end loop;
+
+  perform public.append_job_activity_event(p_job_id, v_job.operation_id, auth.uid(), 'job_closed', 'İlan sahibi tarafından silindi', null, null, 'requester_only');
+end;
+$$;
+
+revoke all on function public.delete_job(uuid) from public, anon;
+grant execute on function public.delete_job(uuid) to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- get_job_address — the sole read path for jobs' contact-gated columns

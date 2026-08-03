@@ -23,12 +23,40 @@
 --     kontrol create_offer()'a GERİ EKLENİR (bkz. docs/database/
 --     future-migrations/MANIFEST.md) — bugün eklemek, olmayan bir özelliği
 --     icat etmek olurdu.
+--   * DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 2 -
+--     KRITIK): create_offer()'in estimated_duration parametresi text'ten
+--     nullable integer'a (1-60) degisti, yalniz Nakliye kategorisinde
+--     zorunlu/kaydediliyor -- bkz. bu dosyadaki create_offer()'in kendi
+--     basligi. Bosalan MLK66 kodu (yukaridaki madde) bu yeni dogrulama icin
+--     YENIDEN KULLANILDI (yeni bir kod TAHSIS ETMEK yerine).
 --   * has_reached_active_job_limit() artık get_effective_limit() yerine
 --     get_active_job_limit()'i (0012, sabit 5) kullanıyor — davranış
 --     değişmedi, yalnızca abonelik tablosuna bağımlılık kaldırıldı.
 --   * MLK71 çakışması düzeltildi (önceki denetim C.9): resolve_completion_
 --     dispute()'un "invalid resolution" hatası artık MLK78 (0016'daki
 --     review_provider_document()'ın MLK71'i ile çakışmıyor).
+--   * DUZELTME (yerel dry-run, gercek CREATE FUNCTION hatasi): accept_offer/
+--     reject_offer/start_work/record_agreement_failure/confirm_completion/
+--     dispute_completion/resolve_completion_dispute/submit_rating'in hepsinde
+--     "select o[.*], j.diger_kolon into v_offer[, v_diger]" kalibi vardi --
+--     yani v_offer (satir/record tipli degisken, public.offers) BASKA bir
+--     hedefle AYNI INTO listesinde. plpgsql'in kendi kurali kesin: bir
+--     record/row degisken bir INTO listesinde ANCAK TEK BASINA yer alabilir;
+--     "o.*"yi cIplak "o"ya cevirmek YETMEDI (ilk denemede oyle sanildi) --
+--     hata kaynagi ifadenin SELECT tarafinda degil, INTO hedef listesinin
+--     KENDISINDE. confirm_completion'da bu, plpgsql derleyicisinin "record
+--     variable cannot be part of multiple-item INTO list" (SQLSTATE 42601)
+--     hatasiyla supabase db reset'i GERCEKTEN durdurdu -- statik analiz
+--     bunu yakalayamazdi. Digerlerinde (tek INTO hedefi, v_offer public.
+--     offers olarak sabit tipli, ama select listesi o.* + ekstra kolon(lar)
+--     iceriyordu) ayni temel sorun CREATE zamaninda hata vermiyordu ama
+--     calisma zamaninda kolon-sayisi uyusmazligina yol acardi, ustelik
+--     reject_offer/start_work/record_agreement_failure'da o ekstra deger
+--     "returning * into v_offer" ile v_offer'in UZERINE YAZILDIKTAN SONRA
+--     tekrar okunuyordu (sessizce kaybolurdu). GERCEK duzeltme: v_offer'i
+--     TEK BASINA dolduran bir "select o into v_offer ... where o.id = ..."
+--     + hemen ardindan v_offer.job_id'yi kullanan AYRI bir "select ...
+--     into v_job_requester_id[, v_job_operation_id] from public.jobs ...".
 --
 -- Hata kodu aralığı: MLK60-69, MLK72-74, MLK78 (bu dosya; MLK70-71/75-77
 -- 0016'da).
@@ -36,9 +64,18 @@
 
 -- -----------------------------------------------------------------------------
 -- create_offer
+--
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 2 - KRITIK):
+-- p_estimated_duration artik `text` degil, nullable bir `integer` (1-60) --
+-- bkz. 0005_offers_and_status_history.sql'in basligindaki ayni ad altindaki
+-- not. Yalnizca Nakliye kategorisindeki (category_id = 'nakliye')
+-- ilanlarda zorunlu/kaydedilir; MLK66 (eskiden gunluk teklif kotasi icin
+-- kullaniliyordu, o kontrol TAMAMEN KALDIRILMISTI -- bkz. asagidaki not --
+-- bu yuzden kod bu dosyanin kendi MLK60-69 araliginda YENIDEN KULLANILIYOR,
+-- yeni bir aralik disi kod eklemek yerine).
 -- -----------------------------------------------------------------------------
 create or replace function public.create_offer(
-  p_job_id uuid, p_amount numeric, p_currency text, p_description text, p_estimated_duration text
+  p_job_id uuid, p_amount numeric, p_currency text, p_description text, p_estimated_duration integer default null
 )
 returns public.offers
 language plpgsql
@@ -49,6 +86,8 @@ declare
   v_job public.jobs;
   v_latest_offer public.offers;
   v_offer public.offers;
+  v_requires_estimated_duration boolean;
+  v_estimated_duration integer;
 begin
   if public.current_user_role() <> 'hizmet-veren' then
     raise exception 'MLK50: only hizmet-veren accounts may create an offer' using errcode = 'MLK50';
@@ -103,8 +142,21 @@ begin
     raise exception 'MLK65: active job capacity reached' using errcode = 'MLK65';
   end if;
 
+  -- "Tamamlanması Taahhüt Edilen Gün" -- yalnizca Nakliye kategorisi icin
+  -- zorunlu/kaydedilir, mirrors offers.ts#createOffer'in
+  -- requiresEstimatedDuration = isTransportationCategory(job.category)
+  -- mantigi birebir. Nakliye disinda p_estimated_duration ne gonderilirse
+  -- gonderilsin sessizce yok sayilir (kaydedilmez) -- kaynakla ayni.
+  v_requires_estimated_duration := (v_job.category_id = 'nakliye');
+  if v_requires_estimated_duration and (
+    p_estimated_duration is null or p_estimated_duration < 1 or p_estimated_duration > 60
+  ) then
+    raise exception 'MLK66: estimated_duration must be an integer between 1 and 60 for Nakliye jobs' using errcode = 'MLK66';
+  end if;
+  v_estimated_duration := case when v_requires_estimated_duration then p_estimated_duration else null end;
+
   insert into public.offers (job_id, provider_id, amount, currency, description, estimated_duration)
-  values (p_job_id, auth.uid(), p_amount, p_currency, p_description, p_estimated_duration)
+  values (p_job_id, auth.uid(), p_amount, p_currency, p_description, v_estimated_duration)
   returning * into v_offer;
 
   insert into public.offer_status_history (offer_id, previous_status, new_status, changed_by)
@@ -120,8 +172,17 @@ begin
 end;
 $$;
 
-revoke all on function public.create_offer(uuid, numeric, text, text, text) from public, anon;
-grant execute on function public.create_offer(uuid, numeric, text, text, text) to authenticated;
+-- NOT: parametre imzasi (uuid, numeric, text, text, integer) -- son
+-- parametrenin tipi text'ten integer'a degisti (bkz. yukaridaki DUZELTME).
+-- Bu migration seti HENUZ hicbir Supabase projesine uygulanmadigi icin
+-- (dogrulanmis) bu, gercek bir "eski text-parametreli asiri yukleme kalir"
+-- riski TASIMAZ; yalniz gelecekte bu dosya GERCEK bir veritabanina
+-- uygulandiktan SONRA tekrar degistirilirse, CREATE OR REPLACE FUNCTION
+-- imza degisikligini bir REPLACE olarak degil YENI bir asiri yukleme olarak
+-- ele alacagi icin eski imzanin ayrica DROP FUNCTION ile kaldirilmasi
+-- gerekecegi not edilir.
+revoke all on function public.create_offer(uuid, numeric, text, text, integer) from public, anon;
+grant execute on function public.create_offer(uuid, numeric, text, text, integer) to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- accept_offer / reject_offer
@@ -135,10 +196,17 @@ as $$
 declare
   v_offer public.offers;
   v_job public.jobs;
+  v_job_requester_id uuid;
 begin
-  select o.*, j.requester_id as job_requester_id into v_offer from public.offers o
-    join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
-  if v_offer is null or v_offer.job_requester_id <> auth.uid() then
+  -- NOT: v_offer bir satir (record) tipli degisken oldugu icin plpgsql'in
+  -- INTO listesinde TEK BASINA olmasi gerekir -- "select o, j.x into
+  -- v_offer, v_baska_degisken" gibi bir satir-degisken + skaler karisimi
+  -- CREATE zamaninda "record variable cannot be part of multiple-item INTO
+  -- list" (SQLSTATE 42601) hatasi verir (bkz. bu dosyanin basligindaki yerel
+  -- dry-run notu). Bu yuzden asagida iki ayri select var.
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id into v_job_requester_id from public.jobs j where j.id = v_offer.job_id;
+  if v_offer is null or v_job_requester_id <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
   if v_offer.status <> 'pending' then
@@ -193,10 +261,13 @@ as $$
 declare
   v_offer public.offers;
   v_job public.jobs;
+  v_job_requester_id uuid;
+  v_job_operation_id uuid;
 begin
-  select o.*, j.requester_id as job_requester_id, j.operation_id as job_operation_id
-    into v_offer from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
-  if v_offer is null or v_offer.job_requester_id <> auth.uid() then
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id, j.operation_id into v_job_requester_id, v_job_operation_id
+    from public.jobs j where j.id = v_offer.job_id;
+  if v_offer is null or v_job_requester_id <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
   if v_offer.status <> 'pending' then
@@ -215,7 +286,7 @@ begin
 
   insert into public.offer_status_history (offer_id, previous_status, new_status, changed_by)
     values (p_offer_id, 'pending', 'rejected', auth.uid());
-  perform public.create_notification(v_offer.provider_id, auth.uid(), 'teklif_reddedildi', v_offer.job_id, p_offer_id, v_offer.job_operation_id,
+  perform public.create_notification(v_offer.provider_id, auth.uid(), 'teklif_reddedildi', v_offer.job_id, p_offer_id, v_job_operation_id,
     null, 'Hizmet Alan teklifinizi kabul etmedi.', null);
   -- NOT: job_activity_events'e YAZILMIYOR — teklif olayları yalnız
   -- offer_status_history'de (bkz. 0010'un sadeleştirme kararı).
@@ -278,10 +349,13 @@ as $$
 declare
   v_offer public.offers;
   v_job public.jobs;
+  v_job_requester_id uuid;
+  v_job_operation_id uuid;
 begin
-  select o.*, j.requester_id as job_requester_id, j.operation_id as job_operation_id
-    into v_offer from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
-  if v_offer is null or v_offer.job_requester_id <> auth.uid() then
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id, j.operation_id into v_job_requester_id, v_job_operation_id
+    from public.jobs j where j.id = v_offer.job_id;
+  if v_offer is null or v_job_requester_id <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
 
@@ -294,7 +368,7 @@ begin
 
   insert into public.offer_status_history (offer_id, previous_status, new_status, changed_by)
     values (p_offer_id, 'accepted', 'in_progress', auth.uid());
-  perform public.create_notification(v_offer.provider_id, auth.uid(), 'is_basladi', v_offer.job_id, p_offer_id, v_offer.job_operation_id,
+  perform public.create_notification(v_offer.provider_id, auth.uid(), 'is_basladi', v_offer.job_id, p_offer_id, v_job_operation_id,
     null, 'Hizmet Alan, işin başladığını onayladı.', null);
 
   return v_offer;
@@ -315,10 +389,13 @@ set search_path = public
 as $$
 declare
   v_offer public.offers;
+  v_job_requester_id uuid;
+  v_job_operation_id uuid;
 begin
-  select o.*, j.requester_id as job_requester_id, j.operation_id as job_operation_id
-    into v_offer from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
-  if v_offer is null or v_offer.job_requester_id <> auth.uid() then
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id, j.operation_id into v_job_requester_id, v_job_operation_id
+    from public.jobs j where j.id = v_offer.job_id;
+  if v_offer is null or v_job_requester_id <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
 
@@ -334,9 +411,9 @@ begin
 
   insert into public.offer_status_history (offer_id, previous_status, new_status, changed_by, reason)
     values (p_offer_id, 'accepted', 'agreement_failed', auth.uid(), p_reason);
-  perform public.create_notification(v_offer.provider_id, auth.uid(), 'anlasma_saglanamadi', v_offer.job_id, p_offer_id, v_offer.job_operation_id,
+  perform public.create_notification(v_offer.provider_id, auth.uid(), 'anlasma_saglanamadi', v_offer.job_id, p_offer_id, v_job_operation_id,
     null, 'Teklifinizin kabul edildiği ilan için anlaşma sağlanamadı. İletişim bilgileri artık görüntülenemez.', null);
-  perform public.create_notification(v_offer.job_requester_id, auth.uid(), 'ilan_yeniden_yayinda', v_offer.job_id, p_offer_id, v_offer.job_operation_id,
+  perform public.create_notification(v_job_requester_id, auth.uid(), 'ilan_yeniden_yayinda', v_offer.job_id, p_offer_id, v_job_operation_id,
     null, 'Anlaşma sağlanamadığı için ilanınız yeniden yayına alındı ve yeni teklifler almaya hazır.', null);
 
   return v_offer;
@@ -392,8 +469,8 @@ declare
   v_offer public.offers;
   v_job_requester uuid;
 begin
-  select o.*, j.requester_id into v_offer, v_job_requester
-    from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id into v_job_requester from public.jobs j where j.id = v_offer.job_id;
   if v_job_requester is null or v_job_requester <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
@@ -430,8 +507,8 @@ begin
   if char_length(trim(p_note)) < 10 or char_length(trim(p_note)) > 1000 then
     raise exception 'MLK70: dispute note must be between 10 and 1000 characters' using errcode = 'MLK70';
   end if;
-  select o.*, j.requester_id into v_offer, v_job_requester
-    from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id into v_job_requester from public.jobs j where j.id = v_offer.job_id;
   if v_job_requester is null or v_job_requester <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
@@ -473,8 +550,8 @@ begin
     -- taşıyordu). Şimdi MLK78 (bu dosyanın kendi aralığında, benzersiz).
     raise exception 'MLK78: resolution must be completed or cancelled' using errcode = 'MLK78';
   end if;
-  select o.*, j.requester_id into v_offer, v_job_requester
-    from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id into v_job_requester from public.jobs j where j.id = v_offer.job_id;
   if v_job_requester is null or v_job_requester <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;
@@ -526,8 +603,8 @@ begin
   if public.current_user_role() <> 'hizmet-alan' then
     raise exception 'MLK50: only hizmet-alan accounts may submit a rating' using errcode = 'MLK50';
   end if;
-  select o.*, j.requester_id into v_offer, v_job_requester
-    from public.offers o join public.jobs j on j.id = o.job_id where o.id = p_offer_id;
+  select o into v_offer from public.offers o where o.id = p_offer_id;
+  select j.requester_id into v_job_requester from public.jobs j where j.id = v_offer.job_id;
   if v_job_requester is null or v_job_requester <> auth.uid() then
     raise exception 'MLK56: not the owner of this offer''s job' using errcode = 'MLK56';
   end if;

@@ -10,6 +10,17 @@
 
 create extension if not exists pg_cron;
 
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 9): asagidaki
+-- 4 sweep fonksiyonunun hicbirinde acik REVOKE/GRANT yoktu -- PostgreSQL
+-- varsayilan olarak fonksiyonlara PUBLIC'e EXECUTE verir, bu yuzden
+-- (0001-0020'nin geri kalaninda ayri bir varsayilan-ayricalik degisikligi
+-- olmadigi surece) herhangi bir authenticated/anon cagiran bunlari
+-- PostgREST uzerinden DOGRUDAN cagirabilirdi -- oysa bunlar yalniz
+-- pg_cron'un zamanlanmis gorevleri tarafindan cagrilmak uzere
+-- tasarlanmistir (cron.schedule() bunlari, migration'i calistiran/sahip
+-- rolun yetkileriyle cagirir, ayri bir client grant'ina ihtiyac duymadan).
+-- Her dordu de asagida acikca kilitlenir -- hicbir role dogrudan grant yok.
+
 -- -----------------------------------------------------------------------------
 -- sweep_expired_job_listings
 -- -----------------------------------------------------------------------------
@@ -38,6 +49,8 @@ begin
   end loop;
 end;
 $$;
+
+revoke all on function public.sweep_expired_job_listings() from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- sweep_completion_auto_approvals — mirrors
@@ -69,6 +82,8 @@ begin
 end;
 $$;
 
+revoke all on function public.sweep_completion_auto_approvals() from public, anon, authenticated;
+
 -- -----------------------------------------------------------------------------
 -- sweep_notification_retention — soft-delete only, 180 gün (muhafazakâr
 -- varsayılan, doğrulanmış bir ürün gereksinimi değil).
@@ -83,6 +98,8 @@ as $$
     set deleted_at = now()
     where deleted_at is null and created_at < now() - interval '180 days';
 $$;
+
+revoke all on function public.sweep_notification_retention() from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- sweep_stale_anonymous_legal_consents — tek HARD delete (bkz. yorum).
@@ -99,6 +116,8 @@ $$;
 
 comment on function public.sweep_stale_anonymous_legal_consents() is
   'Bu şemadaki TEK hard delete: anonim (user_id null) bir consent kaydı gerçek bir kullanıcının hesabına hiç bağlanmadıysa, "kalıcı saklanmalıdır" gereksinimi gerçek kullanıcı kararlarına uygulanır, sahipsiz anonim satırlara değil.';
+
+revoke all on function public.sweep_stale_anonymous_legal_consents() from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Storage-orphan cleanup — TANIMLANDI, SQL olarak İNŞA EDİLMEDİ (Postgres,

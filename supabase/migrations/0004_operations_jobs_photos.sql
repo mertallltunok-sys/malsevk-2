@@ -53,6 +53,10 @@ comment on table public.operations is
 comment on column public.operations.closed_at is
   'Set by trg_operations_recompute_terminal_state (below) once every NON-DELETED member job independently resolved. Distinct from completed_at — see that trigger''s body. Never set directly by client code.';
 
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 10 — idempotency):
+-- bu dosyadaki TÜM CREATE TRIGGER ifadeleri artık DROP IF EXISTS ile
+-- öncelenmiştir.
+drop trigger if exists trg_operations_set_updated_at on public.operations;
 create trigger trg_operations_set_updated_at
   before update on public.operations
   for each row execute function public.set_updated_at();
@@ -136,6 +140,7 @@ comment on column public.jobs.operation_id is
 comment on column public.jobs.republished_from_job_id is
   'Self-referencing FK, matches types.ts#Job.republishedFromJobId/republishedToJobId''s two-way link exactly. Partial unique indexes below enforce "each old job republishes to at most one new job" and vice versa.';
 
+drop trigger if exists trg_jobs_set_updated_at on public.jobs;
 create trigger trg_jobs_set_updated_at
   before update on public.jobs
   for each row execute function public.set_updated_at();
@@ -164,9 +169,16 @@ begin
 end;
 $$;
 
+drop trigger if exists trg_jobs_requester_is_hizmet_alan on public.jobs;
 create trigger trg_jobs_requester_is_hizmet_alan
   before insert or update of requester_id on public.jobs
   for each row execute function public.ensure_job_requester_is_hizmet_alan();
+
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 9 — EXECUTE
+-- izinleri): tetikleyici fonksiyonu, hiçbir client/RPC'nin doğrudan
+-- çağırmasına gerek yok — yalnızca yukarıdaki tetikleyici tarafından
+-- çağrılır.
+revoke all on function public.ensure_job_requester_is_hizmet_alan() from public, anon, authenticated;
 
 create or replace function public.ensure_job_operation_requester_matches()
 returns trigger
@@ -185,9 +197,12 @@ begin
 end;
 $$;
 
+drop trigger if exists trg_jobs_operation_requester_matches on public.jobs;
 create trigger trg_jobs_operation_requester_matches
   before insert or update of operation_id, requester_id on public.jobs
   for each row execute function public.ensure_job_operation_requester_matches();
+
+revoke all on function public.ensure_job_operation_requester_matches() from public, anon, authenticated;
 
 -- Stamps operations.closed_at/completed_at once every NON-DELETED member job
 -- is independently resolved — mirrors job-completion.ts#isJobFullyCompletedForListing's
@@ -224,6 +239,11 @@ begin
 end;
 $$;
 
+-- DÜZELTME (SUPABASE-MIGRATION-VALIDATION.md §20, madde 9 — EXECUTE
+-- izinleri): bu, aşağıdaki tetikleyici DIŞINDA hiçbir yerden çağrılmaz;
+-- doğrudan client çağrısına gerek yok.
+revoke all on function public.recompute_operation_terminal_state(uuid) from public, anon, authenticated;
+
 create or replace function public.trg_jobs_recompute_operation_terminal_state()
 returns trigger
 language plpgsql
@@ -236,9 +256,27 @@ begin
 end;
 $$;
 
+revoke all on function public.trg_jobs_recompute_operation_terminal_state() from public, anon, authenticated;
+
+drop trigger if exists trg_jobs_after_change_recompute_operation on public.jobs;
 create trigger trg_jobs_after_change_recompute_operation
   after insert or update of listing_status, closed_at, publish_end_at, deleted_at on public.jobs
   for each row execute function public.trg_jobs_recompute_operation_terminal_state();
+
+-- DUZELTME (yerel dry-run, gercek bulgu): public.jobs icin de HICBIR acik
+-- "revoke all"/"grant select" yoktu -- profiles/provider_profiles'daki
+-- ayni sinifta bulgu (bkz. 0003), farki jobs'un canli veritabaninda anon
+-- bile SELECT'e (Supabase'in varsayilan yetkisi uzerinden, tesadufen)
+-- sahipti -- bu kismen dogru davranisla ORTUSUYORDU (jobs_select_visible
+-- RLS politikasi, 0013, gercekten "to authenticated, anon" -- misafirler
+-- ilanlari gorebilir, uygulamanin bilinen bir ozelligi) ama anon+
+-- authenticated AYNI ZAMANDA TRUNCATE/REFERENCES/TRIGGER de taniyordu --
+-- TRUNCATE RLS'e tabi degildir, yani herhangi bir misafir bile TUM jobs
+-- tablosunu silebilirdi. Duzeltme: once tum yetkiler geri alinir, sonra
+-- yalniz SELECT (RLS politikasinin kendi "to" listesiyle birebir: hem
+-- authenticated hem anon) acikca geri verilir.
+revoke all on public.jobs from public, authenticated, anon;
+grant select on public.jobs to authenticated, anon;
 
 revoke update on public.jobs from authenticated;
 grant update (title, description, operation_details, province, district, work_location_type,

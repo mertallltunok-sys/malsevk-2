@@ -16,6 +16,26 @@
 -- completion_requested/completion_disputed/completed) teklif olabilir"
 -- kuralını doğrudan veritabanı seviyesinde, RPC'yi bypass eden bir yazımda
 -- bile garanti eder.
+--
+-- DUZELTME (SUPABASE-MIGRATION-VALIDATION.md paragraf 20, madde 2 ve 6):
+--   1. estimated_duration artik NOT NULL serbest metin DEGIL - nullable bir
+--      integer (1-60 arasi). Mevcut uygulama davranisi kaynak kabul
+--      edildi: app/_lib/offers.ts#CreateOfferInput.estimatedDuration artik
+--      yalnizca Nakliye kategorisindeki ilanlar icin toplaniyor (bkz.
+--      isTransportationCategory), 1-60 arasi bir TAM SAYI, ve Nakliye
+--      disindaki her kategoride bu alan hic yazilmiyor (undefined). Onceki
+--      taslak (NOT NULL, 2-100 karakter metin) her teklif icin zorunluydu -
+--      Nakliye disindaki (kategori katalogunun buyuk cogunlugu) her
+--      create_offer() cagrisi bununla NOT NULL/CHECK ihlaline carpardi.
+--      "Yalnizca Nakliye'de zorunlu" is kurali job.category'ye bagli
+--      oldugu icin (offers tablosunda degil) burada bir tablo CHECK'i
+--      olarak ifade edilemez - create_offer() RPC'si
+--      (0015_rpc_offer_functions.sql) dogrular, tipki offers.ts'in
+--      kendisi gibi.
+--   2. currency CHECK'i artik EUR'yu da kapsiyor - app/_lib/money.ts#
+--      CURRENCY_VALUES = ["TRY","USD","EUR"] ile birebir (dogrulanmis: bu
+--      ucu offer-form.tsx/offers.ts/offer-form-validation.ts'in TEK
+--      dogruluk kaynagi).
 -- =============================================================================
 
 create table if not exists public.offers (
@@ -24,9 +44,9 @@ create table if not exists public.offers (
   provider_id uuid not null references public.profiles (id),
 
   amount numeric(12, 2) not null check (amount > 0 and amount <= 999999999),
-  currency text not null check (currency in ('TRY', 'USD')),
+  currency text not null check (currency in ('TRY', 'USD', 'EUR')),
   description text not null check (char_length(description) between 20 and 1000),
-  estimated_duration text not null check (char_length(estimated_duration) between 2 and 100),
+  estimated_duration integer check (estimated_duration is null or estimated_duration between 1 and 60),
 
   status text not null default 'pending' check (status in (
     'pending', 'accepted', 'rejected', 'withdrawn', 'in_progress',
@@ -64,6 +84,7 @@ create table if not exists public.offers (
 comment on table public.offers is
   'Maps app/_lib/types.ts#Offer field-for-field, plus per-transition timestamp columns with no direct source-app equivalent. The offer state machine itself is enforced entirely by the RPC layer (0015_rpc_offer_functions.sql), never by a client UPDATE.';
 
+drop trigger if exists trg_offers_set_updated_at on public.offers;
 create trigger trg_offers_set_updated_at
   before update on public.offers
   for each row execute function public.set_updated_at();
@@ -126,9 +147,12 @@ begin
 end;
 $$;
 
+drop trigger if exists trg_offers_provider_is_hizmet_veren on public.offers;
 create trigger trg_offers_provider_is_hizmet_veren
   before insert or update of provider_id, job_id on public.offers
   for each row execute function public.ensure_offer_provider_is_hizmet_veren();
+
+revoke all on function public.ensure_offer_provider_is_hizmet_veren() from public, anon, authenticated;
 
 revoke all on public.offers from authenticated, anon;
 grant select on public.offers to authenticated;
