@@ -1,11 +1,21 @@
-// MALSEVK — 0025/0026 (job_customs_documents + badge_types/provider_badges)
-// RLS + RPC + Storage güvenlik regresyon testi.
+// MALSEVK — provider_documents (firma doğrulama belgeleri) +
+// badge_types/provider_badges güvenlik regresyon testi.
 //
 // Bu, diğer scripts/tmp-*.mjs dosyalarının aksine KALICI bir güvenlik
-// regresyon testidir (bu yüzden "tmp-" önekini taşımaz) — Karar #1'in
-// ("Gümrük destekleyici belgeleri tamamen gizli") ve rozet sisteminin admin-
-// only yazma kurallarının gelecekte bir refactor'la sessizce bozulmadığını
-// doğrulamak için projede tutulmalıdır.
+// regresyon testidir (bu yüzden "tmp-" önekini taşımaz).
+//
+// KAPSAM GEÇMİŞİ (önemli): bu script başlangıçta job_customs_documents +
+// job-customs-documents Storage bucket'ı (0025/0026) için yazılmıştı. Bir
+// kapsam düzeltmesiyle bu altyapı YANLIŞ olduğu için 0027 ile tamamen
+// kaldırıldı — MALSEVK'te ilan/teklif/operasyon sırasında hiçbir gümrük
+// destekleyici belgesi (konşimento, fatura, çeki listesi, menşe belgesi vb.)
+// TUTULMAZ; belge yükleme yalnızca hizmet veren FİRMANIN kendi doğrulama
+// belgeleri (provider_documents, 0007) içindir. Bu script şimdi üç şeyi
+// doğrular: (1) job_customs_documents altyapısının GERÇEKTEN geri
+// gelmediğini (regresyon bekçisi — 0027'nin kalıcı olduğunu garanti eder),
+// (2) provider_documents'ın firma-yalnız + admin görünürlük kuralının
+// çalıştığını, (3) badge_types/provider_badges rozet sisteminin (Mavi Tik/
+// Altın Tik, admin-only grant/revoke, tam tarihçe) çalıştığını.
 //
 // Bu script SADECE yerel, izole Docker Supabase yığınına karşı çalışır
 // (`npx supabase start`, supabase/config.toml#project_id = "malsevk-2").
@@ -52,7 +62,6 @@ function psql(sql) {
 }
 
 const admin = createClient(URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-const anon = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
 const PASSWORD = "TestSifre2026!";
 const ts = Date.now();
@@ -67,16 +76,9 @@ async function makeUser(label, email) {
 }
 
 console.log("=== Setup: test users ===");
-const userA = await makeUser("A(job owner)", `customs-a-${ts}@example.com`);
-const userB = await makeUser("B(unrelated)", `customs-b-${ts}@example.com`);
-const userP = await makeUser("P(provider)", `customs-p-${ts}@example.com`);
-const userAdmin = await makeUser("Admin", `customs-admin-${ts}@example.com`);
-
-const regA = await userA.client.rpc("complete_registration", {
-  p_role: "hizmet-alan", p_full_name: "Test A", p_phone: "+905551110001",
-  p_company_name: "A Ltd", p_company_type: "bireysel", p_province: "Kocaeli", p_district: "Gebze",
-});
-check("setup: A completes registration (hizmet-alan)", !regA.error, regA.error?.message);
+const userB = await makeUser("B(unrelated)", `docbadge-b-${ts}@example.com`);
+const userP = await makeUser("P(provider)", `docbadge-p-${ts}@example.com`);
+const userAdmin = await makeUser("Admin", `docbadge-admin-${ts}@example.com`);
 
 const regB = await userB.client.rpc("complete_registration", {
   p_role: "hizmet-alan", p_full_name: "Test B", p_phone: "+905551110002",
@@ -96,124 +98,71 @@ const regAdmin = await userAdmin.client.rpc("complete_registration", {
 });
 check("setup: Admin completes registration (placeholder role)", !regAdmin.error, regAdmin.error?.message);
 
-// Yalnizca yerel, izole sandbox'ta: dogrudan psql ile role='admin' yapiyoruz
-// (uygulamada gercek admin hesabi hicbir self-service yoldan olusmaz).
 psql(`update public.profiles set role = 'admin', onboarding_completed = true where id = '${userAdmin.id}';`);
 const adminRoleCheck = psql(`select role from public.profiles where id = '${userAdmin.id}';`);
 check("setup: Admin promoted to role='admin' via direct SQL (sandbox-only)", adminRoleCheck === "admin", adminRoleCheck);
 
-console.log("\n=== Setup: jobs ===");
-const fakePhoto = { storage_path: "dummy/photo.jpg", original_file_name: "photo.jpg", mime_type: "image/jpeg", size_bytes: 12345, width: 800, height: 600 };
+console.log("\n=== Section 1: job_customs_documents infra must stay REMOVED (0027 regression guard) ===");
 
-const gumrukJob = await userA.client.rpc("create_job", {
-  p_category_id: "gumruk-musavirligi",
-  p_title: "Test Gümrük İşlemi",
-  p_description: "Test açıklama metni, yeterli uzunlukta.",
-  p_operation_details: "Test operasyon detayları metni.",
-  p_province: "Kocaeli", p_district: "Gebze", p_work_location_type: "Test Tesis",
-  p_work_date: "2026-09-01",
-  p_photos: [fakePhoto],
+const tableGone = psql(`select exists(select 1 from information_schema.tables where table_schema='public' and table_name='job_customs_documents');`);
+check("job_customs_documents table does not exist", tableGone === "f", tableGone);
+
+const createFnGone = psql(`select exists(select 1 from pg_proc where proname='create_job_customs_document');`);
+check("create_job_customs_document function does not exist", createFnGone === "f", createFnGone);
+
+const deleteFnGone = psql(`select exists(select 1 from pg_proc where proname='delete_job_customs_document');`);
+check("delete_job_customs_document function does not exist", deleteFnGone === "f", deleteFnGone);
+
+const bucketPolicyCount = psql(`select count(*) from pg_policies where schemaname='storage' and policyname like 'job_customs_documents%';`);
+check("job-customs-documents Storage policies do not exist (0 count)", bucketPolicyCount === "0", bucketPolicyCount);
+
+const rpcCallFails = await userP.client.rpc("create_job_customs_document", {
+  p_job_id: "00000000-0000-0000-0000-000000000000", p_storage_path: "x", p_original_file_name: "x",
+  p_mime_type: "application/pdf", p_extension: "pdf", p_size_bytes: 1,
 });
-check("setup: A creates gumruk-musavirligi job", !gumrukJob.error, gumrukJob.error?.message);
-const gumrukJobId = gumrukJob.data?.id;
+check("Calling create_job_customs_document via the API fails (function not found)", !!rpcCallFails.error, JSON.stringify(rpcCallFails.error));
 
-const nakliyeJob = await userA.client.rpc("create_job", {
-  p_category_id: "nakliye",
-  p_title: "Test Nakliye İşi",
-  p_description: "Test açıklama metni, yeterli uzunlukta.",
-  p_operation_details: "Test operasyon detayları metni.",
-  p_province: "Kocaeli", p_district: "Gebze", p_work_location_type: "Test Tesis",
-  p_work_date: "2026-09-01",
-  p_photos: [fakePhoto],
+const tableQueryFails = await userP.client.from("job_customs_documents").select("id");
+check("Querying job_customs_documents via the API fails (table not found)", !!tableQueryFails.error, JSON.stringify(tableQueryFails.error));
+
+const bucketUploadFails = await userP.client.storage
+  .from("job-customs-documents")
+  .upload(`${userP.id}/x/x.pdf`, Buffer.from("x"), { contentType: "application/pdf" });
+check("Uploading to job-customs-documents bucket fails (no policies / gone)", !!bucketUploadFails.error, JSON.stringify(bucketUploadFails.error));
+
+console.log("\n=== Section 2: provider_documents (firma doğrulama belgeleri) — değişmedi, hâlâ çalışıyor ===");
+
+const createDoc = await userP.client.rpc("create_provider_document", {
+  p_document_type: "genel",
+  p_storage_path: `${userP.id}/faaliyet-belgesi.pdf`,
+  p_original_file_name: "faaliyet-belgesi.pdf",
+  p_mime_type: "application/pdf",
+  p_extension: "pdf",
+  p_size_bytes: 20000,
 });
-check("setup: A creates nakliye (non-customs) job", !nakliyeJob.error, nakliyeJob.error?.message);
-const nakliyeJobId = nakliyeJob.data?.id;
+check("P uploads a company document via create_provider_document (0023, unchanged)", !createDoc.error, createDoc.error?.message);
+const providerDocId = createDoc.data?.id;
 
-console.log("\n=== Section 1: create_job_customs_document RPC ===");
+const selfSeesOwnDoc = await userP.client.from("provider_documents").select("id").eq("id", providerDocId);
+check("P sees own company document", selfSeesOwnDoc.data?.length === 1, JSON.stringify(selfSeesOwnDoc));
 
-const createOnNonCustomsJob = await userA.client.rpc("create_job_customs_document", {
-  p_job_id: nakliyeJobId, p_storage_path: `${userA.id}/${nakliyeJobId}/doc.pdf`,
-  p_original_file_name: "doc.pdf", p_mime_type: "application/pdf", p_extension: "pdf", p_size_bytes: 1000,
+const otherCannotSeeDoc = await userB.client.from("provider_documents").select("id").eq("id", providerDocId);
+check("B (unrelated) cannot see P's company document", (otherCannotSeeDoc.data?.length ?? -1) === 0, JSON.stringify(otherCannotSeeDoc));
+
+const adminSeesDoc = await userAdmin.client.from("provider_documents").select("id, current_review_status").eq("id", providerDocId);
+check("Admin can see P's company document", adminSeesDoc.data?.length === 1, JSON.stringify(adminSeesDoc));
+
+const adminApproves = await userAdmin.client.rpc("review_provider_document", {
+  p_document_id: providerDocId, p_status: "approved",
 });
-check("ML104: rejects non-gumruk-musavirligi job", createOnNonCustomsJob.error?.code === "ML104", JSON.stringify(createOnNonCustomsJob.error));
+check("Admin can approve P's company document (review_provider_document, unchanged)", !adminApproves.error, adminApproves.error?.message);
 
-const createByNonOwner = await userB.client.rpc("create_job_customs_document", {
-  p_job_id: gumrukJobId, p_storage_path: `${userB.id}/${gumrukJobId}/doc.pdf`,
-  p_original_file_name: "doc.pdf", p_mime_type: "application/pdf", p_extension: "pdf", p_size_bytes: 1000,
-});
-check("MLK56: rejects non-owner (B on A's job)", createByNonOwner.error?.code === "MLK56", JSON.stringify(createByNonOwner.error));
+const statusAfterApproval = psql(`select current_review_status from public.provider_documents where id = '${providerDocId}';`);
+check("Company document status is now 'approved'", statusAfterApproval === "approved", statusAfterApproval);
 
-const createWrongFolder = await userA.client.rpc("create_job_customs_document", {
-  p_job_id: gumrukJobId, p_storage_path: `${userB.id}/${gumrukJobId}/doc.pdf`,
-  p_original_file_name: "doc.pdf", p_mime_type: "application/pdf", p_extension: "pdf", p_size_bytes: 1000,
-});
-check("MLK80: rejects storage_path outside caller's own folder", createWrongFolder.error?.code === "MLK80", JSON.stringify(createWrongFolder.error));
+console.log("\n=== Section 3: badge_types catalog ===");
 
-const createBadExtension = await userA.client.rpc("create_job_customs_document", {
-  p_job_id: gumrukJobId, p_storage_path: `${userA.id}/${gumrukJobId}/doc.exe`,
-  p_original_file_name: "doc.exe", p_mime_type: "application/octet-stream", p_extension: "exe", p_size_bytes: 1000,
-});
-check("CHECK: rejects disallowed extension (23514)", createBadExtension.error?.code === "23514", JSON.stringify(createBadExtension.error));
-
-const createOk = await userA.client.rpc("create_job_customs_document", {
-  p_job_id: gumrukJobId, p_storage_path: `${userA.id}/${gumrukJobId}/beyanname.pdf`,
-  p_original_file_name: "beyanname.pdf", p_mime_type: "application/pdf", p_extension: "pdf", p_size_bytes: 45000,
-});
-check("A successfully uploads a valid customs document", !createOk.error, createOk.error?.message);
-const docId = createOk.data?.id;
-
-console.log("\n=== Section 2: job_customs_documents visibility (Karar #1) ===");
-
-const selA = await userA.client.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Owner (A) sees own document via SELECT", selA.data?.length === 1, JSON.stringify(selA));
-
-const selB = await userB.client.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Unrelated user (B) sees 0 documents", (selB.data?.length ?? -1) === 0, JSON.stringify(selB));
-
-// P, gumrukJob uzerine GERCEK bir teklif verir (hatta accepted'a tasinir) --
-// "teklif veren/isi alan hizmet veren" karsi-taraf istisnasinin GERCEKTEN
-// olmadigini kanitlamak icin en gucumu senaryo.
-const offer = await userP.client.rpc("create_offer", {
-  p_job_id: gumrukJobId, p_amount: 15000, p_currency: "TRY", p_description: "Test teklif açıklaması.",
-});
-check("setup: P submits a real (pending) offer on the customs job", !offer.error, offer.error?.message);
-const offerId = offer.data?.id;
-
-const selPPending = await userP.client.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Offer holder P (pending) sees 0 documents", (selPPending.data?.length ?? -1) === 0, JSON.stringify(selPPending));
-
-if (offerId) {
-  const accept = await userA.client.rpc("accept_offer", { p_offer_id: offerId });
-  check("setup: A accepts P's offer (now ENGAGED, strongest case)", !accept.error, accept.error?.message);
-}
-const selPEngaged = await userP.client.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Offer holder P (accepted/ENGAGED) STILL sees 0 documents (Karar #1)", (selPEngaged.data?.length ?? -1) === 0, JSON.stringify(selPEngaged));
-
-const selAdmin = await userAdmin.client.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Admin sees the document regardless of ownership", selAdmin.data?.length === 1, JSON.stringify(selAdmin));
-
-const selAnon = await anon.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Anonymous (anon key, no session) sees 0 documents / is denied", (selAnon.data?.length ?? 0) === 0, JSON.stringify(selAnon));
-
-console.log("\n=== Section 3: delete_job_customs_document RPC ===");
-
-const deleteByNonOwner = await userB.client.rpc("delete_job_customs_document", { p_document_id: docId });
-check("MLK56: delete rejected for non-owner", deleteByNonOwner.error?.code === "MLK56", JSON.stringify(deleteByNonOwner.error));
-
-const deleteMissing = await userA.client.rpc("delete_job_customs_document", { p_document_id: "00000000-0000-0000-0000-000000000000" });
-check("MLK76: delete rejected for nonexistent document", deleteMissing.error?.code === "MLK76", JSON.stringify(deleteMissing.error));
-
-const deleteOk = await userA.client.rpc("delete_job_customs_document", { p_document_id: docId });
-check("Owner successfully soft-deletes own document", !deleteOk.error, deleteOk.error?.message);
-
-const selAfterDelete = await userA.client.from("job_customs_documents").select("id").eq("job_id", gumrukJobId);
-check("Deleted document no longer visible even to owner", (selAfterDelete.data?.length ?? -1) === 0, JSON.stringify(selAfterDelete));
-
-const selAdminAfterDelete = await userAdmin.client.from("job_customs_documents").select("id, deleted_at").eq("id", docId);
-check("Admin CAN still see the soft-deleted document (history review)", selAdminAfterDelete.data?.length === 1 && selAdminAfterDelete.data[0].deleted_at !== null, JSON.stringify(selAdminAfterDelete));
-
-console.log("\n=== Section 4: badge_types catalog ===");
-
+const anon = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 const badgeTypesAnon = await anon.from("badge_types").select("id, is_purchasable").order("sort_order");
 check("Anon can read badge_types catalog", badgeTypesAnon.data?.length === 2, JSON.stringify(badgeTypesAnon));
 check("mavi-tik and altin-tik both seeded, neither purchasable",
@@ -221,16 +170,16 @@ check("mavi-tik and altin-tik both seeded, neither purchasable",
   badgeTypesAnon.data?.map((r) => r.id).sort().join(",") === "altin-tik,mavi-tik",
   JSON.stringify(badgeTypesAnon.data));
 
-console.log("\n=== Section 5: grant_provider_badge / revoke_provider_badge RPCs ===");
+console.log("\n=== Section 4: grant_provider_badge / revoke_provider_badge RPCs ===");
 
-const grantByNonAdmin = await userA.client.rpc("grant_provider_badge", { p_provider_id: userP.id, p_badge_type_id: "mavi-tik" });
+const grantByNonAdmin = await userB.client.rpc("grant_provider_badge", { p_provider_id: userP.id, p_badge_type_id: "mavi-tik" });
 check("MLK50: grant rejected for non-admin caller", grantByNonAdmin.error?.code === "MLK50", JSON.stringify(grantByNonAdmin.error));
 
 const grantUnknownType = await userAdmin.client.rpc("grant_provider_badge", { p_provider_id: userP.id, p_badge_type_id: "does-not-exist" });
 check("MLK94: grant rejected for unknown badge_type_id", grantUnknownType.error?.code === "MLK94", JSON.stringify(grantUnknownType.error));
 
-const grantNonProvider = await userAdmin.client.rpc("grant_provider_badge", { p_provider_id: userA.id, p_badge_type_id: "mavi-tik" });
-check("ML106: grant rejected for a non-hizmet-veren target (A)", grantNonProvider.error?.code === "ML106", JSON.stringify(grantNonProvider.error));
+const grantNonProvider = await userAdmin.client.rpc("grant_provider_badge", { p_provider_id: userB.id, p_badge_type_id: "mavi-tik" });
+check("ML106: grant rejected for a non-hizmet-veren target (B)", grantNonProvider.error?.code === "ML106", JSON.stringify(grantNonProvider.error));
 
 const grantOk = await userAdmin.client.rpc("grant_provider_badge", {
   p_provider_id: userP.id, p_badge_type_id: "mavi-tik", p_reason: "Zorunlu firma belgeleri onaylandı (test).",
@@ -252,7 +201,7 @@ check("Admin can see P's badge", selectByAdmin.data?.length === 1, JSON.stringif
 const revokeNoReason = await userAdmin.client.rpc("revoke_provider_badge", { p_provider_id: userP.id, p_badge_type_id: "mavi-tik" });
 check("ML107: revoke without reason rejected", revokeNoReason.error?.code === "ML107", JSON.stringify(revokeNoReason.error));
 
-const revokeByNonAdmin = await userA.client.rpc("revoke_provider_badge", { p_provider_id: userP.id, p_badge_type_id: "mavi-tik", p_reason: "x" });
+const revokeByNonAdmin = await userB.client.rpc("revoke_provider_badge", { p_provider_id: userP.id, p_badge_type_id: "mavi-tik", p_reason: "x" });
 check("MLK50: revoke rejected for non-admin caller", revokeByNonAdmin.error?.code === "MLK50", JSON.stringify(revokeByNonAdmin.error));
 
 const revokeOk = await userAdmin.client.rpc("revoke_provider_badge", {
@@ -272,40 +221,6 @@ check("Re-grant after revoke succeeds (history preserved, new row)", !regrant.er
 
 const historyCount = psql(`select count(*) from public.provider_badges where provider_id = '${userP.id}' and badge_type_id = 'mavi-tik';`);
 check("Full grant/revoke/re-grant history retained (2 rows, none deleted)", historyCount === "2", historyCount);
-
-console.log("\n=== Section 6: job-customs-documents Storage bucket (0026) ===");
-
-const bucketRow = psql(`select public, file_size_limit from storage.buckets where id = 'job-customs-documents';`);
-check("Bucket exists and is private (public=false)", bucketRow.startsWith("f|"), bucketRow);
-
-const storagePath = `${userA.id}/${gumrukJobId}/storage-test.pdf`;
-const fileBytes = Buffer.from("%PDF-1.4 test content for MALSEVK 0026 verification");
-
-const uploadOwn = await userA.client.storage.from("job-customs-documents").upload(storagePath, fileBytes, { contentType: "application/pdf" });
-check("A uploads to own folder", !uploadOwn.error, uploadOwn.error?.message);
-
-const uploadOtherFolder = await userB.client.storage.from("job-customs-documents")
-  .upload(`${userA.id}/${gumrukJobId}/intruder.pdf`, fileBytes, { contentType: "application/pdf" });
-check("B is denied uploading into A's folder", !!uploadOtherFolder.error, JSON.stringify(uploadOtherFolder));
-
-const downloadOwn = await userA.client.storage.from("job-customs-documents").download(storagePath);
-check("A can download own uploaded object", !downloadOwn.error, downloadOwn.error?.message);
-
-const downloadByB = await userB.client.storage.from("job-customs-documents").download(storagePath);
-check("B is denied downloading A's object", !!downloadByB.error, JSON.stringify(downloadByB));
-
-const downloadByAdmin = await userAdmin.client.storage.from("job-customs-documents").download(storagePath);
-check("Admin can download A's object", !downloadByAdmin.error, downloadByAdmin.error?.message);
-
-const downloadAnon = await anon.storage.from("job-customs-documents").download(storagePath);
-check("Anonymous is denied downloading (private bucket)", !!downloadAnon.error, JSON.stringify(downloadAnon));
-
-const deleteByB = await userB.client.storage.from("job-customs-documents").remove([storagePath]);
-const stillThereAfterBDelete = await userA.client.storage.from("job-customs-documents").download(storagePath);
-check("B's delete attempt does not remove A's object", !stillThereAfterBDelete.error, JSON.stringify({ deleteByB, stillThereAfterBDelete: stillThereAfterBDelete.error }));
-
-const deleteOwn = await userA.client.storage.from("job-customs-documents").remove([storagePath]);
-check("A deletes own object", !deleteOwn.error && deleteOwn.data?.length === 1, JSON.stringify(deleteOwn));
 
 console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
 if (fail > 0) {
