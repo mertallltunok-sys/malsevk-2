@@ -28,6 +28,7 @@ import {
   requiresProductInfo,
 } from "../_lib/product-catalog";
 import { resolveLegacyJobCategoryToId, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
 import type { Job, Offer, Session } from "../_lib/types";
 import {
   getDistrictId,
@@ -447,6 +448,17 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
     if (!result.ok) {
       setSubmitError(result.error);
       return;
+    }
+
+    // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — ana
+    // localStorage yazımı BAŞARILI olduktan SONRA, en-iyi-çaba/bloklamayan
+    // aday bildirimi, job-request-form.tsx'in oluşturma yolundaki AYNI
+    // desen. Yalnızca serbest metin (custom) tesis adları bildirilir.
+    if (isCustomLocation && otherFacilityText.trim()) {
+      submitFacilityCandidateBestEffort(otherFacilityText, provinceName, district, "job_pickup_location");
+    }
+    if (showDeliveryFields && isDeliveryManual && deliveryOtherFacilityText.trim()) {
+      submitFacilityCandidateBestEffort(deliveryOtherFacilityText, deliveryProvinceName, deliveryDistrict, "job_delivery_location");
     }
 
     router.push("/panel/hizmet-taleplerim?guncellendi=1");

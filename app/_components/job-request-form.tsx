@@ -43,6 +43,7 @@ import {
   requiresProductInfo,
 } from "../_lib/product-catalog";
 import { getServiceCategoryLabel, isStorageOnlyLocationCategory, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
 import {
   getDistrictId,
   getDistrictsByProvinceCode,
@@ -959,6 +960,7 @@ export function JobRequestForm() {
             })
           : null;
         const isCustomLocation = location.facilityId === FACILITY_FREE_TEXT_VALUE;
+        const deliveryPayload = resolveDeliveryLocationPayload(service);
         const result = await createJob(session, {
           category: service.category,
           title: service.title,
@@ -973,7 +975,7 @@ export function JobRequestForm() {
           workEndDate: service.workEndDate,
           ...resolveProductInfoPayload(service),
           ...resolveCustomsBrokerageServicePayload(service),
-          ...resolveDeliveryLocationPayload(service),
+          ...deliveryPayload,
           operationDetails,
           photos,
         });
@@ -983,8 +985,37 @@ export function JobRequestForm() {
           return;
         }
 
+        // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — ana
+        // localStorage yazımı BAŞARILI olduktan SONRA, en-iyi-çaba/bloklamayan
+        // aday bildirimi. Yalnızca gerçekten serbest metin girilmiş (custom)
+        // tesis adları bildirilir; katalogdan seçilmiş bir tesisin zaten
+        // doğrulanmış bir adı vardır, aday değildir.
+        const pickupIsCustom = pickupPayload ? pickupPayload.locationMode === "custom" : isCustomLocation;
+        if (pickupIsCustom && location.otherFacilityText.trim()) {
+          submitFacilityCandidateBestEffort(
+            location.otherFacilityText,
+            pickupPayload ? pickupPayload.province : provinceName,
+            location.district,
+            "job_pickup_location",
+          );
+        }
+        if (deliveryPayload.deliveryLocationType === "open_address" && deliveryPayload.deliveryFacilityName.trim()) {
+          submitFacilityCandidateBestEffort(
+            deliveryPayload.deliveryFacilityName,
+            deliveryPayload.deliveryProvince,
+            deliveryPayload.deliveryDistrict,
+            "job_delivery_location",
+          );
+        }
+
         router.push(`/ilanlar/${result.job.id}`);
       } else {
+        // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — RPC
+        // gövdesini üreten AYNI map geçişinde, her hizmetin custom pickup/
+        // delivery tesis adını da (varsa) ayrı bir listede toplar, RPC
+        // başarılı olana kadar HİÇBİRİNİ göndermez (aşağıda, result.ok'tan
+        // sonra).
+        const pendingCandidates: { rawText: string; province: string; district: string; source: string }[] = [];
         const result = await createJobsForOperation(session, {
           province: provinceName,
           operationDetails,
@@ -1003,6 +1034,26 @@ export function JobRequestForm() {
                 })
               : null;
             const isCustomLocation = location.facilityId === FACILITY_FREE_TEXT_VALUE;
+            const deliveryPayload = resolveDeliveryLocationPayload(service);
+
+            const pickupIsCustom = pickupPayload ? pickupPayload.locationMode === "custom" : isCustomLocation;
+            if (pickupIsCustom && location.otherFacilityText.trim()) {
+              pendingCandidates.push({
+                rawText: location.otherFacilityText,
+                province: pickupPayload ? pickupPayload.province : provinceName,
+                district: location.district,
+                source: "job_pickup_location",
+              });
+            }
+            if (deliveryPayload.deliveryLocationType === "open_address" && deliveryPayload.deliveryFacilityName.trim()) {
+              pendingCandidates.push({
+                rawText: deliveryPayload.deliveryFacilityName,
+                province: deliveryPayload.deliveryProvince,
+                district: deliveryPayload.deliveryDistrict,
+                source: "job_delivery_location",
+              });
+            }
+
             return {
               category: service.category,
               title: service.title,
@@ -1022,7 +1073,7 @@ export function JobRequestForm() {
               locationMode: pickupPayload ? pickupPayload.locationMode : isCustomLocation ? "custom" : "catalog",
               ...resolveProductInfoPayload(service),
               ...resolveCustomsBrokerageServicePayload(service),
-              ...resolveDeliveryLocationPayload(service),
+              ...deliveryPayload,
             };
           }),
         });
@@ -1030,6 +1081,10 @@ export function JobRequestForm() {
         if (!result.ok) {
           if (isMountedRef.current) setSubmitError(result.error);
           return;
+        }
+
+        for (const candidate of pendingCandidates) {
+          submitFacilityCandidateBestEffort(candidate.rawText, candidate.province, candidate.district, candidate.source);
         }
 
         // Yeni bir operasyon detay sayfası/route YOK — kullanıcı rastgele
