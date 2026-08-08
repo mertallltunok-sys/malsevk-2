@@ -2,30 +2,28 @@
 
 import { CheckCircle2, Circle, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { getCompanyTypeFieldLabel, getCompanyTypeOptions, isCompanyType, type CompanyType } from "../_lib/company-type";
-import { recordConsentForAllLegalDocuments } from "../_lib/legal-consent";
+import { finishSupabaseRegistration } from "../_lib/complete-registration";
 import { getLegalDocumentMeta, type LegalDocumentId } from "../_lib/legal-documents";
-import { STORAGE_WRITE_ERROR_MESSAGE } from "../_lib/local-storage";
 import { validateLoginFields } from "../_lib/login-form-validation";
 import { evaluatePasswordRules } from "../_lib/password-rules";
 import { isCustomsOnlyRegistration } from "../_lib/customs-license";
+import { savePendingRegistrationDraft } from "../_lib/pending-registration-draft";
 import { CUSTOMS_LICENSE_DECLARATION_TEXT, PROVIDER_DOCUMENT_DECLARATION_TEXT } from "../_lib/provider-document-consents";
-import { registerProviderAccount } from "../_lib/provider-registration";
 import { validateRegisterFormFields, type RegisterFormErrors } from "../_lib/register-form-validation";
-import { setSession } from "../_lib/session";
+import { type RegistrationMetadataFields } from "../_lib/registration-metadata";
 import { GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import { createSupabaseBrowserClient } from "../_lib/supabase/browser-client";
+import { mapSupabaseAuthError } from "../_lib/supabase-auth-errors";
 import type { UserRole } from "../_lib/types";
 import { getDistrictsByProvinceCode, getProvinces } from "../_lib/turkey-locations";
-import { registerUser, seedDevAccountsIfNeeded, verifyLogin } from "../_lib/users";
 import { LegalDocumentModal } from "./legal-document-modal";
 import { MultiSelectChips } from "./multi-select-chips";
 import { ProviderDocumentUpload, type ReadyProviderDocument } from "./provider-document-upload";
 import { SearchableSelect } from "./searchable-select";
 
 type Mode = "giris" | "kayit";
-
-const isDev = process.env.NODE_ENV !== "production";
 
 /**
  * Kayıt formundaki TEK birleşik onay cümlesi içinde (bkz. bu dosyanın
@@ -90,9 +88,15 @@ function PasswordRulesChecklist({
 export function LoginForm({
   redirectTo,
   initialMode = "giris",
+  confirmErrorMessage,
+  passwordUpdated = false,
 }: {
   redirectTo: string;
   initialMode?: Mode;
+  /** app/auth/confirm/route.ts'in bir doğrulama bağlantısı reddedince yönlendirdiği anlaşılır hata mesajı — bkz. giris-yap/page.tsx. */
+  confirmErrorMessage?: string;
+  /** app/sifre-guncelle sonrası — "başarı sonrası giriş ekranına yönlendirme" gereksinimi. */
+  passwordUpdated?: boolean;
 }) {
   const router = useRouter();
   const firstNameId = useId();
@@ -137,7 +141,13 @@ export function LoginForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [justRegistered, setJustRegistered] = useState(false);
+  // SUPABASE AUTH GEÇİŞİ: e-posta doğrulaması gerektiğinden, signUp()
+  // başarılı olduğunda (ve Supabase anında bir oturum döndürmediğinde —
+  // bkz. handleSubmit) kayıt formu bu ekranla DEĞİŞTİRİLİR; formu tekrar
+  // göstermenin bir anlamı yok, çünkü Supabase Auth hesabı zaten oluştu.
+  const [awaitingEmailConfirmation, setAwaitingEmailConfirmation] = useState(false);
   const [openLegalDocumentId, setOpenLegalDocumentId] = useState<LegalDocumentId | null>(null);
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   // React state (submitting) yalnızca UI'yi (buton disabled/metin) sürer —
   // aynı JS event-loop turunda art arda iki tıklama/Enter, ikisi de state
   // commit edilmeden ÖNCE handleSubmit'in kayıt (kayit) yoluna ulaşabilir,
@@ -147,10 +157,6 @@ export function LoginForm({
   // state güncellemesini beklemeden bu kilidi görüp döner. Yalnızca kayıt
   // yoluna özeldir; giriş (giris) dalı bundan hiç etkilenmez.
   const registerSubmitLockRef = useRef(false);
-
-  useEffect(() => {
-    void seedDevAccountsIfNeeded();
-  }, []);
 
   const passwordRules = evaluatePasswordRules(password, confirmPassword);
   const allPasswordRulesMet = mode === "kayit" && passwordRules.every((rule) => rule.met);
@@ -261,27 +267,54 @@ export function LoginForm({
       if (Object.keys(fieldErrors).length > 0) return;
 
       setSubmitting(true);
-      await seedDevAccountsIfNeeded();
-      const result = await verifyLogin(email, password);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error || !data.user) {
+        setSubmitting(false);
+        setFormError(error ? mapSupabaseAuthError(error) : "Giriş yapılamadı. Lütfen tekrar deneyin.");
+        return;
+      }
+
+      // account_status kontrolü (ÖNEMLİ SINIR: yalnızca istemci taraflı bir
+      // kapı — bkz. session.ts'in kendi dokümantasyonu, Faz 1'in hiçbir RLS/
+      // RPC'si bu bayrağı henüz uygulamıyor). Askıya alınmış/kapalı bir
+      // hesap burada AÇIKÇA reddedilir ve oturum hemen kapatılır — sessizce
+      // "oturum yokmuş" gibi davranan belirsiz bir duruma bırakılmaz.
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, account_status")
+        .eq("id", data.user.id)
+        .maybeSingle<{ role: UserRole | null; account_status: string | null }>();
       setSubmitting(false);
-      if (!result.ok) {
-        setFormError(result.error);
+
+      if (!profile || profile.account_status !== "active") {
+        await supabase.auth.signOut();
+        setFormError(
+          profile && (profile.account_status === "suspended" || profile.account_status === "banned")
+            ? "Hesabınız askıya alınmış. Lütfen destek ekibimizle iletişime geçin."
+            : "Hesabınıza erişilemiyor. Lütfen tekrar deneyin.",
+        );
         return;
       }
-      const sessionWritten = setSession({ id: result.user.id, name: result.user.name, role: result.user.role });
-      if (!sessionWritten) {
-        setFormError(STORAGE_WRITE_ERROR_MESSAGE);
+
+      if (!profile.role) {
+        // Kayıt tamamlanmamış (e-posta doğrulandı ama complete_registration
+        // hiç çağrılmamış — ör. kullanıcı doğrulama linkine tıkladıktan
+        // sonra kayıt tamamlama ekranını kapatıp daha sonra doğrudan giriş
+        // yapmayı denedi). Kaybolmuş gibi görünmez — tamamlama ekranına
+        // yönlendirilir.
+        router.push("/kayit-tamamla");
         return;
       }
+
       router.push(redirectTo);
       return;
     }
 
     // Senkron kilit: state (submitting) commit edilmeden önce gelebilecek
     // ikinci bir kayıt denemesini de hemen durdurur (bkz. registerSubmitLockRef
-    // tanımı). `finally` sayesinde validasyon hatası, registerUser'ın
-    // {ok:false} sonucu ya da beklenmeyen bir exception dahil HER çıkış
-    // yolunda kilit mutlaka açılır — takılı kalmaz.
+    // tanımı). `finally` sayesinde validasyon hatası, signUp/
+    // finishSupabaseRegistration'ın `{ok:false}` sonucu ya da beklenmeyen bir
+    // exception dahil HER çıkış yolunda kilit mutlaka açılır — takılı kalmaz.
     if (registerSubmitLockRef.current) return;
     registerSubmitLockRef.current = true;
     try {
@@ -308,85 +341,171 @@ export function LoginForm({
       setErrors(fieldErrors);
       if (Object.keys(fieldErrors).length > 0) return;
 
-      setSubmitting(true);
-      const baseInput = {
-        name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-        email,
-        phone,
-        password,
-        role: role as UserRole,
-        companyName,
-        companyType: isCompanyType(companyType) ? companyType : undefined,
-        province: provinceName,
-        district,
-      };
-      // Hizmet Alan akışı registerUser'ı doğrudan çağırmaya devam eder
-      // (mevcut kayıt mekanizması hiç değişmedi); Hizmet Veren'in hizmet
-      // seçimi/belge/beyan yazımlarının hepsi ya da hiçbiri atomikliği
-      // yalnızca provider-registration.ts üzerinden sağlanabildiği için o
-      // akış ayrı bir fonksiyon çağırır (bkz. o dosyanın dokümantasyonu).
-      const result =
-        role === "hizmet-veren"
-          ? await registerProviderAccount({
-              ...baseInput,
-              serviceCategoryIds: providerServiceCategoryIds,
-              documents: providerDocuments.map((doc) => ({
-                indexedDbStorageKey: doc.indexedDbStorageKey,
-                originalFileName: doc.originalFileName,
-                mimeType: doc.mimeType,
-                extension: doc.extension,
-                size: doc.size,
-              })),
-              documentDeclarationAccepted,
-              customsLicenseDocument: customsLicenseDocument
-                ? {
-                    indexedDbStorageKey: customsLicenseDocument.indexedDbStorageKey,
-                    originalFileName: customsLicenseDocument.originalFileName,
-                    mimeType: customsLicenseDocument.mimeType,
-                    extension: customsLicenseDocument.extension,
-                    size: customsLicenseDocument.size,
-                  }
-                : undefined,
-              customsLicenseDeclarationAccepted,
-            })
-          : await registerUser(baseInput);
-      if (!result.ok) {
-        setFormError(result.error);
+      if (!isCompanyType(companyType)) {
+        // Defansif — validateRegisterFormFields bunu zaten yukarıda
+        // engellemiş olmalı (errors.companyType), buraya normal koşullarda
+        // asla ulaşılmaz.
+        setFormError("Firma tipi zorunludur.");
         return;
       }
 
-      // TEK birleşik onay kutusu, üç metnin de ("Gizlilik Politikası, Kullanım
-      // Koşulları ve KVKK Aydınlatma Metni'ni ... kabul ediyorum") kabul
-      // edildiği anlamına gelir — bu yüzden kayıt başarılı olur olmaz her üç
-      // belge için de AYRI birer kabul kaydı üretilir (bkz. legal-consent.ts
-      // dokümantasyonu), yeni oluşturulan kullanıcının id'siyle ilişkilendirilir.
-      recordConsentForAllLegalDocuments(result.user.id);
+      setSubmitting(true);
 
-      // Kayıt başarılı: kullanıcı otomatik oturum açmaz — giriş sekmesine
-      // yönlendirilir ve orada başarı mesajı gösterilir. `email` bilerek
-      // temizlenmez (giriş formunda önceden dolu gelsin diye); şifre ve diğer
-      // kayıt alanları temizlenir.
-      setFirstName("");
-      setLastName("");
-      setPhone("");
-      setPassword("");
-      setConfirmPassword("");
-      setRole("");
-      setCompanyName("");
-      setCompanyType("");
-      setProvinceCode("");
-      setDistrict("");
-      setLegalConsentAccepted(false);
-      setProviderServiceCategoryIds([]);
-      setProviderDocuments([]);
-      setDocumentDeclarationAccepted(false);
-      setErrors({});
-      setMode("giris");
-      setJustRegistered(true);
+      // SUPABASE AUTH GEÇİŞİ: gerçek hesap artık burada, tek adımda
+      // OLUŞMAZ — önce Supabase Auth'ta bir kullanıcı açılır (`signUp`),
+      // ardından (e-posta doğrulaması genelde ZORUNLU olduğu için) formun
+      // GERİ KALANI (rol/firma/hizmet/belge bilgileri) `complete_registration`
+      // RPC'siyle e-posta doğrulandıktan SONRA tamamlanır — bkz.
+      // complete-registration.ts'in kendi dokümantasyonu.
+      //
+      // `options.data` (registration-metadata.ts) — hassas OLMAYAN form
+      // alanlarının (belgeler/şifre/e-posta HARİÇ) Supabase'in kendi
+      // `user_metadata`sına da yazılması: doğrulama linki farklı bir
+      // sekmede/cihazda açıldığında `pending-registration-draft.ts`in
+      // sessionStorage taslağı bulunamaz (bkz. o dosyanın "bilinçli
+      // sınırlama" notu) — bu, /kayit-tamamla'nın o durumda hâlâ formu
+      // ÖN-DOLDURABİLMESİ için sunucu-taraflı bir yedek kaynaktır. `role` DA
+      // dahildir ama SADECE ön-doldurma/görüntüleme amaçlıdır — bkz.
+      // registration-metadata.ts'in kendi güvenlik notu: tek doğruluk kaynağı
+      // hâlâ HER ZAMAN `complete_registration`in kendi `p_role` parametresi
+      // (kullanıcının /kayit-tamamla'da gördüğü/onayladığı form state'i),
+      // hiçbir kod yolu `user_metadata`daki `role`'ü doğrudan RPC'ye taşımaz.
+      const registrationMetadata: RegistrationMetadataFields = {
+        role: role as UserRole,
+        firstName,
+        lastName,
+        phone,
+        companyName,
+        companyType,
+        province: provinceName,
+        district,
+        providerServiceCategoryIds,
+        documentDeclarationAccepted,
+        customsLicenseDeclarationAccepted,
+        legalConsentAccepted,
+      };
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/confirm?next=${encodeURIComponent("/kayit-tamamla")}`,
+          data: registrationMetadata,
+        },
+      });
+
+      if (signUpError) {
+        setSubmitting(false);
+        setFormError(mapSupabaseAuthError(signUpError));
+        return;
+      }
+      if (!signUpData.user) {
+        setSubmitting(false);
+        setFormError("Hesap oluşturulamadı. Lütfen tekrar deneyin.");
+        return;
+      }
+      // Supabase, e-posta doğrulaması etkinken bile aynı adresle DAHA ÖNCE
+      // doğrulanmış bir hesap için "sahte" bir başarı döner (e-posta
+      // numaralandırma saldırılarını önlemek için, `identities` boş dizi
+      // olur, yeni bir doğrulama e-postası GÖNDERİLMEZ) — bu, ne olumlu ne
+      // olumsuz bir mesajla (görev gereksinimi: var olan bir hesabı açığa
+      // çıkarma) ele alınır.
+      if (signUpData.user.identities && signUpData.user.identities.length === 0) {
+        setSubmitting(false);
+        setFormError(
+          "Bu e-posta adresiyle bir hesap zaten mevcut olabilir. Giriş yapmayı ya da şifrenizi sıfırlamayı deneyin.",
+        );
+        return;
+      }
+
+      const completionInput = {
+        role: role as UserRole,
+        firstName,
+        lastName,
+        phone,
+        companyName,
+        companyType,
+        province: provinceName,
+        district,
+        providerServiceCategoryIds,
+        providerDocuments: providerDocuments.map((doc) => ({
+          indexedDbStorageKey: doc.indexedDbStorageKey,
+          originalFileName: doc.originalFileName,
+          mimeType: doc.mimeType,
+          extension: doc.extension,
+          size: doc.size,
+        })),
+        documentDeclarationAccepted,
+        customsLicenseDocument: customsLicenseDocument
+          ? {
+              indexedDbStorageKey: customsLicenseDocument.indexedDbStorageKey,
+              originalFileName: customsLicenseDocument.originalFileName,
+              mimeType: customsLicenseDocument.mimeType,
+              extension: customsLicenseDocument.extension,
+              size: customsLicenseDocument.size,
+            }
+          : undefined,
+        customsLicenseDeclarationAccepted,
+        legalConsentAccepted,
+      };
+
+      if (signUpData.session) {
+        // Bu development projesinde e-posta doğrulaması KAPALIYSA, signUp
+        // anında zaten aktif bir Supabase oturumu döner — bu durumda
+        // e-posta bekleme ekranı GÖSTERİLMEDEN kayıt doğrudan tamamlanır ve
+        // kullanıcı doğrudan içeri alınır (zaten kimliği doğrulanmış bir
+        // kullanıcıyı tekrar giriş yapmaya zorlamanın bir anlamı yok).
+        const result = await finishSupabaseRegistration(completionInput);
+        setSubmitting(false);
+        if (!result.ok) {
+          setFormError(result.error);
+          return;
+        }
+        router.push(redirectTo);
+        return;
+      }
+
+      // Normal akış: e-posta doğrulaması bekleniyor. Formun geri kalan
+      // (hassas olmayan) bilgileri aynı sekme için sessionStorage'a
+      // yazılır (bkz. pending-registration-draft.ts'in kendi
+      // dokümantasyonu — bu yalnızca bir kolaylıktır, tek doğruluk kaynağı
+      // DEĞİLDİR) ve kullanıcıya "e-postanızı kontrol edin" ekranı gösterilir.
+      savePendingRegistrationDraft(completionInput);
+      setSubmitting(false);
+      setAwaitingEmailConfirmation(true);
     } finally {
       registerSubmitLockRef.current = false;
       setSubmitting(false);
     }
+  }
+
+  // SUPABASE AUTH GEÇİŞİ: signUp() e-posta doğrulaması bekleyen bir hesap
+  // üretti — form/sekme yerine tek amaçlı bir "e-postanızı kontrol edin"
+  // ekranı gösterilir (tekrar "Kayıt Ol"a basmanın bir anlamı yok, Supabase
+  // Auth hesabı zaten oluştu). Kullanıcı dilerse "Giriş Yap" sekmesine geri
+  // dönüp BAŞKA bir hesapla giriş yapabilsin diye erken çıkış butonu vardır.
+  if (awaitingEmailConfirmation) {
+    return (
+      <div className="rounded-card border border-border bg-background p-6 text-center sm:p-8">
+        <p className="text-base font-semibold text-foreground">E-postanızı Kontrol Edin</p>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          <strong className="text-foreground">{email}</strong> adresine bir doğrulama bağlantısı gönderdik.
+          Hesabınızı kullanmaya başlamak için bağlantıya tıklayın.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          E-postayı bulamıyorsanız gereksiz/spam klasörünü kontrol edin.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setAwaitingEmailConfirmation(false);
+            switchMode("giris");
+          }}
+          className="mt-6 text-sm font-medium text-accent underline decoration-dotted underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+        >
+          Giriş ekranına dön
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -431,6 +550,22 @@ export function LoginForm({
           className="mt-6 rounded-md border border-success/30 bg-success-soft px-4 py-3 text-sm font-medium text-success"
         >
           Kaydınız başarıyla oluşturuldu. Hesabınıza giriş yapabilirsiniz.
+        </div>
+      )}
+
+      {mode === "giris" && passwordUpdated && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mt-6 rounded-md border border-success/30 bg-success-soft px-4 py-3 text-sm font-medium text-success"
+        >
+          Şifreniz güncellendi. Yeni şifrenizle giriş yapabilirsiniz.
+        </div>
+      )}
+
+      {mode === "giris" && confirmErrorMessage && (
+        <div role="alert" className="mt-6 rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
+          {confirmErrorMessage}
         </div>
       )}
 
@@ -617,6 +752,14 @@ export function LoginForm({
           )}
           {mode === "kayit" && (
             <PasswordRulesChecklist password={password} confirmPassword={confirmPassword} />
+          )}
+          {mode === "giris" && (
+            <a
+              href="/sifre-sifirla"
+              className="mt-2 inline-block text-sm text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+            >
+              Şifremi unuttum
+            </a>
           )}
         </div>
 
@@ -989,20 +1132,6 @@ export function LoginForm({
             </button>
           );
         })()}
-
-        {isDev && (
-          <div className="rounded-md border border-dashed border-border bg-background p-4 text-xs leading-relaxed text-muted-foreground">
-            <p className="font-medium text-foreground">
-              Geliştirme ortamı test hesapları
-            </p>
-            <p className="mt-1">Hizmet Alan: zeynep@test.com / Zeynep1!</p>
-            <p>Hizmet Veren: mert@test.com / Mert123!</p>
-            <p>Hizmet Veren: mehmet.demir.demo@malsevk.com / Demo123!</p>
-            <p>Nakliyeci: nakliyeci@test.com / Nakliye123!</p>
-            <p>Gümrük Müşaviri: gumrukdemo@malsevk.demo / Demo1234!</p>
-            <p>Admin (Belge Kontrolü): admin@test.com / Admin123!</p>
-          </div>
-        )}
       </form>
 
       {openLegalDocumentId && (
