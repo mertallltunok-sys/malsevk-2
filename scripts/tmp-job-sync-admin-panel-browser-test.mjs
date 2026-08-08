@@ -182,6 +182,21 @@ async function main() {
     check("4b. title/province/district doğru senkronlandı", jobRow?.title === jobTitle && jobRow?.province === "Kocaeli" && jobRow?.district === "Gebze", JSON.stringify(jobRow));
     check("4c. requester_id gerçek test kullanıcısı", jobRow?.requester_id === requester.id, jobRow?.requester_id);
 
+    console.log("\n=== 4d-4g) Fotoğraf Storage senkronu (Faz 3) — placeholder KALMADI, gerçek dosya var ===");
+    const photoRows = JSON.parse(
+      psql(`select json_agg(row_to_json(p)) from public.job_photos p where job_id = '${createdJobId}' and deleted_at is null;`) || "null",
+    ) ?? [];
+    check("4d. job_photos satırı yazıldı", photoRows.length === 1, JSON.stringify(photoRows));
+    const photoStoragePath = photoRows[0]?.storage_path;
+    check("4e. storage_path GERÇEK bir yol (Faz 2'nin 'local-pending:' placeholder'ı değil)", typeof photoStoragePath === "string" && !photoStoragePath.startsWith("local-pending:"), photoStoragePath);
+    check(
+      "4f. storage_path, dokümante edilen konvansiyona uyuyor ({requester_id}/{job_id}/{photo_id}.{ext})",
+      typeof photoStoragePath === "string" && photoStoragePath.startsWith(`${requester.id}/${createdJobId}/`),
+      photoStoragePath,
+    );
+    const downloadResult = await admin.storage.from("job-photos").download(photoStoragePath);
+    check("4g. Dosya GERÇEKTEN Storage'da mevcut ve indirilebiliyor (boş/placeholder değil)", !downloadResult.error && downloadResult.data && downloadResult.data.size > 0, downloadResult.error?.message ?? `size=${downloadResult.data?.size}`);
+
     console.log("\n=== 5) Admin panelinde GERÇEKTEN oluşturulan ilan görünüyor mu (seed değil) ===");
     await loginAs(page, adminUser.email);
     await page.goto(`${BASE_URL}/admin/ilanlar`);
@@ -193,6 +208,14 @@ async function main() {
     const detailText = await page.locator("main").innerText().catch(async () => page.textContent("body"));
     check("5b. Admin detay ekranı doğru ili gösteriyor", detailText.includes("Kocaeli"));
     check("5c. Admin detay ekranı doğru ilçeyi gösteriyor", detailText.includes("Gebze"));
+
+    console.log("\n=== 5d-5e) Admin panelinde fotoğraf GERÇEKTEN çalışıyor mu ===");
+    const photoImg = page.locator("main img").first();
+    await photoImg.waitFor({ state: "visible", timeout: 15000 });
+    const photoSrc = await photoImg.getAttribute("src");
+    check("5d. Admin detay ekranında bir <img> render ediliyor ve src'si Storage yoluna işaret ediyor", typeof photoSrc === "string" && photoSrc.includes(photoStoragePath), photoSrc);
+    const imgLoaded = await photoImg.evaluate((el) => el instanceof HTMLImageElement && el.complete && el.naturalWidth > 0);
+    check("5e. Fotoğraf tarayıcıda GERÇEKTEN yükleniyor (kırık img değil)", imgLoaded === true, `complete/naturalWidth check: ${imgLoaded}`);
 
     console.log("\n=== 6) Admin etiketi UX düzeltmesi: üst sağda 'Admin' yazıyor, 'Hizmet Alan' değil ===");
     await page.getByRole("banner").getByText("Admin", { exact: true }).waitFor({ state: "visible", timeout: 15000 });

@@ -1,4 +1,5 @@
 import { createSupabaseBrowserClient } from "./supabase/browser-client";
+import { getJobPhotoPublicUrl } from "./supabase-job-photos";
 import type { JobClosureReason } from "./types";
 
 /**
@@ -18,6 +19,12 @@ import type { JobClosureReason } from "./types";
  * senkron henüz yazılmadan önce oluşturulmuş bir ilan için hepsi `null`
  * kalabilir — bu bir hata değildir, aynı localStorage tarafının
  * `hasProductInfo` ilkesiyle tutarlıdır).
+ *
+ * Fotoğraflar (Supabase Geçişi Faz 3): `job_photos` (0004) `job-photos`
+ * public bucket'ına (0019) işaret eder — `getJobPhotoPublicUrl`
+ * (supabase-job-photos.ts) ile doğrudan genel URL'e çevrilir, imzalı URL
+ * gerekmez. `deleted_at is null` filtresi ve `sort_order` sıralaması
+ * job-store.ts'in kendi (localStorage) JobPhoto listesiyle AYNI ilke.
  */
 
 export type AdminJobStatus = "yayinda" | "teklif_bekliyor" | "devam_ediyor" | "tamamlandi" | "suresi_doldu" | "kapatildi";
@@ -178,7 +185,10 @@ export type AdminJobDetail = {
   operationId: string | null;
   siblings: AdminJobSibling[];
   offers: AdminJobOfferRow[];
+  photos: AdminJobPhoto[];
 };
+
+export type AdminJobPhoto = { id: string; url: string; originalFileName: string };
 
 export async function getJobDetailForAdmin(jobId: string): Promise<AdminJobDetail | null> {
   const supabase = createSupabaseBrowserClient();
@@ -192,13 +202,19 @@ export async function getJobDetailForAdmin(jobId: string): Promise<AdminJobDetai
     .maybeSingle();
   if (jobError || !jobRow || jobRow.deleted_at !== null) return null;
 
-  const [requesterResult, categoryResult, offersResult, siblingsResult] = await Promise.all([
+  const [requesterResult, categoryResult, offersResult, siblingsResult, photosResult] = await Promise.all([
     supabase.from("profiles").select("company_name, full_name, phone").eq("id", jobRow.requester_id).maybeSingle(),
     supabase.from("service_categories").select("name").eq("id", jobRow.category_id).maybeSingle(),
     supabase.from("offers").select("id, provider_id, amount, currency, status, created_at").eq("job_id", jobId).order("created_at", { ascending: false }),
     jobRow.operation_id
       ? supabase.from("jobs").select("id, title, category_id").eq("operation_id", jobRow.operation_id).neq("id", jobId).is("deleted_at", null)
       : Promise.resolve({ data: [] as { id: string; title: string; category_id: string }[] }),
+    supabase
+      .from("job_photos")
+      .select("id, storage_path, original_file_name")
+      .eq("job_id", jobId)
+      .is("deleted_at", null)
+      .order("sort_order", { ascending: true }),
   ]);
 
   const offerRows = (offersResult.data ?? []) as { id: string; provider_id: string; amount: number; currency: string; status: string; created_at: string }[];
@@ -223,6 +239,13 @@ export async function getJobDetailForAdmin(jobId: string): Promise<AdminJobDetai
   }
 
   const requester = requesterResult.data as { company_name: string | null; full_name: string | null; phone: string | null } | null;
+
+  const photoRows = (photosResult.data ?? []) as { id: string; storage_path: string; original_file_name: string }[];
+  const photos: AdminJobPhoto[] = photoRows.map((row) => ({
+    id: row.id,
+    url: getJobPhotoPublicUrl(row.storage_path),
+    originalFileName: row.original_file_name,
+  }));
 
   return {
     id: jobRow.id,
@@ -260,6 +283,7 @@ export async function getJobDetailForAdmin(jobId: string): Promise<AdminJobDetai
       status: row.status,
       createdAt: row.created_at,
     })),
+    photos,
   };
 }
 

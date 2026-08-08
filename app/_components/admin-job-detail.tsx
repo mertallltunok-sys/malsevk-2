@@ -110,6 +110,20 @@ export function AdminJobDetail({ jobId }: { jobId: string }) {
           <StatusBadge label={JOB_STATUS_LABEL[job.status]} tone={JOB_STATUS_TONE[job.status]} />
         </div>
 
+        {job.photos.length > 0 && (
+          <div className="mt-5 flex flex-wrap gap-3">
+            {job.photos.map((photo) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={photo.id}
+                src={photo.url}
+                alt={photo.originalFileName}
+                className="h-24 w-24 rounded-md border border-border object-cover"
+              />
+            ))}
+          </div>
+        )}
+
         <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <InfoRow label="İl / İlçe" value={`${job.province} / ${job.district}`} />
           <InfoRow label="Bölge / Tesis" value={job.workLocationType || "—"} />
