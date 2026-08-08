@@ -44,6 +44,7 @@ import {
 } from "../_lib/product-catalog";
 import { getServiceCategoryLabel, isStorageOnlyLocationCategory, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
+import { isSupabaseJobSyncEnabled, syncJobToSupabase, syncOperationToSupabase } from "../_lib/supabase-job-sync";
 import {
   getDistrictId,
   getDistrictsByProvinceCode,
@@ -1008,7 +1009,22 @@ export function JobRequestForm() {
           );
         }
 
-        router.push(`/ilanlar/${result.job.id}`);
+        // Supabase Geçişi Faz 2 — bayrak kapalıyken bu blok hiç çalışmaz,
+        // bugünkü davranış birebir aynı kalır. Açıkken localStorage yazımı
+        // BAŞARILI olduktan SONRA beklenir (senkron); başarısız olursa yerel
+        // ilan SİLİNMEZ/geri alınmaz, gezinme ENGELLENMEZ — yalnızca hedef
+        // sayfaya "senkronUyarisi=1" eklenir (bkz. job-detail-content.tsx) ve
+        // hata, gizli hiçbir Supabase bilgisi içermeden console'a yazılır.
+        let syncWarning = false;
+        if (isSupabaseJobSyncEnabled()) {
+          const syncResult = await syncJobToSupabase(result.job);
+          if (!syncResult.ok) {
+            syncWarning = true;
+            console.error(`Supabase ilan senkronizasyonu başarısız (job ${result.job.id}):`, syncResult.error);
+          }
+        }
+
+        router.push(`/ilanlar/${result.job.id}${syncWarning ? "?senkronUyarisi=1" : ""}`);
       } else {
         // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — RPC
         // gövdesini üreten AYNI map geçişinde, her hizmetin custom pickup/
@@ -1087,13 +1103,28 @@ export function JobRequestForm() {
           submitFacilityCandidateBestEffort(candidate.rawText, candidate.province, candidate.district, candidate.source);
         }
 
+        // Supabase Geçişi Faz 2 — tek hizmet dalıyla AYNI ilke (bkz. yukarıdaki
+        // yorum): bayrak kapalıyken çalışmaz, açıkken localStorage yazımından
+        // SONRA beklenir, başarısız olursa hiçbir yerel ilan silinmez/geri
+        // alınmaz, yalnızca hedef sayfaya "senkronUyarisi=1" eklenir.
+        let syncWarning = false;
+        if (isSupabaseJobSyncEnabled()) {
+          const syncResult = await syncOperationToSupabase(result.jobs, result.operationId, provinceName, operationDetails);
+          if (!syncResult.ok) {
+            syncWarning = true;
+            console.error(`Supabase operasyon senkronizasyonu başarısız (operation ${result.operationId}):`, syncResult.error);
+          }
+        }
+
         // Yeni bir operasyon detay sayfası/route YOK — kullanıcı rastgele
         // tek bir ilan detayına değil, kendi ilanlarını topluca gördüğü
         // mevcut "Hizmet Taleplerim" sayfasına yönlendirilir. Başarı mesajı,
         // o sayfadaki mevcut "guncellendi=1" (bkz. job-edit-form.tsx) ile
         // AYNI query-param tabanlı banner deseniyle gösterilir (bkz.
         // job-requests-panel.tsx).
-        router.push(`/panel/hizmet-taleplerim?operasyonIlanSayisi=${result.jobs.length}`);
+        router.push(
+          `/panel/hizmet-taleplerim?operasyonIlanSayisi=${result.jobs.length}${syncWarning ? "&senkronUyarisi=1" : ""}`,
+        );
       }
     } finally {
       // createJob()/createJobsForOperation() beklenmedik şekilde reddedilse/

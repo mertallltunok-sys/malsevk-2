@@ -1,0 +1,239 @@
+// MALSEVK — Supabase Geçişi Faz 2 "Gerçek İlan Oluşturma → Supabase" gerçek
+// tarayıcı doğrulaması. Yerel, izole Docker Supabase yığınına karşı çalışır
+// (tmp-supabase-facility-candidates-test.mjs ile AYNI docker-exec/psql
+// deseni, admin rolüne yükseltme için) — hosted dev projede service_role'ün
+// profiles tablosuna REST erişimi olmadığı (bilinen, dokümante edilmiş
+// platform sınırlaması) zaten doğrulanmıştı, bu yüzden gerçek bir admin
+// hesabı yalnızca yerelde üretilebiliyor.
+//
+// Önkoşul: `npm run dev`, .env.local'ı yerel Docker Supabase URL/anahtarına
+// VE NEXT_PUBLIC_ENABLE_SUPABASE_JOB_SYNC=true'ya işaret edecek şekilde
+// http://localhost:3000 üzerinde çalışıyor olmalı (bkz. görev sonu raporu —
+// bu script'i çalıştırırken gerçek geliştirme sunucusu geçici olarak bu
+// yapılandırmaya alındı, testten sonra orijinaline geri döndürüldü).
+//
+// Çalıştırma: node scripts/tmp-job-sync-admin-panel-browser-test.mjs
+import { chromium } from "playwright";
+import { createClient } from "@supabase/supabase-js";
+import { execSync } from "node:child_process";
+
+const BASE_URL = "http://localhost:3000";
+const URL = "http://127.0.0.1:54321";
+const ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+const SERVICE_ROLE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+const DB_CONTAINER = "supabase_db_malsevk-2";
+
+if (!/^https?:\/\/(127\.0\.0\.1|localhost)/.test(URL)) {
+  throw new Error("Refusing to run: target Supabase URL is not local (safety guard).");
+}
+
+function psql(sql) {
+  const escaped = sql.replace(/"/g, '\\"');
+  return execSync(`docker exec ${DB_CONTAINER} psql -U postgres -d postgres -t -A -c "${escaped}"`, { encoding: "utf-8" }).trim();
+}
+
+const admin = createClient(URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+const PASSWORD = "TestSifre2026!";
+const stamp = Date.now();
+const createdUserIds = [];
+
+let pass = 0;
+let fail = 0;
+const failures = [];
+function check(name, cond, extra) {
+  if (cond) {
+    pass += 1;
+    console.log(`PASS  ${name}`);
+  } else {
+    fail += 1;
+    failures.push(name + (extra ? ` -- ${extra}` : ""));
+    console.log(`FAIL  ${name}${extra ? ` -- ${extra}` : ""}`);
+  }
+}
+
+async function makeConfirmedUser(label) {
+  const email = `job-sync-browser-${label}-${stamp}@example.com`;
+  const created = await admin.auth.admin.createUser({ email, password: PASSWORD, email_confirm: true });
+  if (created.error) throw new Error(`${label} createUser: ${created.error.message}`);
+  createdUserIds.push(created.data.user.id);
+  return { email, id: created.data.user.id };
+}
+
+/** Sabit bir timeout yerine GERÇEK yönlendirmeyi bekler — tmp-custom-facility-location-test.mjs'in AYNI, daha sağlam deseni (flat waitForTimeout, giriş yavaş olduğunda /panel'e erken gidip proxy.ts'in koruma kapısına takılmaya yol açabiliyordu). */
+async function loginAs(page, email, redirect = "/panel") {
+  await page.goto(`${BASE_URL}/giris-yap?redirect=${encodeURIComponent(redirect)}`);
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(PASSWORD);
+  await page.getByRole("button", { name: "Giriş Yap" }).click();
+  await page.waitForURL(`${BASE_URL}${redirect}`, { timeout: 15000 });
+}
+
+async function selectFromSearchable(page, label, optionText, { exact = true } = {}) {
+  await page.getByRole("button", { name: label, exact: true }).click();
+  const listbox = page.locator(`ul[aria-label="${label}"]`);
+  await listbox.waitFor({ state: "visible" });
+  await listbox.getByRole("option", { name: optionText, exact }).first().click();
+}
+
+async function uploadOnePhoto(page) {
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "test-fixture.jpg",
+    mimeType: "image/jpeg",
+    // 1x1 minimal JPEG.
+    buffer: Buffer.from(
+      "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+      "base64",
+    ),
+  });
+  await page.locator("text=/1\\s*\\/\\s*10/").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(1000);
+}
+
+async function main() {
+  console.log("=== Kurulum: test kullanıcıları ===");
+  const requester = await makeConfirmedUser("requester");
+  const adminUser = await makeConfirmedUser("admin");
+
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    const page = await context.newPage();
+    const jsErrors = [];
+    page.on("pageerror", (err) => jsErrors.push(String(err)));
+
+    console.log("\n=== 1) Hizmet Alan kaydını tamamlar ===");
+    await loginAs(page, requester.email, "/kayit-tamamla");
+    // Kayıt tamamlama formu: hesap türü + temel firma bilgileri.
+    await page.getByRole("button", { name: /Hizmet Alan/ }).first().click().catch(() => {});
+    const fullNameInput = page.getByLabel(/Ad Soyad/).first();
+    if ((await fullNameInput.count()) > 0) await fullNameInput.fill("Test Requester");
+    const phoneInput = page.getByLabel(/Telefon/).first();
+    if ((await phoneInput.count()) > 0) await phoneInput.fill("+905551112233");
+    const companyInput = page.getByLabel(/Firma/).first();
+    if ((await companyInput.count()) > 0) await companyInput.fill("Test Firma");
+    await selectFromSearchable(page, "İl", "Kocaeli").catch(() => {});
+    await selectFromSearchable(page, "İlçe", "Gebze").catch(() => {});
+    const completeButton = page.getByRole("button", { name: /Kaydı Tamamla|Devam Et|Tamamla/ }).first();
+    if ((await completeButton.count()) > 0) await completeButton.click().catch(() => {});
+    await page.waitForTimeout(1500);
+
+    // profiles.role henüz atanmamışsa (ör. kayıt tamamlama formu farklı bir
+    // alan seti bekliyorsa) doğrudan RPC ile tamamla — bu script'in amacı
+    // kayıt formunun kendisini DEĞİL, ilan oluşturma senkronunu doğrulamak.
+    const roleCheck = psql(`select role from public.profiles where id = '${requester.id}';`);
+    if (roleCheck !== "hizmet-alan") {
+      const anonClient = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+      await anonClient.auth.signInWithPassword({ email: requester.email, password: PASSWORD });
+      await anonClient.rpc("complete_registration", {
+        p_role: "hizmet-alan", p_full_name: "Test Requester", p_phone: "+905551112233",
+        p_company_name: "Test Firma", p_company_type: "bireysel", p_province: "Kocaeli", p_district: "Gebze",
+      });
+    }
+    check("1a. Hizmet Alan kaydı tamamlandı (RPC/form)", psql(`select role from public.profiles where id = '${requester.id}';`) === "hizmet-alan");
+
+    console.log("\n=== 2) Admin hesabı yükseltiliyor (yerel, sandbox-only) ===");
+    psql(`update public.profiles set role = 'admin', onboarding_completed = true where id = '${adminUser.id}';`);
+    check("2a. Admin hesabı role='admin' oldu", psql(`select role from public.profiles where id = '${adminUser.id}';`) === "admin");
+
+    console.log("\n=== 3) Gerçek UI üzerinden, flag AÇIKKEN ilan oluşturuluyor ===");
+    const jobTitle = `SUPABASE-SYNC-TEST-${stamp}`;
+    await page.goto(`${BASE_URL}/hizmet-talebi-olustur`);
+    await page.locator("select").first().selectOption({ label: "Forklift" });
+    await page.getByLabel("İlan Başlığı").fill(jobTitle);
+    await page.getByLabel("Hizmete Özel Açıklama").fill("Bu, Supabase senkron testinin oluşturduğu bir ilandır — en az yirmi karakter.");
+    await selectFromSearchable(page, "İl", "Kocaeli");
+    await selectFromSearchable(page, "İlçe", "Gebze");
+    // NOT: bu ekranın gerçek "Listede yok" seçenek metni job-location.ts#
+    // CUSTOM_FACILITY_OPTION_LABEL sabitinden FARKLI ("Listede yok, kendim
+    // gireceğim" — virgüllü, em-dash'siz); bu yüzden geniş bir regex ile
+    // eşleşiyoruz, tam metne bağımlı olmuyoruz.
+    await page.getByRole("button", { name: "Liman / Sanayi / OSB", exact: true }).click();
+    const facilityListbox = page.locator('ul[aria-label="Liman / Sanayi / OSB"]');
+    await facilityListbox.waitFor({ state: "visible" });
+    await facilityListbox.getByRole("option", { name: /Listede yok/ }).first().click();
+    await page.getByLabel("Liman / Sanayi / OSB Adı").fill("Test Sahası");
+    await page.getByLabel("Açık Adres").fill("Test Mahallesi, Test Caddesi No:1, Gebze");
+    await page.getByLabel("Başlangıç Tarihi").fill("2026-12-01");
+    await page.getByLabel("Bitiş Tarihi").fill("2026-12-03");
+    await uploadOnePhoto(page);
+
+    // Aşama 1: form doğrulanır, Operasyon Önizleme'ye geçilir (henüz createJob çağrılmaz).
+    await page.getByRole("button", { name: "İlanı Yayınla" }).click();
+    await page.getByText("Operasyon Özeti").waitFor({ state: "visible", timeout: 10000 });
+    check("3a. Önizleme ekranına geçildi (henüz ilan oluşmadı)", true);
+
+    // Aşama 2: önizlemenin kendi Yayınla butonu -> gerçek createJob + (flag açıkken) Supabase senkronu.
+    await page.getByRole("button", { name: "İlanı Yayınla" }).click();
+    await page.waitForURL(/\/ilanlar\/.+/, { timeout: 20000 });
+    const createdJobId = page.url().split("/ilanlar/")[1].split("?")[0];
+    check("3b. İlan başarıyla oluşturuldu ve detay sayfasına yönlendirildi", /\/ilanlar\/[0-9a-f-]+/.test(page.url()), page.url());
+
+    await page.getByText(jobTitle).first().waitFor({ state: "visible", timeout: 15000 });
+    const bodyTextAfterCreate = await page.locator("main").innerText().catch(async () => page.textContent("body"));
+    check("3c. Senkron uyarı banner'ı GÖRÜNMÜYOR (Supabase senkronu başarılı oldu)", !bodyTextAfterCreate.includes("sunucu senkronizasyonunda bir sorun"));
+    check("3d. Sayfa başlığı doğru ilanı gösteriyor", bodyTextAfterCreate.includes(jobTitle));
+    check("3e. Konsolda beklenmeyen JS hatası yok", jsErrors.length === 0, jsErrors.join(" | "));
+
+    console.log("\n=== 4) Supabase'de gerçekten yazıldı mı (jobs tablosu, id eşleşmesi) ===");
+    const jobRow = JSON.parse(psql(`select row_to_json(j) from public.jobs j where id = '${createdJobId}';`) || "null");
+    check("4a. Supabase jobs tablosunda AYNI id ile bulunabiliyor (client-id stratejisi)", jobRow !== null, jobRow);
+    check("4b. title/province/district doğru senkronlandı", jobRow?.title === jobTitle && jobRow?.province === "Kocaeli" && jobRow?.district === "Gebze", JSON.stringify(jobRow));
+    check("4c. requester_id gerçek test kullanıcısı", jobRow?.requester_id === requester.id, jobRow?.requester_id);
+
+    console.log("\n=== 5) Admin panelinde GERÇEKTEN oluşturulan ilan görünüyor mu (seed değil) ===");
+    await loginAs(page, adminUser.email);
+    await page.goto(`${BASE_URL}/admin/ilanlar`);
+    await page.getByText(jobTitle).first().waitFor({ state: "visible", timeout: 15000 });
+    check("5a. Admin İlan Yönetimi listesinde UI'dan oluşturulan gerçek ilan görünüyor", true);
+
+    await page.goto(`${BASE_URL}/admin/ilanlar/${createdJobId}`);
+    await page.getByText(jobTitle).first().waitFor({ state: "visible", timeout: 15000 });
+    const detailText = await page.locator("main").innerText().catch(async () => page.textContent("body"));
+    check("5b. Admin detay ekranı doğru ili gösteriyor", detailText.includes("Kocaeli"));
+    check("5c. Admin detay ekranı doğru ilçeyi gösteriyor", detailText.includes("Gebze"));
+
+    console.log("\n=== 6) Admin etiketi UX düzeltmesi: üst sağda 'Admin' yazıyor, 'Hizmet Alan' değil ===");
+    await page.getByRole("banner").getByText("Admin", { exact: true }).waitFor({ state: "visible", timeout: 15000 });
+    const headerText = await page.getByRole("banner").innerText();
+    check("6a. Üst sağ kullanıcı alanı (header) 'Admin' gösteriyor", headerText.includes("Admin"), headerText);
+    check("6b. Üst sağ kullanıcı alanı (header) ARTIK 'Hizmet Alan' göstermiyor", !headerText.includes("Hizmet Alan"), headerText);
+
+    console.log("\n=== 7) Regresyon: normal Hizmet Alan hesabı hâlâ 'Hizmet Alan' görüyor ===");
+    // Aynı context'te bir admin oturumundan hemen sonra farklı bir kullanıcıya
+    // geçmek Supabase'in localStorage tabanlı oturum durumunu karıştırabiliyor
+    // — gerçek bir izolasyon için TAZE bir browser context kullanılır (yeni
+    // sayfa DEĞİL, context: sayfalar aynı context'te storage'ı paylaşır).
+    const regressionContext = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    const regressionPage = await regressionContext.newPage();
+    await loginAs(regressionPage, requester.email);
+    // Sunucu tarafı yönlendirme (proxy.ts, gerçek Supabase oturumu) bitmiş
+    // olabilir ama istemci tarafı `useSession()` önbelleği bir sonraki
+    // render'a kadar hâlâ null dönebilir (bkz. session.ts) — header'ın
+    // konuk (Giriş Yap/Kayıt Ol) durumundan çıkmasını gerçekten bekleriz.
+    await regressionPage.getByRole("banner").getByText("Hizmet Alan").waitFor({ state: "visible", timeout: 15000 });
+    const requesterHeaderText = await regressionPage.getByRole("banner").innerText();
+    check("7a. Normal Hizmet Alan hesabı kendi rolünü doğru görüyor (regresyon yok)", requesterHeaderText.includes("Hizmet Alan"), requesterHeaderText);
+    await regressionContext.close();
+
+    console.log("\n=== Temizlik ===");
+    for (const id of createdUserIds) {
+      await admin.auth.admin.deleteUser(id).catch(() => {});
+    }
+
+    console.log(`\n=== SONUÇ: ${pass} PASS, ${fail} FAIL ===`);
+    if (fail > 0) {
+      console.log("Başarısız testler:");
+      for (const f of failures) console.log(` - ${f}`);
+      process.exitCode = 1;
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
+main().catch((error) => {
+  console.error("BEKLENMEYEN HATA:", error?.message || error);
+  process.exitCode = 1;
+});

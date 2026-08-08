@@ -15,13 +15,14 @@ import {
   LogOut,
   Send,
   Settings,
+  ShieldCheck,
   User,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getProviderOffersTabHref } from "../_lib/job-requests";
-import { clearSession } from "../_lib/session";
+import { createSupabaseBrowserClient } from "../_lib/supabase/browser-client";
 import type { Session } from "../_lib/types";
 import { useDropdown } from "../_lib/use-dropdown";
 
@@ -58,8 +59,20 @@ const hizmetVerenMenuItems: MenuItem[] = [
   { label: "Hesap Ayarları", href: "/panel/hesap-ayarlari", icon: Settings },
 ];
 
-export function handleLogout() {
-  clearSession();
+/**
+ * SUPABASE AUTH GEÇİŞİ: eski `clearSession()` (localStorage'a doğrudan
+ * yazma) yerine gerçek `supabase.auth.signOut()` çağrılır — bu, Supabase'in
+ * kendi oturum çerezlerini/localStorage anahtarlarını temizler ve
+ * `session.ts`'in `onAuthStateChange` dinleyicisini tetikleyerek uygulama
+ * genelindeki `useSession()` önbelleğini otomatik olarak `null`a çevirir
+ * (bkz. o dosyanın dokümantasyonu). `window.location.href = "/"` (tam sayfa
+ * yenileme, `router.push` DEĞİL) BİLEREK korunur — mevcut davranışla aynı:
+ * tüm client-side state'in (React ağacı, localStorage önbellekleri) sıfırdan
+ * başlamasını garanti eder.
+ */
+export async function handleLogout() {
+  const supabase = createSupabaseBrowserClient();
+  await supabase.auth.signOut();
   window.location.href = "/";
 }
 
@@ -112,23 +125,31 @@ function MenuRow({
 
 /**
  * Hizmet Alan -> minimal fabrika ikonu, Hizmet Veren -> minimal baretli
- * operatör ikonu. Rol yalnızca bu iki değeri alabildiği için üçüncü bir
- * durumla karışma riski yoktur.
+ * operatör ikonu, Admin -> kalkan ikonu (üçüncü, ayrı bir dal — admin bu
+ * ikiden hiçbirine görsel olarak karışmamalı).
  */
 function RoleIcon({ role, className }: { role: Session["role"]; className?: string }) {
-  const Icon = role === "hizmet-veren" ? HardHat : Factory;
+  const Icon = role === "admin" ? ShieldCheck : role === "hizmet-veren" ? HardHat : Factory;
   return <Icon className={className} aria-hidden="true" />;
 }
 
+/**
+ * ADMIN ETİKETİ UX DÜZELTMESİ (Supabase Geçişi Faz 2, görev bölüm 11): bu
+ * etiket `session.role`den (bkz. session.ts — gerçek kaynağı `profiles.role`/
+ * `is_admin()`, hiçbir hardcoded e-posta/`user_metadata` kontrolü yok) okur,
+ * yalnızca görüntüleme metnini seçer — mevcut yetki mekanizması hiç
+ * değişmedi. Normal Hizmet Alan/Hizmet Veren davranışı (aşağıdaki iki dal)
+ * BİLEREK dokunulmadan kaldı; yalnızca üçüncü, önceden yanlışlıkla "Hizmet
+ * Alan" dalına düşen `admin` durumu kendi metnini kazandı.
+ */
 function RoleLabel({ session }: { session: Session }) {
+  const roleText = session.role === "admin" ? "Admin" : session.role === "hizmet-veren" ? "Hizmet Veren" : "Hizmet Alan";
   return (
     <div className="flex items-center gap-2.5">
       <RoleIcon role={session.role} className="h-5 w-5 shrink-0 text-foreground" />
       <div className="flex flex-col items-start leading-tight">
         <p className="text-sm font-bold tracking-heading text-foreground">{session.name}</p>
-        <p className="text-xs text-muted-foreground">
-          {session.role === "hizmet-veren" ? "Hizmet Veren" : "Hizmet Alan"}
-        </p>
+        <p className="text-xs text-muted-foreground">{roleText}</p>
       </div>
     </div>
   );

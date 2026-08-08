@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { JobDetailContent } from "../../_components/job-detail-content";
 import { getJobById } from "../../_lib/jobs";
 
@@ -19,7 +20,9 @@ export default async function IlanDetayPage({ params }: PageProps) {
 
   return (
     <section className="bg-background">
-      <JobDetailContent id={id} />
+      <Suspense fallback={<div aria-hidden="true" className="h-96 animate-pulse bg-surface" />}>
+        <JobDetailContent id={id} />
+      </Suspense>
     </section>
   );
 }

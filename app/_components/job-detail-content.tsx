@@ -2,6 +2,7 @@
 
 import { Building2, CalendarDays, Clock, ClipboardList, FileText, Home, MapPin, Package } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   getCustomsRequestedServiceLabels,
   getCustomsTransactionTypeLabel,
@@ -57,6 +58,12 @@ export function JobDetailContent({ id }: { id: string }) {
   const job = useJobById(id);
   const offers = useAllOffers();
   const session = useSession();
+  const searchParams = useSearchParams();
+  // Supabase Geçişi Faz 2 — job-request-form.tsx'in Supabase senkron
+  // denemesi başarısız olduğunda bu sayfaya eklediği bayrak (bkz. o
+  // dosyadaki dokümantasyon). Yerel ilan zaten başarıyla oluşturuldu — bu
+  // yalnızca "gerekiyorsa sade bir senkronizasyon uyarısı" (görev bölüm 3).
+  const syncWarning = searchParams.get("senkronUyarisi") === "1";
 
   // Nakliye izolasyonu (bkz. job-visibility.ts): doğrudan jobId URL erişimi
   // DAHİL, bu sayfaya ULAŞAN her yol (panel içi bağlantılar, bildirimler,
@@ -102,6 +109,13 @@ export function JobDetailContent({ id }: { id: string }) {
       >
         ← İlanlara Dön
       </Link>
+
+      {syncWarning && (
+        <p role="alert" className="mt-4 rounded-md bg-warning-soft px-4 py-3 text-sm font-medium text-warning">
+          İlanınız oluşturuldu ancak sunucu senkronizasyonunda bir sorun oluştu. Ekibimiz bilgilendirildi, ilanınız
+          normal şekilde kullanılabilir.
+        </p>
+      )}
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
         <div>
