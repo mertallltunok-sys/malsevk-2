@@ -1,0 +1,71 @@
+-- =============================================================================
+-- MALSEVK — migration 0034: eski create_operation_with_jobs overload'ını
+-- kaldırır (0032/0033'ün create_job için bulduğu AYNI hatanın kardeş RPC'de
+-- tekrarı — teknik borç denetimi sırasında bulundu)
+-- =============================================================================
+-- STATUS: `0001`–`0033`'ün tam zincirinin (bu görevden önce iki kez arka
+-- arkaya `supabase db reset` ile doğrulanmış) canlı `pg_proc` kataloğu
+-- sorgulanarak ve gerçek bir RPC çağrısıyla (statik inceleme DEĞİL)
+-- doğrulanan, önceden var olan bir hata. `0032`'nin kendi başlığı
+-- `create_operation_with_jobs`'ın "bu sorunu HİÇ yaşamadığını" iddia
+-- ediyordu (0031 onun dış imzasını değiştirmediği için) — bu doğru ama
+-- eksik: `0031`'den ÖNCE, `0028` zaten bu fonksiyonun dış imzasını
+-- değiştirmişti (`p_client_operation_id` eklenerek) ve o zamanki hata hiç
+-- yakalanmamıştı. `0032`/`0033` yalnızca `create_job`'ı kapsadı,
+-- `create_operation_with_jobs` denetim dışı kaldı.
+--
+-- KÖK NEDEN — `0032`/`0033` ile BİREBİR AYNI: `create or replace function`
+-- yalnızca AYNI parametre imzasıyla bir fonksiyonu GERÇEKTEN değiştirir.
+-- `0014`, `create_operation_with_jobs`'ı 4 parametreyle tanımladı
+-- (`p_province, p_operation_details, p_services, p_photos_by_service_index`).
+-- `0028`, `p_client_operation_id uuid default null` parametresini EKLEYEREK
+-- tanımladı — bu Postgres için FARKLI bir imza, dolayısıyla "replace"
+-- değil, İKİNCİ bir overload'un CREATE edilmesiydi. `0030` ve `0031` her
+-- ikisi de bu 5 parametreli imzayla TAM eşleşerek doğru şekilde replace
+-- etti (bu yüzden 5 parametreli tarafta ek bir overload YOK) — ama `0014`'ün
+-- orijinal 4 parametreli hali hiç `drop function` edilmedi, canlıda kalmaya
+-- devam etti.
+--
+-- CANLI DOĞRULAMA (gerçek RPC çağrısıyla, `0001`-`0033` tam zincir
+-- uygulandıktan sonra): `authenticated` rolüyle, yalnızca 4 temel parametre
+-- gönderildiğinde (`p_client_operation_id` OLMADAN) PostgREST şu hatayı
+-- döndürüyor:
+--   PGRST203 "Could not choose the best candidate function between:
+--   create_operation_with_jobs(p_province, p_operation_details, p_services,
+--   p_photos_by_service_index), create_operation_with_jobs(..., p_client_
+--   operation_id => uuid)"
+-- `authenticated` rolü her iki overload'da da EXECUTE yetkisine sahip
+-- (`has_function_privilege` ile doğrulandı).
+--
+-- BUGÜNKÜ ETKİ: `supabase-job-sync.ts#syncOperationToSupabase` her zaman
+-- `p_client_operation_id` gönderdiği için (bkz. CLAUDE.md "Supabase Geçişi
+-- Faz 2–4"), gerçek uygulama bu hatadan bugün ETKİLENMİYOR — `create_job`
+-- durumunda olduğu gibi. Ama eski 4 parametreli overload canlı kaldığı
+-- sürece: (1) bu parametreyi bilmeyen HERHANGİ bir gelecekteki
+-- script/entegrasyon çağrısı PGRST203 ile sert şekilde başarısız olur, (2)
+-- eski overload'ın kendisi `0028`'in client-id eşlemesinden, `0028`'in ürün
+-- bilgisi alanlarından, `0031`'in teslimat alanlarından VE `0030`'un
+-- per-service province override düzeltmesinden habersiz kalmaya devam eder.
+--
+-- DÜZELTME: eski 4 parametreli imza `drop function` ile açıkça kaldırılır —
+-- `0032`/`0033`'ün AYNI deseni. Bundan sonra `create_operation_with_jobs`
+-- için TEK bir overload (5 parametreli, `p_client_operation_id default
+-- null` ile) kalır. `supabase-job-sync.ts` (ve bu fazın güncellenmiş test
+-- script'i, `scripts/tmp-supabase-job-sync-test.mjs`) zaten her zaman
+-- `p_client_operation_id`yi (dolu bir uuid olarak) gönderiyor, bu yüzden
+-- hiçbir gerçek uygulama çağıranı bundan ETKİLENMEZ.
+--
+-- KAPSAM DIŞI (bilinçli): `create_job`, `update_job`, `admin_job_list`/
+-- `active_job_listings` view'ları veya başka herhangi bir RPC/view bu
+-- migration'da DEĞİŞTİRİLMEDİ — yalnızca bu tek overload kaldırılıyor.
+--
+-- Hata kodu değişikliği yok.
+-- =============================================================================
+
+drop function if exists public.create_operation_with_jobs(
+  text, text, jsonb, jsonb
+);
+
+-- Kalan (5 parametreli, p_client_operation_id dahil) create_operation_with_jobs
+-- için grant zaten 0028'de verildi — burada tekrarlanmasına gerek yok, drop
+-- işlemi onu etkilemez.
