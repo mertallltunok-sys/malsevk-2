@@ -16,6 +16,8 @@
 // yazar) TAM ORİJİNALİNE geri döndürün ve `.next-test`'i silin — .env.local
 // hot-reload edilen paylaşılan bir dosyadır, ONA DOKUNMAK aynı dizindeki
 // başka bir çalışan dev server'ı (varsa) da etkiler.
+import { chromium } from "playwright";
+
 const BASE_URL = "http://localhost:3000";
 const [, , adminEmail, candidateToApproveId, candidateToRejectId] = process.argv;
 const PASSWORD = "TestSifre2026!";
