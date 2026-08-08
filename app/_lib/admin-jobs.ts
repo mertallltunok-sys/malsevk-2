@@ -25,6 +25,12 @@ import type { JobClosureReason } from "./types";
  * (supabase-job-photos.ts) ile doğrudan genel URL'e çevrilir, imzalı URL
  * gerekmez. `deleted_at is null` filtresi ve `sort_order` sıralaması
  * job-store.ts'in kendi (localStorage) JobPhoto listesiyle AYNI ilke.
+ *
+ * Nakliye teslimat alanları (Supabase Geçişi Faz 4, migration 0031):
+ * `delivery_*` kolonları yalnızca Nakliye kategorisindeki ilanlarda dolu —
+ * render tarafı (`admin-job-detail.tsx`) yalnızca `deliveryProvince` doluysa
+ * "Teslim Edilecek Yer" bölümünü gösterir (localStorage tarafının
+ * nakliye-route-card.tsx'iyle AYNI "varsa göster" ilkesi).
  */
 
 export type AdminJobStatus = "yayinda" | "teklif_bekliyor" | "devam_ediyor" | "tamamlandi" | "suresi_doldu" | "kapatildi";
@@ -177,6 +183,12 @@ export type AdminJobDetail = {
   productTonnage: number | null;
   productType: string | null;
   customsProductType: string | null;
+  deliveryProvince: string | null;
+  deliveryDistrict: string | null;
+  deliveryLocationType: string | null;
+  deliveryFacilityId: string | null;
+  deliveryFacilityName: string | null;
+  deliveryAddressText: string | null;
   createdAt: string;
   publishEndAt: string;
   closedAt: string | null;
@@ -196,7 +208,7 @@ export async function getJobDetailForAdmin(jobId: string): Promise<AdminJobDetai
   const { data: jobRow, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, operation_id, requester_id, category_id, title, description, operation_details, province, district, work_location_type, address_text, work_date, work_end_date, product_quantity, product_tonnage, product_type, customs_product_type, created_at, publish_end_at, closed_at, closure_reason, deleted_at",
+      "id, operation_id, requester_id, category_id, title, description, operation_details, province, district, work_location_type, address_text, work_date, work_end_date, product_quantity, product_tonnage, product_type, customs_product_type, delivery_province, delivery_district, delivery_location_type, delivery_facility_id, delivery_facility_name, delivery_address_text, created_at, publish_end_at, closed_at, closure_reason, deleted_at",
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -267,6 +279,12 @@ export async function getJobDetailForAdmin(jobId: string): Promise<AdminJobDetai
     productTonnage: jobRow.product_tonnage,
     productType: jobRow.product_type,
     customsProductType: jobRow.customs_product_type,
+    deliveryProvince: jobRow.delivery_province,
+    deliveryDistrict: jobRow.delivery_district,
+    deliveryLocationType: jobRow.delivery_location_type,
+    deliveryFacilityId: jobRow.delivery_facility_id,
+    deliveryFacilityName: jobRow.delivery_facility_name,
+    deliveryAddressText: jobRow.delivery_address_text,
     createdAt: jobRow.created_at,
     publishEndAt: jobRow.publish_end_at,
     closedAt: jobRow.closed_at,

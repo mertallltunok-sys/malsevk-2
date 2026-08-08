@@ -27,17 +27,27 @@ import type { Job } from "./types";
  * job-store.ts#createJob tarafından yazılmıştı — bu modül onu yalnızca OKUR,
  * hiç silmez/değiştirmez (yerel kopyanın kendi ömrü bu senkrondan bağımsız).
  *
+ * FAZ 4 GÜNCELLEMESİ: Nakliye'nin 6 teslimat alanı (deliveryProvince/
+ * District/LocationType/FacilityId/FacilityName/AddressText — types.ts#Job
+ * ve job-store.ts#resolveDeliveryLocationFields'ten BİREBİR çıkarıldı, bkz.
+ * migration 0031) artık senkronlanıyor. `job.deliveryX` alanları
+ * `isTransportationCategory` DIŞINDAKİ her kategoride zaten `undefined`dir
+ * (job-store.ts'in kendi aktif temizleme ilkesi) — bu modül bunu tekrar
+ * KONTROL ETMEZ, yalnızca olduğu gibi `?? null` ile taşır; Nakliye olmayan
+ * bir ilan için RPC'ye her zaman `null` gider (görev bölüm 3).
+ *
  * BİLİNEN, BİLEREK BIRAKILMIŞ KAPSAM DIŞI (0028'in kendi başlığıyla AYNI
  * sınır, bu modül onu genişletmez):
  *   - `width`/`height` her zaman `null` (JobPhoto bu iki alanı hiç
  *     taşımıyor, kolonlar nullable) — Faz 3'ün kapsamı yalnızca gerçek dosya
  *     baytlarının Storage'a ulaşmasıdır, boyut metadata'sı ayrı bir konudur.
  *   - Gümrük Müşavirliği'nin customsTransactionType/customsRequestedServices/
- *     customsDocuments alanları ve Nakliye'nin 6 teslimat alanı
- *     (deliveryProvince/vb.) — Supabase şemasında hiç karşılığı yok (0028'in
- *     kendi kapsam sınırı), bu yüzden burada da senkronlanmaz.
- * Her iki gruptaki eksiklik SESSİZCE değil, açıkça (bu dosyanın kendi
- * dokümantasyonu + görev sonu raporu) belgelenmiştir.
+ *     customsDocuments alanları — Supabase şemasında hiç karşılığı yok
+ *     (0028'in kendi kapsam sınırı, Faz 4 bunu genişletmedi — görev
+ *     tanımının kendi kapsam sınırı: "gümrük alanları bu fazın kapsamı
+ *     değildir"), bu yüzden burada da senkronlanmaz.
+ * Bu eksiklik SESSİZCE değil, açıkça (bu dosyanın kendi dokümantasyonu +
+ * görev sonu raporu) belgelenmiştir.
  *
  * Requester kimliği (`auth.uid()`) HER İKİ RPC'de de yalnızca sunucu
  * tarafında, oturumun kendi JWT'sinden belirlenir — bu modül bir requester/
@@ -142,6 +152,12 @@ export async function syncJobToSupabase(job: Job): Promise<JobSyncResult> {
     p_product_type: job.productType ?? null,
     p_customs_product_type: job.customsProductType ?? null,
     p_client_id: job.id,
+    p_delivery_province: job.deliveryProvince ?? null,
+    p_delivery_district: job.deliveryDistrict ?? null,
+    p_delivery_location_type: job.deliveryLocationType ?? null,
+    p_delivery_facility_id: job.deliveryFacilityId ?? null,
+    p_delivery_facility_name: job.deliveryFacilityName ?? null,
+    p_delivery_address_text: job.deliveryAddressText ?? null,
   });
   if (error) {
     // Metadata satırı hiç yazılamadı — az önce yüklenen fotoğraflar Storage'da
@@ -213,6 +229,15 @@ export async function syncOperationToSupabase(
     product_tonnage: job.productTonnage ?? null,
     product_type: job.productType ?? null,
     customs_product_type: job.customsProductType ?? null,
+    // Yalnızca Nakliye kardeşi doludur (job-store.ts'in kendi aktif
+    // temizleme ilkesi) — diğer kardeşlerde zaten `undefined`, RPC'ye her
+    // zaman `null` gider (migration 0031).
+    delivery_province: job.deliveryProvince ?? null,
+    delivery_district: job.deliveryDistrict ?? null,
+    delivery_location_type: job.deliveryLocationType ?? null,
+    delivery_facility_id: job.deliveryFacilityId ?? null,
+    delivery_facility_name: job.deliveryFacilityName ?? null,
+    delivery_address_text: job.deliveryAddressText ?? null,
     // Yalnızca gerçekten paylaşılandan farklıysa gönderilir (bkz. bu
     // fonksiyonun dokümantasyonu) — diğer tüm kardeş hizmetler için bu
     // anahtar hiç yoktur, RPC 0030'un coalesce'i p_province'e düşer.

@@ -57,9 +57,15 @@ async function createAndCompleteUser(label) {
 }
 
 /** app/_lib/supabase-job-sync.ts#toRpcPhotos'un BİREBİR aynısı — placeholder storage_path deseni. */
+// NOT: bu RPC-seviyeli script fotoğrafları GERÇEKTEN Storage'a yüklemez
+// (supabase-job-sync.ts'i atlayıp RPC'yi doğrudan çağırıyor) — burada
+// üretilen storage_path'ler yalnızca RPC'nin metinsel olarak kabul ettiğini
+// doğrulayan sahte değerlerdir. Gerçek Storage yüklemesi (Faz 3) ve gerçek
+// dosya varlığı scripts/tmp-job-sync-admin-panel-browser-test.mjs'te
+// (gerçek tarayıcı, gerçek supabase-job-sync.ts) doğrulanıyor.
 function fakePhotos(count) {
   return Array.from({ length: count }, (_, i) => ({
-    storage_path: `local-pending:test-storage-key-${stamp}-${i}`,
+    storage_path: `test-storage-key-${stamp}-${i}`,
     original_file_name: `foto-${i}.jpg`,
     mime_type: "image/jpeg",
     size_bytes: 123456,
@@ -113,9 +119,56 @@ async function main() {
 
   const singlePhotos = await client.from("job_photos").select("storage_path, mime_type").eq("job_id", clientJobId);
   record("1j. 2 fotoğraf metadata satırı yazıldı", (singlePhotos.data ?? []).length === 2, singlePhotos.error?.message ?? singlePhotos.data?.length);
-  record("1k. storage_path placeholder olarak işaretli (gerçek Storage yüklemesi YOK, bilinen kapsam dışı)", (singlePhotos.data ?? []).every((p) => p.storage_path.startsWith("local-pending:")), JSON.stringify(singlePhotos.data));
+  // NOT: bu script RPC'yi DOĞRUDAN çağırıyor (supabase-job-sync.ts'i
+  // atlıyor) — burada gönderilen storage_path'ler gerçek Storage'a hiç
+  // yüklenmemiş, yalnızca RPC'nin metinsel kabul ettiğini doğrulayan sahte
+  // değerlerdir. Gerçek Storage senkronu (Faz 3) ve gerçek yükleme
+  // scripts/tmp-job-sync-admin-panel-browser-test.mjs'te doğrulanıyor.
+  record("1k. storage_path RPC'ye olduğu gibi yazıldı", (singlePhotos.data ?? []).every((p) => p.storage_path.startsWith("test-storage-key")), JSON.stringify(singlePhotos.data));
+  record("1l. Nakliye DIŞI ilanın delivery_* kolonları null (regresyon — kapsam dışı kategoride sızıntı yok)", s.delivery_province === null && s.delivery_district === null && s.delivery_location_type === null && s.delivery_facility_id === null && s.delivery_facility_name === null && s.delivery_address_text === null, JSON.stringify({ dp: s.delivery_province, dd: s.delivery_district, dlt: s.delivery_location_type }));
 
-  console.log("\n=== 2) Çoklu hizmet (create_operation_with_jobs) — operation-id eşlemesi + Nakliye province override (migration 0030) ===");
+  console.log("\n=== 1.5) Tek Nakliye ilanı (create_job) — 6 teslimat alanı, 'facility' modu (migration 0031) ===");
+  const clientNakliyeJobId = crypto.randomUUID();
+  const nakliyeResult = await client.rpc("create_job", {
+    p_category_id: "nakliye",
+    p_title: "Test Nakliye İlanı",
+    p_description: "Nakliye açıklaması",
+    p_operation_details: "",
+    p_province: "Kocaeli",
+    p_district: "Gebze",
+    p_work_location_type: "Yük Alınacak Tesis",
+    p_work_date: "2026-09-10",
+    p_photos: fakePhotos(1),
+    p_location_mode: "custom",
+    p_address_text: "Yük alınacak açık adres",
+    p_work_end_date: "2026-09-11",
+    p_product_quantity: 3,
+    p_product_tonnage: 20,
+    p_product_type: "Nakliye Ürünü",
+    p_client_id: clientNakliyeJobId,
+    p_delivery_province: "İstanbul",
+    p_delivery_district: "Kadıköy",
+    p_delivery_location_type: "facility",
+    p_delivery_facility_id: "loc-test-facility-id",
+    p_delivery_facility_name: "Test Teslim Tesisi",
+    p_delivery_address_text: "Teslim edilecek açık adres, en az on karakter.",
+  });
+  record("1.5a. Nakliye ilanı (facility modu) başarılı", !nakliyeResult.error, nakliyeResult.error?.message);
+  const nakliyeRowSingle = await client.from("jobs").select("*").eq("id", clientNakliyeJobId).maybeSingle();
+  const n = nakliyeRowSingle.data ?? {};
+  record(
+    "1.5b. 6 teslimat alanı da BİREBİR doğru senkronlandı",
+    n.delivery_province === "İstanbul" && n.delivery_district === "Kadıköy" && n.delivery_location_type === "facility" &&
+      n.delivery_facility_id === "loc-test-facility-id" && n.delivery_facility_name === "Test Teslim Tesisi" &&
+      n.delivery_address_text === "Teslim edilecek açık adres, en az on karakter.",
+    JSON.stringify({
+      dp: n.delivery_province, dd: n.delivery_district, dlt: n.delivery_location_type,
+      dfi: n.delivery_facility_id, dfn: n.delivery_facility_name, dat: n.delivery_address_text,
+    }),
+  );
+  record("1.5c. Pickup (Yük Alınacak Yer) ve delivery (Teslim Edilecek Yer) BİRBİRİNDEN BAĞIMSIZ", n.province === "Kocaeli" && n.district === "Gebze" && n.delivery_province === "İstanbul" && n.delivery_district === "Kadıköy");
+
+  console.log("\n=== 2) Çoklu hizmet (create_operation_with_jobs) — operation-id eşlemesi + Nakliye province override (migration 0030) + delivery alanları (migration 0031, 'open_address' modu) ===");
   const clientOperationId = crypto.randomUUID();
   const clientJobIdLashing = crypto.randomUUID();
   const clientJobIdNakliye = crypto.randomUUID();
@@ -155,6 +208,14 @@ async function main() {
         work_date: "2026-09-05", work_end_date: "2026-09-06",
         product_quantity: 5, product_tonnage: 12, product_type: "Nakliye Ürünü", customs_product_type: null,
         province: OVERRIDE_PROVINCE, // migration 0030'un test ettiği per-service override.
+        // migration 0031 — bu sefer "open_address" modu (1.5 testi "facility"
+        // modunu zaten kapsadı): facility_id YOK, manuel yazılmış bir ad var.
+        delivery_province: "Sakarya",
+        delivery_district: "Serdivan",
+        delivery_location_type: "open_address",
+        delivery_facility_id: null,
+        delivery_facility_name: "Manuel Teslim Sahası",
+        delivery_address_text: "Manuel yazılmış teslim adresi, en az on karakter.",
       },
     ],
     p_photos_by_service_index: { "0": fakePhotos(1), "1": fakePhotos(1) },
@@ -164,12 +225,28 @@ async function main() {
   record("2b. operation_id, client_operation_id ile BİREBİR aynı", opResult.data?.operation_id === clientOperationId, opResult.data?.operation_id);
   record("2c. iki job_id de kendi client_id'siyle BİREBİR aynı", (opResult.data?.job_ids ?? []).includes(clientJobIdLashing) && (opResult.data?.job_ids ?? []).includes(clientJobIdNakliye), JSON.stringify(opResult.data?.job_ids));
 
-  const opRows = await client.from("jobs").select("id, operation_id, province, category_id").in("id", [clientJobIdLashing, clientJobIdNakliye]);
+  const opRows = await client.from("jobs").select("*").in("id", [clientJobIdLashing, clientJobIdNakliye]);
   const lashingRow = (opRows.data ?? []).find((r) => r.id === clientJobIdLashing);
   const nakliyeRow = (opRows.data ?? []).find((r) => r.id === clientJobIdNakliye);
   record("2d. her iki job aynı operation_id'yi taşıyor", lashingRow?.operation_id === clientOperationId && nakliyeRow?.operation_id === clientOperationId);
   record("2e. province GÖNDERMEYEN kardeş (Lashing) paylaşılan province'i aldı", lashingRow?.province === SHARED_PROVINCE, lashingRow?.province);
   record("2f. KENDİ province'ini gönderen Nakliye kardeşi OVERRIDE edilmiş ili aldı (migration 0030 doğrulaması)", nakliyeRow?.province === OVERRIDE_PROVINCE, nakliyeRow?.province);
+  record(
+    "2g. Nakliye kardeşinin 6 teslimat alanı da ('open_address' modu) BİREBİR doğru senkronlandı (migration 0031)",
+    nakliyeRow?.delivery_province === "Sakarya" && nakliyeRow?.delivery_district === "Serdivan" && nakliyeRow?.delivery_location_type === "open_address" &&
+      nakliyeRow?.delivery_facility_id === null && nakliyeRow?.delivery_facility_name === "Manuel Teslim Sahası" &&
+      nakliyeRow?.delivery_address_text === "Manuel yazılmış teslim adresi, en az on karakter.",
+    JSON.stringify({
+      dp: nakliyeRow?.delivery_province, dd: nakliyeRow?.delivery_district, dlt: nakliyeRow?.delivery_location_type,
+      dfi: nakliyeRow?.delivery_facility_id, dfn: nakliyeRow?.delivery_facility_name, dat: nakliyeRow?.delivery_address_text,
+    }),
+  );
+  record(
+    "2h. Nakliye OLMAYAN kardeşin (Lashing) delivery_* kolonları null (görev bölüm 5 — 'diğer hizmet kardeşleri bu alanlardan etkilenmemeli')",
+    lashingRow?.delivery_province === null && lashingRow?.delivery_district === null && lashingRow?.delivery_location_type === null &&
+      lashingRow?.delivery_facility_id === null && lashingRow?.delivery_facility_name === null && lashingRow?.delivery_address_text === null,
+    JSON.stringify({ dp: lashingRow?.delivery_province, dlt: lashingRow?.delivery_location_type }),
+  );
 
   console.log("\n=== 3) RPC hatası düzgün yüzeye çıkıyor (uygulama yerel ilanı asla silmiyor/gizli bilgi sızdırmıyor) ===");
   const badJobId = crypto.randomUUID();

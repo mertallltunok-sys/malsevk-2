@@ -77,6 +77,21 @@ async function selectFromSearchable(page, label, optionText, { exact = true } = 
   await listbox.getByRole("option", { name: optionText, exact }).first().click();
 }
 
+/**
+ * Nakliye'nin "Yük Alınacak Yer" (pickup) VE "Teslim Edilecek Yer"
+ * (delivery) bölümleri AYNI "İl"/"İlçe"/"Liman / Sanayi / OSB"/"Açık Adres"
+ * etiketlerini kullanır (bkz. nakliye-location-fields.tsx'in kendi
+ * dokümantasyonu — TEK paylaşılan bileşen) — DOM sırası her zaman pickup
+ * ÖNCE, delivery SONRA olduğu için (job-request-form.tsx'in kendi JSX
+ * sırası) `.first()`/`.last()` güvenilir bir ayrım sağlar.
+ */
+async function selectFromSearchableAt(page, label, optionText, position, { exact = true } = {}) {
+  await page.getByRole("button", { name: label, exact: true })[position]().click();
+  const listbox = page.locator(`ul[aria-label="${label}"]`);
+  await listbox.waitFor({ state: "visible" });
+  await listbox.getByRole("option", { name: optionText, exact }).first().click();
+}
+
 async function uploadOnePhoto(page) {
   await page.locator('input[type="file"]').setInputFiles({
     name: "test-fixture.jpg",
@@ -239,6 +254,78 @@ async function main() {
     const requesterHeaderText = await regressionPage.getByRole("banner").innerText();
     check("7a. Normal Hizmet Alan hesabı kendi rolünü doğru görüyor (regresyon yok)", requesterHeaderText.includes("Hizmet Alan"), requesterHeaderText);
     await regressionContext.close();
+
+    console.log("\n=== 8) Supabase Geçişi Faz 4 — GERÇEK bir Nakliye ilanı UI üzerinden oluşturuluyor (6 teslimat alanı) ===");
+    const nakliyeJobTitle = `NAKLIYE-SYNC-TEST-${stamp}`;
+    await loginAs(page, requester.email);
+    await page.goto(`${BASE_URL}/hizmet-talebi-olustur`);
+    await page.locator("select").first().selectOption({ label: "Nakliye" });
+    await page.getByLabel("İlan Başlığı").fill(nakliyeJobTitle);
+    await page.getByLabel("Hizmete Özel Açıklama").fill("Bu, Nakliye Supabase senkron testinin oluşturduğu bir ilandır.");
+
+    // Nakliye "Ürün Bilgileri" kapsamındadır (Ürün Adedi/Cinsi zorunlu,
+    // Tonaj Nakliye'de ZORUNLU) — bu doldurulmadan form submit'i engeller.
+    await page.getByLabel("Ürün Adedi").fill("7");
+    await page.getByLabel(/^Tonaj/).fill("15");
+    await page.getByRole("combobox", { name: "Ürün Cinsi", exact: true }).click();
+    await page.locator('ul[aria-label="Ürün Cinsi"]').getByRole("option", { name: "Rulo Sac", exact: true }).click();
+
+    // Yük Alınacak Yer (pickup) — sayfadaki İLK "İl"/"İlçe"/"Liman / Sanayi / OSB".
+    await selectFromSearchableAt(page, "İl", "Kocaeli", "first");
+    await selectFromSearchableAt(page, "İlçe", "Gebze", "first");
+    await selectFromSearchableAt(page, "Liman / Sanayi / OSB", "Listede yok", "first", { exact: false });
+    await page.getByLabel("Liman / Sanayi / OSB Adı").first().fill("Yük Alım Sahası Testi");
+    await page.getByLabel("Açık Adres").first().fill("Yük alınacak açık adres, en az on karakter.");
+
+    // Teslim Edilecek Yer (delivery) — sayfadaki SON "İl"/"İlçe"/"Liman / Sanayi / OSB" (bkz. selectFromSearchableAt'in kendi dokümantasyonu).
+    await page.getByText("Teslim Edilecek Yer", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+    await selectFromSearchableAt(page, "İl", "İstanbul", "last");
+    await selectFromSearchableAt(page, "İlçe", "Kadıköy", "last");
+    await selectFromSearchableAt(page, "Liman / Sanayi / OSB", "Listede yok", "last", { exact: false });
+    await page.getByLabel("Liman / Sanayi / OSB Adı").last().fill("Teslim Sahası Testi");
+    await page.getByLabel("Açık Adres").last().fill("Teslim edilecek açık adres, en az on karakter.");
+
+    await page.getByLabel("Başlangıç Tarihi").fill("2026-12-05");
+    await page.getByLabel("Bitiş Tarihi").fill("2026-12-07");
+    await uploadOnePhoto(page);
+
+    await page.getByRole("button", { name: "İlanı Yayınla" }).click();
+    await page.getByText("Operasyon Özeti").waitFor({ state: "visible", timeout: 10000 });
+    await page.getByRole("button", { name: "İlanı Yayınla" }).click();
+    await page.waitForURL(/\/ilanlar\/.+/, { timeout: 20000 });
+    const nakliyeJobId = page.url().split("/ilanlar/")[1].split("?")[0];
+    check("8a. Nakliye ilanı başarıyla oluşturuldu ve detay sayfasına yönlendirildi", /\/ilanlar\/[0-9a-f-]+/.test(page.url()), page.url());
+    await page.getByText(nakliyeJobTitle).first().waitFor({ state: "visible", timeout: 15000 });
+    const nakliyeBodyText = await page.locator("main").innerText().catch(async () => page.textContent("body"));
+    check("8b. Senkron uyarı banner'ı GÖRÜNMÜYOR (Nakliye senkronu da başarılı oldu)", !nakliyeBodyText.includes("sunucu senkronizasyonunda bir sorun"));
+
+    console.log("\n=== 9) Supabase'de 6 teslimat alanı da doğru yazıldı mı (jobs tablosu) ===");
+    const nakliyeJobRow = JSON.parse(psql(`select row_to_json(j) from public.jobs j where id = '${nakliyeJobId}';`) || "null");
+    check("9a. Nakliye ilanı Supabase'de AYNI id ile bulunabiliyor", nakliyeJobRow !== null, nakliyeJobRow);
+    check("9b. Pickup (Yük Alınacak Yer) doğru — İl/İlçe Kocaeli/Gebze", nakliyeJobRow?.province === "Kocaeli" && nakliyeJobRow?.district === "Gebze", JSON.stringify({ p: nakliyeJobRow?.province, d: nakliyeJobRow?.district }));
+    check(
+      "9c. Delivery (Teslim Edilecek Yer) 6 alanı da BİREBİR doğru — pickup'tan BAĞIMSIZ",
+      nakliyeJobRow?.delivery_province === "İstanbul" &&
+        nakliyeJobRow?.delivery_district === "Kadıköy" &&
+        nakliyeJobRow?.delivery_location_type === "open_address" &&
+        nakliyeJobRow?.delivery_facility_id === null &&
+        nakliyeJobRow?.delivery_facility_name === "Teslim Sahası Testi" &&
+        nakliyeJobRow?.delivery_address_text === "Teslim edilecek açık adres, en az on karakter.",
+      JSON.stringify({
+        dp: nakliyeJobRow?.delivery_province, dd: nakliyeJobRow?.delivery_district, dlt: nakliyeJobRow?.delivery_location_type,
+        dfi: nakliyeJobRow?.delivery_facility_id, dfn: nakliyeJobRow?.delivery_facility_name, dat: nakliyeJobRow?.delivery_address_text,
+      }),
+    );
+
+    console.log("\n=== 10) Admin panelinden AYNI Nakliye ilanı açılıyor — 6 alan Supabase'den doğru okunuyor mu (görev bölüm 6) ===");
+    await loginAs(page, adminUser.email);
+    await page.goto(`${BASE_URL}/admin/ilanlar/${nakliyeJobId}`);
+    await page.getByText(nakliyeJobTitle).first().waitFor({ state: "visible", timeout: 15000 });
+    const nakliyeAdminText = await page.locator("main").innerText().catch(async () => page.textContent("body"));
+    check("10a. Admin detay ekranı pickup ilini gösteriyor (Kocaeli)", nakliyeAdminText.includes("Kocaeli"));
+    check("10b. Admin detay ekranı Teslim İl/İlçe'yi gösteriyor (İstanbul / Kadıköy)", nakliyeAdminText.includes("İstanbul") && nakliyeAdminText.includes("Kadıköy"), nakliyeAdminText);
+    check("10c. Admin detay ekranı Teslim Tesisi adını gösteriyor", nakliyeAdminText.includes("Teslim Sahası Testi"));
+    check("10d. Admin detay ekranı Teslim Adresini gösteriyor", nakliyeAdminText.includes("Teslim edilecek açık adres"));
 
     console.log("\n=== Temizlik ===");
     for (const id of createdUserIds) {

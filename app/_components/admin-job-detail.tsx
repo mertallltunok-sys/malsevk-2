@@ -133,6 +133,11 @@ export function AdminJobDetail({ jobId }: { jobId: string }) {
           {job.productTonnage !== null && <InfoRow label="Tonaj" value={`${job.productTonnage} ton`} />}
           {job.productType !== null && <InfoRow label="Ürün Cinsi" value={job.productType} />}
           {job.customsProductType !== null && <InfoRow label="Gümrük Ürün Cinsi" value={job.customsProductType} />}
+          {job.deliveryProvince !== null && (
+            <InfoRow label="Teslim İl / İlçe" value={`${job.deliveryProvince} / ${job.deliveryDistrict ?? "—"}`} />
+          )}
+          {job.deliveryFacilityName !== null && <InfoRow label="Teslim Tesisi" value={job.deliveryFacilityName} />}
+          {job.deliveryAddressText !== null && <InfoRow label="Teslim Adresi" value={job.deliveryAddressText} />}
           <InfoRow label="Oluşturulma Tarihi" value={new Date(job.createdAt).toLocaleString("tr-TR")} />
           <InfoRow label="Yayın Bitiş Tarihi" value={new Date(job.publishEndAt).toLocaleString("tr-TR")} />
           {job.closedAt && <InfoRow label="Kapatılma Tarihi" value={new Date(job.closedAt).toLocaleString("tr-TR")} />}
