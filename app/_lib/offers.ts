@@ -17,7 +17,7 @@ import { isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE, JOB_CLOSURE_BLOCKED_ME
 import { isJobModerationApproved } from "./job-moderation";
 import { closeJob as closeJobRecord, deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
 import { isProviderAuthorizedToOfferOnJob } from "./job-visibility";
-import { findJobById } from "./jobs-lookup";
+import { findJobById, findJobByIdWithRemoteFallback } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { isValidCurrency, MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
@@ -640,7 +640,17 @@ export async function createOffer(
     return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar teklif verebilir." };
   }
 
-  const job = findJobById(input.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi — bulunan gerçek kök neden:
+  // düz `findJobById` yalnızca BU TARAYICININ localStorage'ına bakıyordu.
+  // Bir ilan başka bir cihazda oluşturulup admin tarafından onaylandıysa,
+  // o ilana hiç değmemiş (temiz oturum/farklı cihaz) bir Hizmet Veren
+  // GERÇEK create_offer RPC'sine hiç ULAŞAMADAN "İlan bulunamadı" alıyordu
+  // — RPC'nin kendisi teklife izin verecek olsa bile. `findJobByIdWithRemoteFallback`
+  // yerel sonucu HER ZAMAN önce dener, yalnızca hiç bulunamazsa
+  // (jobs-lookup.ts'in kendi dokümanına bkz.) get_visible_job RPC'siyle
+  // sunucudan GERÇEKTEN sorar — localStorage burada asla tek doğruluk
+  // kaynağı değildir, yalnızca bir hızlandırma katmanıdır.
+  const job = await findJobByIdWithRemoteFallback(input.jobId);
   if (!job) {
     return { ok: false, error: "İlan bulunamadı veya artık yayında değil." };
   }
