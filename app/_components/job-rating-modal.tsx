@@ -65,7 +65,7 @@ export function JobRatingModal({
     onClose(false);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (submitting) return;
     if (selectedStars === 0) {
       setError(STARS_REQUIRED_MESSAGE);
@@ -81,7 +81,7 @@ export function JobRatingModal({
     // durumda false'a dönmesini, kullanıcının kapatılamayan bir modalda
     // kilitli kalmamasını garanti eder.
     try {
-      const result = submitRating(session, offer.id, selectedStars);
+      const result = await submitRating(session, offer.id, selectedStars);
       if (!result.ok) {
         setError(result.error);
         return;

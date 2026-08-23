@@ -26,11 +26,15 @@ import { hasReachedActiveJobLimit } from "./provider-capacity";
 import { isRecyclingCategory, isRecyclingCommercialDirection } from "./recycling-catalog";
 import {
   acceptOfferOnSupabase,
+  confirmCompletionOnSupabase,
   createOfferOnSupabase,
+  disputeCompletionOnSupabase,
   recordAgreementFailureOnSupabase,
-  recordCompletionDisputeCancelledOnSupabase,
   rejectOfferOnSupabase,
+  requestCompletionOnSupabase,
   requiresBackendOfferSync,
+  resolveCompletionDisputeOnSupabase,
+  startWorkOnSupabase,
   withdrawOfferOnSupabase,
 } from "./supabase-offer-sync";
 import { containsDangerousMarkup, normalizeFreeText } from "./text-sanitization";
@@ -963,7 +967,14 @@ export async function updateOfferStatus(
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B adımı) — bulunan gerçek
+  // açık: ilan sahibinin (Hizmet Alan) kendi ilanını BAŞKA bir cihazda/temiz
+  // oturumda hiç görmemiş olması (ör. ilanı ofis bilgisayarında oluşturdu,
+  // teklifi telefonundan yönetiyor) bu sahiplik kontrolünü her zaman
+  // "yetkiniz yok" ile reddediyordu — createOffer düzeltmesiyle AYNI
+  // fetchJobByIdFromSupabase/get_visible_job yolunu kullanır, ikinci bir
+  // yol İCAT EDİLMEDİ.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1035,7 +1046,7 @@ export type StartWorkResult = { ok: true; offer: Offer } | { ok: false; error: s
  * çalıştırma korumasıdır: birinci çağrı durumu değiştirdikten sonra ikinci
  * bir çağrı "accepted" bulamayıp reddedilir.
  */
-export function startWorkForOffer(session: Session | null, offerId: string): StartWorkResult {
+export async function startWorkForOffer(session: Session | null, offerId: string): Promise<StartWorkResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -1049,13 +1060,34 @@ export function startWorkForOffer(session: Session | null, offerId: string): Sta
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B) — updateOfferStatus'taki
+  // AYNI gerekçe: ilan sahibi bu ilanı BAŞKA bir cihazda oluşturmuş olabilir.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
   }
 
   if (offer.status !== "accepted") {
     return { ok: false, error: "Bu işlem yalnızca kabul edilmiş bir teklif için yapılabilir." };
+  }
+
+  // "localStorage Bağımlılığını Kaldır" görevi (2B, Aşama 9) — bloklayan
+  // sunucu senkronu, yerel yazımdan ÖNCE (bkz. updateOfferStatus'taki AYNI
+  // desen). Bu geçiş eskiden BİLEREK senkronlanmıyordu (bkz.
+  // supabase-offer-sync.ts dosya başlığı) — gerçek çapraz-cihaz testleri
+  // karşı tarafın (Hizmet Veren) BAŞKA bir cihazdaki temiz oturumda bu
+  // geçişi hiç göremediğini kanıtladığı için artık senkronlanıyor.
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await startWorkOnSupabase(offer.supabaseOfferId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const updated: Offer = { ...offer, status: "in_progress", updatedAt: new Date().toISOString() };
@@ -1098,7 +1130,8 @@ export async function recordAgreementFailure(
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B) — updateOfferStatus'taki AYNI gerekçe.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1325,7 +1358,7 @@ export type RequestCompletionResult = { ok: true; offer: Offer } | { ok: false; 
  * kaydeder — talep tekrar gönderilemez (bu fonksiyon yalnızca "in_progress"
  * durumundan çalışır, "completion_requested" artık bu koşulu sağlamaz).
  */
-export function requestCompletion(session: Session | null, offerId: string): RequestCompletionResult {
+export async function requestCompletion(session: Session | null, offerId: string): Promise<RequestCompletionResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -1343,6 +1376,25 @@ export function requestCompletion(session: Session | null, offerId: string): Req
   }
   if (offer.status !== "in_progress") {
     return { ok: false, error: "Bu işlem yalnızca devam eden bir iş için yapılabilir." };
+  }
+
+  // "localStorage Bağımlılığını Kaldır" görevi (2B, Aşama 9) — bkz.
+  // startWorkForOffer'daki AYNI gerekçe. Bu fonksiyon iş sahibini
+  // (findJobByIdWithRemoteFallback) hiç kontrol etmez (yalnızca teklifin
+  // KENDİ providerId'sine bakar), bu yüzden Aşama 9'un ele aldığı "job
+  // lookup" boşluğuna hiç maruz kalmaz — ama senkron eksikliği AYRI bir
+  // boşluktu, bkz. supabase-offer-sync.ts dosya başlığı.
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await requestCompletionOnSupabase(offer.supabaseOfferId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const now = new Date().toISOString();
@@ -1368,7 +1420,7 @@ export type ConfirmCompletionResult = { ok: true; offer: Offer } | { ok: false; 
  * ENGAGED_OFFER_STATUSES dışında kaldığı için Hizmet Veren'in aktif iş
  * kapasitesinden otomatik düşer.
  */
-export function confirmCompletion(session: Session | null, offerId: string): ConfirmCompletionResult {
+export async function confirmCompletion(session: Session | null, offerId: string): Promise<ConfirmCompletionResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -1382,7 +1434,8 @@ export function confirmCompletion(session: Session | null, offerId: string): Con
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B) — updateOfferStatus'taki AYNI gerekçe.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1395,6 +1448,21 @@ export function confirmCompletion(session: Session | null, offerId: string): Con
   // veri katmanında da açıkça reddedilir.
   if (offer.completionRequestedByUserId === session.id) {
     return { ok: false, error: "Kendi gönderdiğiniz tamamlanma talebini onaylayamazsınız." };
+  }
+
+  // "localStorage Bağımlılığını Kaldır" görevi (2B, Aşama 9) — bkz.
+  // startWorkForOffer'daki AYNI gerekçe.
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await confirmCompletionOnSupabase(offer.supabaseOfferId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const updated: Offer = { ...offer, status: "completed", updatedAt: new Date().toISOString() };
@@ -1415,11 +1483,11 @@ export type DisputeCompletionResult = { ok: true; offer: Offer } | { ok: false; 
  * DÜŞMEZ (sorun çözülene kadar Hizmet Veren'i meşgul sayar) — çözüm için
  * bkz. resolveCompletionDispute.
  */
-export function disputeCompletion(
+export async function disputeCompletion(
   session: Session | null,
   offerId: string,
   note: string,
-): DisputeCompletionResult {
+): Promise<DisputeCompletionResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -1433,7 +1501,8 @@ export function disputeCompletion(
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B) — updateOfferStatus'taki AYNI gerekçe.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1448,6 +1517,21 @@ export function disputeCompletion(
   const trimmedNote = note.trim();
   if (trimmedNote.length < 10 || trimmedNote.length > 1000) {
     return { ok: false, error: "İtiraz açıklaması 10-1000 karakter arasında olmalıdır." };
+  }
+
+  // "localStorage Bağımlılığını Kaldır" görevi (2B, Aşama 9) — bkz.
+  // startWorkForOffer'daki AYNI gerekçe.
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await disputeCompletionOnSupabase(offer.supabaseOfferId, trimmedNote);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const updated: Offer = {
@@ -1490,7 +1574,8 @@ export async function resolveCompletionDispute(
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B) — updateOfferStatus'taki AYNI gerekçe.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu teklif üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1498,18 +1583,21 @@ export async function resolveCompletionDispute(
     return { ok: false, error: "Bu işlem yalnızca itiraz edilmiş bir iş için yapılabilir." };
   }
 
-  // Yalnızca "cancelled" çözümü görünürlüğü etkiler (offer'ı ENGAGED
-  // kümesinin dışına çıkarır) — "completed" senkronlanmaz (bkz.
-  // supabase-offer-sync.ts dosya başlığı, accepted zaten ENGAGED kümesinde
-  // kaldığı için görünürlük sonucu değişmez).
-  if (requiresBackendOfferSync() && resolution === "cancelled") {
+  // "localStorage Bağımlılığını Kaldır" görevi (2B, Aşama 9) — artık HER İKİ
+  // sonuç da (completed/cancelled) senkronlanır (bkz. supabase-offer-sync.ts
+  // dosya başlığı — eskiden yalnızca "cancelled" senkronlanıyordu, gerekçe
+  // "completed görünürlüğü değiştirmez"di; bu gerekçe görünürlük açısından
+  // hâlâ doğru ama Hizmet Veren'in AYRI bir cihazdaki temiz oturumunun bu işi
+  // "tamamlandı" olarak görebilmesi için sunucu durumunun da ilerlemesi
+  // gerekiyor).
+  if (requiresBackendOfferSync()) {
     if (!offer.supabaseOfferId) {
       return {
         ok: false,
         error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
       };
     }
-    const syncResult = await recordCompletionDisputeCancelledOnSupabase(offer.supabaseOfferId);
+    const syncResult = await resolveCompletionDisputeOnSupabase(offer.supabaseOfferId, resolution);
     if (!syncResult.ok) {
       return { ok: false, error: syncResult.error };
     }

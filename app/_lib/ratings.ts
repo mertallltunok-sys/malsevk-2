@@ -1,4 +1,4 @@
-import { findJobById } from "./jobs-lookup";
+import { findJobByIdWithRemoteFallback } from "./jobs-lookup";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { getAllOffers } from "./offers";
 import type { Offer, Rating, Session } from "./types";
@@ -177,11 +177,11 @@ export type SubmitRatingResult = { ok: true; rating: Rating } | { ok: false; err
  *    onaylanan işlerde süre sınırı yoktur. İş bu fonksiyonla asla yeniden
  *    açılmaz — yalnızca bir Rating kaydı oluşturulur, Offer/Job'a dokunulmaz.
  */
-export function submitRating(
+export async function submitRating(
   session: Session | null,
   offerId: string,
   stars: number,
-): SubmitRatingResult {
+): Promise<SubmitRatingResult> {
   if (!session) {
     return { ok: false, error: "Puan vermek için giriş yapmalısınız." };
   }
@@ -197,7 +197,9 @@ export function submitRating(
     return { ok: false, error: "Teklif bulunamadı." };
   }
 
-  const job = findJobById(offer.jobId);
+  // "localStorage Bağımlılığını Kaldır" görevi (2B) — offers.ts#updateOfferStatus'taki
+  // AYNI gerekçe: ilan sahibi tamamlanan işi BAŞKA bir cihazdan puanlıyor olabilir.
+  const job = await findJobByIdWithRemoteFallback(offer.jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu iş üzerinde işlem yapma yetkiniz yok." };
   }

@@ -282,11 +282,11 @@ export function MyOffersPanel() {
     setCompletionError(null);
   }
 
-  function handleConfirmRequestCompletion() {
+  async function handleConfirmRequestCompletion() {
     if (!completionTarget || submitting) return;
     setSubmitting(true);
     setCompletionError(null);
-    const result = requestCompletion(session, completionTarget.id);
+    const result = await requestCompletion(session, completionTarget.id);
     setSubmitting(false);
     if (!result.ok) {
       setCompletionError(result.error);

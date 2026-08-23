@@ -22,6 +22,11 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const APP_ORIGIN = process.env.APP_ORIGIN || "http://localhost:3000";
 const PASSWORD = "TestSifre2026!";
+// Aşama 9 SENARYO 11 yeniden-doğrulaması — "yeni admin OLUŞTURULMAYACAK"
+// kısıtı gereği, bu betiğin kendi orijinal `createUser("admin","admin")`
+// çağrısı yerine ÖNCEKİ görevde (aynı oturumda) zaten oluşturulmuş GERÇEK,
+// MEVCUT admin hesabı yeniden kullanılıyor.
+const REUSE_ADMIN_EMAIL = "malsevk-crossdev-admin-1787520260451@gmail.com";
 
 if (!SUPABASE_URL || !ANON_KEY) {
   console.error("FAIL: eksik ortam değişkeni");
@@ -154,11 +159,11 @@ async function submitOfferViaRealForm(page, description) {
 async function run() {
   const browser = await chromium.launch();
   try {
-    console.log("--- Test kullanicilari olusturuluyor (izole hesaplar) ---");
+    console.log("--- Test kullanicilari olusturuluyor (izole hesaplar, admin MEVCUT olan yeniden kullanılıyor) ---");
     const requester = await createUser("req", "hizmet-alan");
-    const admin = await createUser("admin", "admin");
+    const admin = { email: REUSE_ADMIN_EMAIL };
     const provider = await createUser("prov", "hizmet-veren");
-    console.log(`requester=${requester.email} admin=${admin.email} provider=${provider.email}`);
+    console.log(`requester=${requester.email} admin (MEVCUT, yeniden kullanılıyor)=${admin.email} provider=${provider.email}`);
 
     // Provider'i forklift icin GERCEKTEN yetkilendir (admin onayini simule
     // eder - ayni RPC'nin uretecegi satirla ayni sekilde).

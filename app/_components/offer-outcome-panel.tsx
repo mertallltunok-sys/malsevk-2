@@ -345,11 +345,11 @@ export function OfferOutcomePanel({
     setDisputeNote("");
   }
 
-  function handleStartWork() {
+  async function handleStartWork() {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    const result = startWorkForOffer(session, offer.id);
+    const result = await startWorkForOffer(session, offer.id);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error);
@@ -371,11 +371,11 @@ export function OfferOutcomePanel({
     setModal("none");
   }
 
-  function handleConfirmCompletion() {
+  async function handleConfirmCompletion() {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    const result = confirmCompletion(session, offer.id);
+    const result = await confirmCompletion(session, offer.id);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error);
@@ -385,11 +385,11 @@ export function OfferOutcomePanel({
     onCompleted?.(result.offer);
   }
 
-  function handleDisputeCompletion() {
+  async function handleDisputeCompletion() {
     if (submitting || disputeNote.trim().length < 10) return;
     setSubmitting(true);
     setError(null);
-    const result = disputeCompletion(session, offer.id, disputeNote);
+    const result = await disputeCompletion(session, offer.id, disputeNote);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error);

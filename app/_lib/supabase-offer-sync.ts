@@ -19,25 +19,36 @@ import type { DisagreementReason } from "./types";
  * YEREL yazımın kendisini BLOKE ETMEK için kullanır — hiçbir "best-effort"
  * yol YOKTUR, backend başarısız olursa yerel işlem de başarısız sayılır.
  *
- * KAPSAM (yalnızca görünürlüğü etkileyen VE gelecekteki yeniden-teklif
- * doğruluğunu etkileyen geçişler — tam teklif yaşam döngüsü sunucuya
- * YANSITILMAZ, bkz. proje raporu "teknik borç"): create/accept/reject/
- * withdraw birebir kendi RPC'lerine gider (reject/withdraw senkronu
- * GÖRÜNÜRLÜK için değil, create_offer'ın kendi MLK63 "zaten var" kontrolünün
- * sunucuda YANLIŞLIKLA süresiz "pending" görmesini önlemek için gereklidir —
- * aksi halde bir reddedilmiş/geri çekilmiş teklifin bekleme süresi sonrası
- * meşru yeniden teklifi sunucuda spurious biçimde reddedilirdi). "İşe
- * başlama", "tamamlama talebi", "tamamlama itirazı" YEREL kalır (görünürlük
- * sonucunu değiştirmezler — accepted zaten ENGAGED_OFFER_STATUSES içinde, bu
- * ara geçişlerin hiçbiri onu kümenin dışına çıkarmaz). Anlaşma başarısız
- * olduğunda VE tamamlama itirazı "iptal" ile sonuçlandığında ikisi de AYNI
- * sunucu etkisine ihtiyaç duyar (offer'ı ENGAGED kümesinin dışına çıkarmak)
- * — ikisi için de mevcut `record_agreement_failure` RPC'si yeniden kullanılır
- * (ikinci bir "iptal" RPC'si İCAT EDİLMEDİ); `resolve_completion_dispute`
- * kullanılmadı çünkü o RPC sunucu tarafında `status = 'completion_disputed'`
- * ön koşulu arıyor — ve bu modül ara geçişleri hiç senkronlamadığından
- * sunucudaki teklif her zaman `accepted`te kalır, `record_agreement_failure`
- * in TAM DA beklediği durum.
+ * KAPSAM — GÜNCELLENDİ ("localStorage Bağımlılığını Kaldır" görevi, Aşama 9,
+ * canlıya hazırlık): bu dosya eskiden yalnızca "görünürlüğü etkileyen VE
+ * gelecekteki yeniden-teklif doğruluğunu etkileyen geçişler"i senkronluyordu
+ * (create/accept/reject/withdraw/anlaşma-sağlanamadı) ve "işe başlama"/
+ * "tamamlama talebi"/"tamamlama onayı"/"tamamlama itirazı"nı BİLEREK
+ * senkronlamıyordu — gerekçe "bu ara geçişlerin hiçbiri iş görünürlüğünü
+ * değiştirmez" idi (accepted zaten ENGAGED_OFFER_STATUSES içinde). Bu
+ * gerekçe GÖRÜNÜRLÜK açısından hâlâ doğru, ama Aşama 9'un gerçek çapraz-cihaz
+ * testleri (SENARYO 5/6/7) BAŞKA, daha ciddi bir sonucu ortaya çıkardı: bir
+ * cihazda "işe başlandı" işaretlenen bir teklif, TAMAMEN AYRI/temiz bir
+ * oturumdaki (farklı cihaz/tarayıcı) karşı taraf için hâlâ "accepted"
+ * görünüyordu — çünkü o temiz oturum, hydrateMissingOffersFromRemote
+ * üzerinden sunucudaki (hiç ilerlememiş) donmuş "accepted" satırını
+ * hidratlıyordu. Bu, teklifin durumunu göstermenin ötesinde, karşı tarafın
+ * GERÇEK bir sonraki adımı (Tamamlandı Olarak İşaretle/Tamamlandığını Onayla/
+ * İtiraz Et) hiç GÖREMEMESİ anlamına geliyordu — yani akışın kendisi farklı
+ * cihazda fiilen KIRIKTI, yalnızca "teknik borç" değil. Sunucu tarafında bu
+ * beş geçiş için gereken RPC'ler (start_work/request_completion/
+ * confirm_completion/dispute_completion/resolve_completion_dispute) migration
+ * 0015/0022'den beri zaten VARDI — yalnızca bu istemci modülü hiç
+ * çağırmıyordu. Artık HEPSİ çağrılıyor; yeni bir RPC/migration İCAT EDİLMEDİ.
+ * create/accept/reject/withdraw/anlaşma-sağlanamadı senkronu değişmedi
+ * (reject/withdraw senkronu GÖRÜNÜRLÜK için değil, create_offer'ın kendi
+ * MLK63 "zaten var" kontrolünün sunucuda YANLIŞLIKLA süresiz "pending"
+ * görmesini önlemek için gereklidir). `resolveCompletionDispute` artık HER
+ * İKİ sonuç (completed/cancelled) için de gerçek `resolve_completion_dispute`
+ * RPC'sini çağırır — eskiden yalnızca "cancelled" için `record_agreement_failure`
+ * RPC'si ödünç alınıyordu (çünkü sunucudaki teklif hiç `completion_disputed`e
+ * ulaşamıyordu); artık dispute_completion de senkronlandığı için sunucu
+ * durumu gerçekten `completion_disputed`e ulaşıyor ve doğru RPC kullanılabiliyor.
  *
  * İDEMPOTENT/TEKRAR-DENEME GÜVENLİĞİ: her fonksiyon, "istek sunucuda
  * BAŞARILI oldu ama yanıt tarayıcıya hiç ulaşmadı" senaryosunu, RPC'nin
@@ -87,6 +98,9 @@ function friendlyError(error: { message?: string } | null): string {
   if (raw.includes("MLK66")) return "Tamamlanması taahhüt edilen gün 1-60 arasında olmalıdır.";
   if (raw.includes("MLK67")) return "Bu ilan için başka bir teklif zaten anlaşma sürecinde.";
   if (raw.includes("MLK68")) return "Bu teklif zaten karara bağlanmış.";
+  if (raw.includes("MLK69")) return "Kendi gönderdiğiniz tamamlanma talebi üzerinde bu işlemi yapamazsınız.";
+  if (raw.includes("MLK70")) return "İtiraz açıklaması 10-1000 karakter arasında olmalıdır.";
+  if (raw.includes("MLK78")) return "Geçersiz sonuç seçimi.";
   if (raw.includes("MLK87")) return "Bu teklifin hizmet uygunluğu artık geçerli değil.";
   if (raw.includes("ML125") || raw.includes("ML126")) return "Oturumunuz doğrulanamadı, lütfen tekrar giriş yapın.";
   if (raw.includes("ML127")) return "Hesabınız askıya alınmış.";
@@ -205,25 +219,78 @@ export async function recordAgreementFailureOnSupabase(
   return { ok: false, error: friendlyError(error) };
 }
 
-/**
- * `resolveCompletionDispute(cancelled)` içinde, YEREL yazımdan ÖNCE çağrılır
- * — bkz. dosya başlığı, `resolve_completion_dispute` yerine BİLEREK
- * `record_agreement_failure` yeniden kullanılır. Yalnızca resolution
- * "cancelled" iken çağrılır — "completed" çözümü görünürlüğü DEĞİŞTİRMEZ
- * (accepted zaten ENGAGED kümesinde), bu yüzden senkronlanmaz.
- */
-export async function recordCompletionDisputeCancelledOnSupabase(supabaseOfferId: string): Promise<OfferSyncVoidResult> {
+/** `startWorkForOffer` içinde, YEREL yazımdan ÖNCE çağrılır. */
+export async function startWorkOnSupabase(supabaseOfferId: string): Promise<OfferSyncVoidResult> {
   const supabase = createSupabaseBrowserClient();
-  const { error } = await supabase.rpc("record_agreement_failure", {
+  const { error } = await supabase.rpc("start_work", { p_offer_id: supabaseOfferId });
+  if (!error) return { ok: true };
+
+  if (isErrorCode(error, ALREADY_DECIDED_CODE)) {
+    const { data: current } = await supabase.from("offers").select("status").eq("id", supabaseOfferId).maybeSingle();
+    if (current?.status === "in_progress") return { ok: true };
+  }
+  return { ok: false, error: friendlyError(error) };
+}
+
+/** `requestCompletion` içinde, YEREL yazımdan ÖNCE çağrılır. */
+export async function requestCompletionOnSupabase(supabaseOfferId: string): Promise<OfferSyncVoidResult> {
+  const supabase = createSupabaseBrowserClient();
+  const { error } = await supabase.rpc("request_completion", { p_offer_id: supabaseOfferId });
+  if (!error) return { ok: true };
+
+  if (isErrorCode(error, ALREADY_DECIDED_CODE)) {
+    const { data: current } = await supabase.from("offers").select("status").eq("id", supabaseOfferId).maybeSingle();
+    if (current?.status === "completion_requested") return { ok: true };
+  }
+  return { ok: false, error: friendlyError(error) };
+}
+
+/** `confirmCompletion` içinde, YEREL yazımdan ÖNCE çağrılır. */
+export async function confirmCompletionOnSupabase(supabaseOfferId: string): Promise<OfferSyncVoidResult> {
+  const supabase = createSupabaseBrowserClient();
+  const { error } = await supabase.rpc("confirm_completion", { p_offer_id: supabaseOfferId });
+  if (!error) return { ok: true };
+
+  if (isErrorCode(error, ALREADY_DECIDED_CODE)) {
+    const { data: current } = await supabase.from("offers").select("status").eq("id", supabaseOfferId).maybeSingle();
+    if (current?.status === "completed") return { ok: true };
+  }
+  return { ok: false, error: friendlyError(error) };
+}
+
+/** `disputeCompletion` içinde, YEREL yazımdan ÖNCE çağrılır. */
+export async function disputeCompletionOnSupabase(supabaseOfferId: string, note: string): Promise<OfferSyncVoidResult> {
+  const supabase = createSupabaseBrowserClient();
+  const { error } = await supabase.rpc("dispute_completion", { p_offer_id: supabaseOfferId, p_note: note });
+  if (!error) return { ok: true };
+
+  if (isErrorCode(error, ALREADY_DECIDED_CODE)) {
+    const { data: current } = await supabase.from("offers").select("status").eq("id", supabaseOfferId).maybeSingle();
+    if (current?.status === "completion_disputed") return { ok: true };
+  }
+  return { ok: false, error: friendlyError(error) };
+}
+
+/**
+ * `resolveCompletionDispute` içinde, YEREL yazımdan ÖNCE çağrılır — artık HER
+ * İKİ sonuç (completed/cancelled) için de gerçek `resolve_completion_dispute`
+ * RPC'sini kullanır (bkz. dosya başlığı — eskiden yalnızca "cancelled" için
+ * `record_agreement_failure` ödünç alınıyordu).
+ */
+export async function resolveCompletionDisputeOnSupabase(
+  supabaseOfferId: string,
+  resolution: "completed" | "cancelled",
+): Promise<OfferSyncVoidResult> {
+  const supabase = createSupabaseBrowserClient();
+  const { error } = await supabase.rpc("resolve_completion_dispute", {
     p_offer_id: supabaseOfferId,
-    p_reason: "diger",
-    p_note: "Tamamlama uyuşmazlığı sonucunda iş iptal edildi.",
+    p_resolution: resolution,
   });
   if (!error) return { ok: true };
 
   if (isErrorCode(error, ALREADY_DECIDED_CODE)) {
     const { data: current } = await supabase.from("offers").select("status").eq("id", supabaseOfferId).maybeSingle();
-    if (current?.status === "agreement_failed") return { ok: true };
+    if (current?.status === resolution) return { ok: true };
   }
   return { ok: false, error: friendlyError(error) };
 }
