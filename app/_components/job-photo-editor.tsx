@@ -40,11 +40,14 @@ export function JobPhotoEditor({
   onChange,
   onBusyChange,
   errorId,
+  maxPhotos = MAX_PHOTOS,
 }: {
   job: Job;
   onChange: (state: { keptPhotoIds: string[]; newPhotos: ReadyJobPhoto[] }) => void;
   onBusyChange?: (busy: boolean) => void;
   errorId?: string;
+  /** Bkz. job-photo-upload.tsx#JobPhotoUpload'daki AYNI "Depolama İlan Oluşturma" notu — verilmezse davranış BİREBİR eskisiyle (MAX_PHOTOS) aynıdır. */
+  maxPhotos?: number;
 }) {
   const [keptPhotos, setKeptPhotos] = useState<JobPhoto[]>(
     () => [...job.photos].sort((a, b) => a.order - b.order),
@@ -65,7 +68,7 @@ export function JobPhotoEditor({
     setKeptPhotos((current) => current.filter((photo) => photo.id !== photoId));
   }
 
-  const remainingSlots = Math.max(0, MAX_PHOTOS - keptPhotos.length);
+  const remainingSlots = Math.max(0, maxPhotos - keptPhotos.length);
 
   return (
     <div>
@@ -90,11 +93,12 @@ export function JobPhotoEditor({
             onBusyChange={onBusyChange}
             errorId={errorId}
             existingCount={keptPhotos.length}
+            maxPhotos={maxPhotos}
           />
         </div>
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">
-          En fazla {MAX_PHOTOS} fotoğraf yükleyebilirsiniz. Yeni fotoğraf eklemek için önce mevcut
+          En fazla {maxPhotos} fotoğraf yükleyebilirsiniz. Yeni fotoğraf eklemek için önce mevcut
           bir fotoğrafı silin.
         </p>
       )}

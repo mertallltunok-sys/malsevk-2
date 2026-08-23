@@ -9,10 +9,9 @@ import {
   getProvinceIdByCode,
   getProvinces,
 } from "../_lib/turkey-locations";
+import { ADDRESS_MAX_LENGTH } from "../_lib/field-limits";
 import { ManualFacilityNameField } from "./manual-facility-name-field";
 import { SearchableSelect } from "./searchable-select";
-
-const ADDRESS_MAX_LENGTH = 500;
 
 export type NakliyeLocationFieldValues = {
   /** turkey-locations.ts il KODU (ör. "41") — types.ts#Job.province/deliveryProvince (il ADI) DEĞİL; il adı yalnızca gönderim anında çözülür (bkz. job-request-form.tsx/job-edit-form.tsx). */

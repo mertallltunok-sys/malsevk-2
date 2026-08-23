@@ -1,14 +1,29 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useId, useMemo, useState } from "react";
-import { getCurrencyLabel } from "../_lib/money";
+import { useId, useMemo, useRef, useState } from "react";
 import { validateOfferForm, type OfferFormErrors } from "../_lib/offer-form-validation";
 import { createOffer, MAX_COMMITTED_DAYS, MIN_COMMITTED_DAYS } from "../_lib/offers";
 import { isTransportationCategory } from "../_lib/product-catalog";
+import { isRecyclingCategory, RECYCLING_COMMERCIAL_DIRECTION_OPTIONS, type RecyclingCommercialDirection } from "../_lib/recycling-catalog";
 import type { Currency, Job, Offer, Session } from "../_lib/types";
 
 const DESCRIPTION_MAX_LENGTH = 1000;
+
+/**
+ * İlan detay sayfası masaüstü tek-ekran yoğunlaştırma görevi (3. tur) —
+ * ayrı "Para Birimi" + "Teklif Fiyatı" alanları eşit genişlikte yan yana
+ * dururken uzun seçenek metinleri ("Türk Lirası (TRY)") kesiliyordu. Tek
+ * başlık ("Teklif Tutarı") altında birleşik bir kontrol: sabit dar bir para
+ * birimi `<select>` (kısa "₺ TRY" biçiminde — money.ts#getCurrencyLabel'ın
+ * KENDİSİ DEĞİL, o fonksiyon `"12.500,50 TL"` gibi biçimlendirilmiş tutarlar
+ * için "TL" tarzı bir SON EK üretir; burada amaç farklı — SEÇİM listesinde
+ * sembol+kod birlikte kısa gösterim — bu yüzden ayrı, yalnızca bu dosyaya
+ * özel küçük bir eşleme kullanılır, money.ts'in kendisi DEĞİŞMEDİ) + kalan
+ * genişliği kullanan fiyat input'u. Doğrulama/gönderim mantığı (validateOfferForm,
+ * createOffer) BİREBİR AYNI — yalnızca sunum birleşti.
+ */
+const CURRENCY_SELECT_LABELS: Record<Currency, string> = { TRY: "₺ TRY", USD: "$ USD", EUR: "€ EUR" };
 
 export function OfferForm({
   job,
@@ -23,14 +38,22 @@ export function OfferForm({
   const amountId = useId();
   const descriptionId = useId();
   const durationId = useId();
+  const commercialDirectionId = useId();
 
   const [currency, setCurrency] = useState<Currency>("TRY");
   const [amountInput, setAmountInput] = useState("");
   const [description, setDescription] = useState("");
   const [estimatedDuration, setEstimatedDuration] = useState<number | "">("");
+  const [commercialDirection, setCommercialDirection] = useState<RecyclingCommercialDirection | "">("");
   const [errors, setErrors] = useState<OfferFormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Genel Güvenlik görevi §15 — çift-gönderim koruması: React state
+  // (submitting) tek başına aynı JS event-loop turundaki art arda iki
+  // tıklama/Enter'ı durduramaz (state commit edilmeden önce ikinci çağrı da
+  // handleSubmit'e ulaşabilir) — job-request-form.tsx#handlePublish'teki
+  // submitLockRef İLE AYNI, senkron, render'dan bağımsız kilit deseni.
+  const submitLockRef = useRef(false);
 
   const dayOptions = useMemo(
     () => Array.from({ length: MAX_COMMITTED_DAYS - MIN_COMMITTED_DAYS + 1 }, (_, index) => MIN_COMMITTED_DAYS + index),
@@ -46,10 +69,12 @@ export function OfferForm({
   }
 
   const requiresEstimatedDuration = isTransportationCategory(job.category);
+  const requiresCommercialDirection = isRecyclingCategory(job.category);
+  const isFreePickup = requiresCommercialDirection && commercialDirection === "ucretsiz-alim";
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || submitLockRef.current) return;
 
     const { errors: fieldErrors, amount } = validateOfferForm({
       currency,
@@ -57,6 +82,7 @@ export function OfferForm({
       description,
       estimatedDuration,
       category: job.category,
+      commercialDirection,
     });
 
     setErrors(fieldErrors);
@@ -66,55 +92,86 @@ export function OfferForm({
       return;
     }
 
+    submitLockRef.current = true;
     setSubmitting(true);
-    const result = createOffer(session, {
-      jobId: job.id,
-      amount,
-      currency,
-      description,
-      estimatedDuration: requiresEstimatedDuration && estimatedDuration !== "" ? estimatedDuration : undefined,
-    });
-    setSubmitting(false);
+    try {
+      const result = await createOffer(session, {
+        jobId: job.id,
+        amount,
+        currency,
+        description,
+        estimatedDuration: requiresEstimatedDuration && estimatedDuration !== "" ? estimatedDuration : undefined,
+        commercialDirection: requiresCommercialDirection && commercialDirection !== "" ? commercialDirection : undefined,
+      });
 
-    if (!result.ok) {
-      setSubmitError(result.error);
-      return;
+      if (!result.ok) {
+        setSubmitError(result.error);
+        return;
+      }
+
+      onSuccess(result.offer);
+    } finally {
+      submitLockRef.current = false;
+      setSubmitting(false);
     }
-
-    onSuccess(result.offer);
   }
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
-      <div className="grid gap-6 sm:grid-cols-2">
+      {requiresCommercialDirection && (
         <div>
-          <label htmlFor={currencyId} className="text-sm font-medium text-foreground">
-            Para Birimi
+          <label htmlFor={commercialDirectionId} className="text-sm font-medium text-foreground">
+            Teklifin Ticari Yönü
           </label>
           <select
-            id={currencyId}
-            value={currency}
-            onChange={(event) => setCurrency(event.target.value as Currency)}
-            aria-invalid={errors.currency ? true : undefined}
-            aria-describedby={errors.currency ? `${currencyId}-error` : undefined}
+            id={commercialDirectionId}
+            value={commercialDirection}
+            onChange={(event) => setCommercialDirection(event.target.value as RecyclingCommercialDirection | "")}
+            aria-invalid={errors.commercialDirection ? true : undefined}
+            aria-describedby={errors.commercialDirection ? `${commercialDirectionId}-error` : undefined}
             className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <option value="TRY">Türk Lirası (TRY)</option>
-            <option value="USD">Amerikan Doları (USD)</option>
-            <option value="EUR">Euro (EUR)</option>
+            <option value="">Seçiniz</option>
+            {RECYCLING_COMMERCIAL_DIRECTION_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
           </select>
-          {errors.currency && (
-            <p id={`${currencyId}-error`} className="mt-2 text-sm text-danger">
-              {errors.currency}
+          {commercialDirection && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {RECYCLING_COMMERCIAL_DIRECTION_OPTIONS.find((option) => option.id === commercialDirection)?.description}
+            </p>
+          )}
+          {errors.commercialDirection && (
+            <p id={`${commercialDirectionId}-error`} className="mt-2 text-sm text-danger">
+              {errors.commercialDirection}
             </p>
           )}
         </div>
+      )}
 
+      {!isFreePickup && (
         <div>
           <label htmlFor={amountId} className="text-sm font-medium text-foreground">
-            Teklif Fiyatı
+            {requiresCommercialDirection && commercialDirection === "atik-satin-alma" ? "Teklif Ettiğiniz Bedel" : "Teklif Tutarı"}
           </label>
-          <div className="relative mt-2">
+          <div className="mt-2 flex gap-2">
+            <select
+              id={currencyId}
+              value={currency}
+              onChange={(event) => setCurrency(event.target.value as Currency)}
+              aria-label="Para birimi"
+              aria-invalid={errors.currency ? true : undefined}
+              aria-describedby={errors.currency ? `${currencyId}-error` : undefined}
+              className="h-[52px] w-[96px] shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {(Object.keys(CURRENCY_SELECT_LABELS) as Currency[]).map((value) => (
+                <option key={value} value={value}>
+                  {CURRENCY_SELECT_LABELS[value]}
+                </option>
+              ))}
+            </select>
             <input
               id={amountId}
               type="text"
@@ -124,23 +181,22 @@ export function OfferForm({
               onChange={handleAmountChange}
               aria-invalid={errors.amount ? true : undefined}
               aria-describedby={errors.amount ? `${amountId}-error` : undefined}
-              placeholder="Ör. 12500,50"
-              className="w-full rounded-md border border-border bg-surface px-4 py-3 pr-12 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              placeholder="0,00"
+              className="h-[52px] min-w-0 flex-1 rounded-md border border-border bg-surface px-4 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground"
-            >
-              {getCurrencyLabel(currency)}
-            </span>
           </div>
+          {errors.currency && (
+            <p id={`${currencyId}-error`} className="mt-2 text-sm text-danger">
+              {errors.currency}
+            </p>
+          )}
           {errors.amount && (
             <p id={`${amountId}-error`} className="mt-2 text-sm text-danger">
               {errors.amount}
             </p>
           )}
         </div>
-      </div>
+      )}
 
       <div>
         <div className="flex items-baseline justify-between gap-3">
@@ -172,7 +228,7 @@ export function OfferForm({
       {requiresEstimatedDuration && (
         <div>
           <label htmlFor={durationId} className="text-sm font-medium text-foreground">
-            Tamamlanması Taahhüt Edilen Gün
+            Taahhüt Edilen Süre
           </label>
           <select
             id={durationId}
@@ -207,7 +263,7 @@ export function OfferForm({
         type="submit"
         disabled={submitting}
         aria-disabled={submitting}
-        className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
+        className="inline-flex w-full min-h-[44px] items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
       >
         {submitting && (
           <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />

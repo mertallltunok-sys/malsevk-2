@@ -7,6 +7,7 @@ import {
   PUBLIC_OPERATION_STATUS_BUCKET_ORDER,
 } from "../_lib/job-requests";
 import { useFilterVisibleJobs } from "../_lib/job-visibility";
+import { filterModerationVisibleJobs } from "../_lib/job-moderation";
 import { getOperationServiceCardStatus } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import { useJobsForOperation } from "../_lib/use-jobs";
@@ -78,7 +79,16 @@ export function OperationStatusCard({
   session: Session | null;
 }) {
   const allOperationJobs = useJobsForOperation(currentJob.operationId);
-  const operationJobs = useFilterVisibleJobs(session, allOperationJobs);
+  // İlan Onayı (bkz. job-moderation.ts, görev bölüm 10 — job-bazlı, operasyon-
+  // bazlı DEĞİL): Nakliye izolasyonuyla AYNI seviyede, ondan bağımsız ikinci
+  // bir filtre — bu operasyonun görüntüleyeni sahibi/admin DEĞİLSE, henüz
+  // onaylanmamış/reddedilmiş kardeş hizmetler bu listede hiç görünmez (ör.
+  // Nakliye onaylı, Depolama hâlâ incelemedeyken yalnız Nakliye satırı
+  // gösterilir). `currentJob`in kendisi bu noktaya ulaşmadan önce zaten
+  // job-detail-content.tsx'in kendi kapısından geçmiştir (sahibi/admin/onaylı),
+  // bu yüzden burada AYRICA kontrol edilmesine gerek yoktur.
+  const nakliyeVisibleOperationJobs = useFilterVisibleJobs(session, allOperationJobs);
+  const operationJobs = filterModerationVisibleJobs(session, nakliyeVisibleOperationJobs);
 
   if (!currentJob.operationId || operationJobs.length < 2) return null;
 

@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Clock,
   Factory,
+  FileUp,
   HardHat,
   Inbox,
   LayoutDashboard,
@@ -26,7 +27,8 @@ import { createSupabaseBrowserClient } from "../_lib/supabase/browser-client";
 import type { Session } from "../_lib/types";
 import { useDropdown } from "../_lib/use-dropdown";
 
-type MenuItem = { label: string; href?: string; icon: LucideIcon };
+/** `accentIconClassName`: yalnızca "Belge Yükleme" gibi tek bir öğeyi hafifçe öne çıkarmak için — mevcut aktif/pasif renk mantığını EZMEZ (yalnızca aktif DEĞİLKEN uygulanır, bkz. MenuRow). */
+type MenuItem = { label: string; href?: string; icon: LucideIcon; accentIconClassName?: string };
 
 const hizmetAlanMenuItems: MenuItem[] = [
   { label: "Profilim", href: "/panel/profil", icon: User },
@@ -57,6 +59,17 @@ const hizmetVerenMenuItems: MenuItem[] = [
   { label: "Tamamlanan İşler", href: "/panel/tekliflerim?durum=tamamlandi", icon: CheckCircle2 },
   { label: "Bildirimler", href: "/panel/bildirimler", icon: Bell },
   { label: "Hesap Ayarları", href: "/panel/hesap-ayarlari", icon: Settings },
+  { label: "Belge Yükleme", href: "/panel/belge-yukleme", icon: FileUp, accentIconClassName: "text-success" },
+];
+
+// ADMİN OTOMATİK YÖNLENDİRME (Yönetim Paneli yeniden tasarımı, görev bölüm
+// 3): admin, herkese açık site/panel sayfalarındayken profil menüsünde tek
+// bir yönlendirme öğesi görür — mevcut hizmet-alan/hizmet-veren panel
+// öğelerinin (Hizmet Taleplerim, Gelen Teklifler, vb.) hiçbiri admin
+// hesabına uygulanmaz, bu yüzden onların listesine EKLENMEZ, tamamen ayrı
+// bir üçüncü liste olarak tutulur.
+const adminMenuItems: MenuItem[] = [
+  { label: "Yönetim Paneline Git", href: "/admin", icon: ShieldCheck },
 ];
 
 /**
@@ -65,15 +78,22 @@ const hizmetVerenMenuItems: MenuItem[] = [
  * kendi oturum çerezlerini/localStorage anahtarlarını temizler ve
  * `session.ts`'in `onAuthStateChange` dinleyicisini tetikleyerek uygulama
  * genelindeki `useSession()` önbelleğini otomatik olarak `null`a çevirir
- * (bkz. o dosyanın dokümantasyonu). `window.location.href = "/"` (tam sayfa
+ * (bkz. o dosyanın dokümantasyonu). `window.location.href` (tam sayfa
  * yenileme, `router.push` DEĞİL) BİLEREK korunur — mevcut davranışla aynı:
  * tüm client-side state'in (React ağacı, localStorage önbellekleri) sıfırdan
  * başlamasını garanti eder.
+ *
+ * "Kritik Oturum/Kimlik Karışması" görevi — `redirectTo` (varsayılan `"/"`,
+ * her iki mevcut çağıran da BİREBİR aynı davranışı korur) `login-form.tsx`nin
+ * "Çıkış Yapıp Kayıt Ol" butonunca `"/giris-yap?mode=kayit"` ile yeniden
+ * kullanılır — aktif oturumu tamamen (tam sayfa yenilemesiyle) temizledikten
+ * SONRA kullanıcıyı doğrudan kayıt sekmesine geri götürür, ikinci bir
+ * sign-out/temizleme fonksiyonu İCAT EDİLMEZ.
  */
-export async function handleLogout() {
+export async function handleLogout(redirectTo = "/") {
   const supabase = createSupabaseBrowserClient();
   await supabase.auth.signOut();
-  window.location.href = "/";
+  window.location.href = redirectTo;
 }
 
 function MenuRow({
@@ -115,7 +135,7 @@ function MenuRow({
       }`}
     >
       <item.icon
-        className={`h-4 w-4 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+        className={`h-4 w-4 ${isActive ? "text-primary" : (item.accentIconClassName ?? "text-muted-foreground")}`}
         aria-hidden="true"
       />
       {item.label}
@@ -163,7 +183,12 @@ export function ProfileMenu({
   layout: "desktop" | "mobile";
 }) {
   const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
-  const items = session.role === "hizmet-veren" ? hizmetVerenMenuItems : hizmetAlanMenuItems;
+  const items =
+    session.role === "admin"
+      ? adminMenuItems
+      : session.role === "hizmet-veren"
+        ? hizmetVerenMenuItems
+        : hizmetAlanMenuItems;
   const pathname = usePathname();
 
   if (layout === "mobile") {
@@ -183,7 +208,7 @@ export function ProfileMenu({
         <div className="mt-1 border-t border-border pt-1">
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => handleLogout()}
             className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <LogOut className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -232,7 +257,7 @@ export function ProfileMenu({
           <div className="border-t border-border pt-1">
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => handleLogout()}
               role="menuitem"
               className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >

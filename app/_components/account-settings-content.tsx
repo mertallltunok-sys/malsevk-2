@@ -1,13 +1,16 @@
 "use client";
 
 import { LogOut } from "lucide-react";
-import { getProfileInfo } from "../_lib/profile";
+import { useSessionProfileDetails } from "../_lib/use-session-profile";
 import { useSession } from "../_lib/use-session";
 import { useUserById } from "../_lib/use-users";
 import { AuthGateNotice } from "./auth-gate-notice";
+import { BasicProfileEditor } from "./basic-profile-editor";
+import { ChangePasswordForm } from "./change-password-form";
 import { ContactVisibilitySettings } from "./contact-visibility-settings";
 import { handleLogout } from "./profile-menu";
 import { ProfileInfoCard } from "./profile-info-card";
+import { ProviderDocumentStatusList } from "./provider-document-status-list";
 import { ProviderProfileEditor } from "./provider-profile-editor";
 
 function ComingSoonAction({
@@ -52,6 +55,12 @@ export function AccountSettingsContent() {
   // Hook, koşulsuz (Rules of Hooks) her render'da çağrılır — session henüz
   // yokken `null` geçilir, useUserById bunu zaten `null` olarak ele alır.
   const user = useUserById(session?.id ?? null);
+  // PROFİL/PROVIDER GEÇİŞİ: ProfileInfoCard artık GERÇEK Supabase `profiles`
+  // satırından beslenir (bkz. profile-page-content.tsx'in AYNI deseni) —
+  // `user` (localStorage) yalnızca ProviderProfileEditor/ContactVisibilitySettings
+  // için hâlâ gereklidir (providerProfile/showEmail.../showPhone... hâlâ
+  // yalnızca localStorage'da, bkz. son rapor).
+  const profileDetails = useSessionProfileDetails();
 
   if (!session) {
     return (
@@ -72,27 +81,39 @@ export function AccountSettingsContent() {
       </p>
 
       <div className="mt-8 flex flex-col gap-6">
-        {user ? (
-          <ProfileInfoCard profile={getProfileInfo(user)} />
+        {profileDetails ? (
+          <ProfileInfoCard
+            profile={{
+              name: profileDetails.fullName,
+              email: profileDetails.email,
+              phone: profileDetails.phone ?? "",
+              role: session.role,
+            }}
+          />
         ) : (
           <p className="rounded-card border border-border bg-surface p-8 text-center text-sm text-muted-foreground">
-            Kullanıcı bilgileri bulunamadı.
+            Profil bilgileri yükleniyor...
           </p>
         )}
+
+        {profileDetails && <BasicProfileEditor profileDetails={profileDetails} role={session.role} />}
 
         {user && session.role === "hizmet-veren" && (
           <ProviderProfileEditor session={session} user={user} />
         )}
 
+        {session.role === "hizmet-veren" && <ProviderDocumentStatusList />}
+
         {user && <ContactVisibilitySettings session={session} user={user} />}
 
         <div className="rounded-card border border-border bg-surface p-6">
           <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Güvenlik</h2>
-          <ComingSoonAction
-            title="Şifre Değiştir"
-            description="Hesap şifrenizi güncelleyin."
-            actionLabel="Şifre Değiştir"
-          />
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Hesap şifrenizi güncelleyin.</p>
+          {profileDetails ? (
+            <ChangePasswordForm email={profileDetails.email} />
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">Profil bilgileri yükleniyor...</p>
+          )}
         </div>
 
         <div className="rounded-card border border-border bg-surface p-6">
@@ -102,7 +123,7 @@ export function AccountSettingsContent() {
           </p>
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => handleLogout()}
             className="mt-4 inline-flex items-center gap-2 rounded-full border border-danger px-5 py-2.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
           >
             <LogOut className="h-4 w-4" aria-hidden="true" />

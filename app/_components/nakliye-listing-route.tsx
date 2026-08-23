@@ -22,24 +22,34 @@ import type { NakliyeShortRouteSide } from "../_lib/nakliye-route";
  * dönüşü) render eder — bu bileşenin kendisi bu iki koşulu KONTROL ETMEZ,
  * yalnızca zaten doğrulanmış veriyi biçimlendirir.
  */
+/**
+ * MALSEVK genel ilan gizlilik kuralı — `isRevealed` (job-listing-row.ts#
+ * JobListingRow.isLocationRevealed, job-requests.ts#canViewJobAddress'in
+ * AYNEN kullanımı) `false` iken `nameLabel` (tesis/firma adı) hiç
+ * render edilmez, yalnızca `locationLabel` (İl / İlçe) kalır — bu ekran
+ * zaten hiçbir zaman tam açık adres göstermiyordu (bkz. job-listing-row.ts),
+ * eksik olan tek şey tesis adının da aynı gizlilik kuralına tabi olmasıydı.
+ */
 export function NakliyeListingRoute({
   pickup,
   delivery,
+  isRevealed,
 }: {
   pickup: NakliyeShortRouteSide;
   delivery: NakliyeShortRouteSide;
+  isRevealed: boolean;
 }) {
   return (
     <span className="block min-w-0 flex-1">
       <span className="block truncate text-xs text-muted-foreground">{pickup.locationLabel}</span>
-      {pickup.nameLabel && (
+      {isRevealed && pickup.nameLabel && (
         <span className="block truncate font-medium text-foreground">{pickup.nameLabel}</span>
       )}
       <span className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
         <MoveDown className="h-3 w-3 shrink-0" aria-hidden="true" />
         {delivery.locationLabel}
       </span>
-      {delivery.nameLabel && (
+      {isRevealed && delivery.nameLabel && (
         <span className="block truncate font-medium text-foreground">{delivery.nameLabel}</span>
       )}
     </span>

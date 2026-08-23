@@ -1,11 +1,52 @@
+import { isStorageGroupCategory, NAKLIYE_SERVICE_CATEGORY_ID } from "./service-catalog";
+
+/**
+ * Genel (kategoriden bağımsız) fotoğraf sayısı sınırları — projenin
+ * TEK merkezi karar noktası, HER çağıran (job-photo-upload.tsx,
+ * job-photo-editor.tsx, job-request-form.tsx, job-form-validation.ts,
+ * job-store.ts) buradan okur. "Depolama İlan Oluşturma" görev talimatı
+ * Depo Hizmetleri grubu için FARKLI bir aralık (4-15) istiyor — bu, mevcut
+ * genel aralıkla (1-10) BİLEREK ÇELİŞİR (proje raporuna bkz.); çözüm
+ * Depolamaya özel İKİNCİ bir yükleme bileşeni/doğrulama modülü kurmak
+ * DEĞİL, bu TEK merkezi sabit çiftini kategoriye duyarlı hâle getirmektir —
+ * `getMinPhotos`/`getMaxPhotos` bunun için eklendi; `category` verilmezse
+ * ya da Depo Hizmetleri grubunun dışındaysa davranış BİREBİR eskisiyle
+ * aynıdır (1-10). `MIN_PHOTOS`/`MAX_PHOTOS` ham sabitleri geriye dönük
+ * uyumluluk için (ve genel/kategori-bağımsız bağlamlarda varsayılan olarak)
+ * hâlâ dışa aktarılır.
+ */
 export const MAX_PHOTOS = 10;
 export const MIN_PHOTOS = 1;
+const STORAGE_MAX_PHOTOS = 15;
+const STORAGE_MIN_PHOTOS = 4;
+
+/** Nakliye Yeniden Tasarımı görevi: Nakliye de artık Depo Hizmetleri İLE AYNI (4-15) aralığı kullanır — operasyonu (yükleme/istifleme/araç) yeterince belgeleyebilmek için tek fotoğraf yetersiz kalıyordu; ikinci bir sabit çift İCAT EDİLMEDİ, mevcut STORAGE_MIN/MAX_PHOTOS aynen paylaşılır. */
+function requiresWiderPhotoRange(category: string): boolean {
+  return isStorageGroupCategory(category) || category === NAKLIYE_SERVICE_CATEGORY_ID;
+}
+
+export function getMinPhotos(category?: string): number {
+  return category && requiresWiderPhotoRange(category) ? STORAGE_MIN_PHOTOS : MIN_PHOTOS;
+}
+
+export function getMaxPhotos(category?: string): number {
+  return category && requiresWiderPhotoRange(category) ? STORAGE_MAX_PHOTOS : MAX_PHOTOS;
+}
+
 export const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
 
 export const ACCEPTED_FILE_INPUT = ".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif";
 
 export const PHOTOS_REQUIRED_MESSAGE =
   "Devam edebilmek için operasyonu gösteren en az 1 fotoğraf yüklemelisiniz.";
+
+/** Bkz. getMinPhotos/getMaxPhotos üstündeki doküman — PHOTOS_REQUIRED_MESSAGE'ın kategoriye duyarlı hâli. */
+export function getPhotosRequiredMessage(category?: string): string {
+  const min = getMinPhotos(category);
+  return min === MIN_PHOTOS
+    ? PHOTOS_REQUIRED_MESSAGE
+    : `Devam edebilmek için en az ${min} fotoğraf yüklemelisiniz.`;
+}
 
 export type ImageFormat = "jpeg" | "png" | "webp" | "heic";
 

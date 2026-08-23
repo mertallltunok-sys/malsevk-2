@@ -13,14 +13,21 @@ function resolveRedirectTarget(redirect: string | undefined): string {
   return "/";
 }
 
+const AUTH_CONFIRM_ERROR_MESSAGES: Record<string, string> = {
+  "dogrulama-eksik": "Doğrulama bağlantısı eksik veya geçersiz.",
+  "dogrulama-basarisiz": "Doğrulama bağlantısının süresi dolmuş veya daha önce kullanılmış. Lütfen tekrar deneyin.",
+};
+
 export default async function GirisYapPage({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect?: string; mode?: string }>;
+  searchParams: Promise<{ redirect?: string; mode?: string; hata?: string; "sifre-guncellendi"?: string }>;
 }) {
   const params = await searchParams;
   const redirectTo = resolveRedirectTarget(params.redirect);
   const initialMode = params.mode === "kayit" ? "kayit" : "giris";
+  const confirmErrorMessage = params.hata ? AUTH_CONFIRM_ERROR_MESSAGES[params.hata] : undefined;
+  const passwordUpdated = params["sifre-guncellendi"] === "1";
 
   return (
     <section className="bg-background">
@@ -32,7 +39,12 @@ export default async function GirisYapPage({
           Devam etmek için e-posta adresinizi ve şifrenizi girin.
         </p>
         <div className="mt-8 rounded-card border border-border bg-surface p-6 sm:p-8">
-          <LoginForm redirectTo={redirectTo} initialMode={initialMode} />
+          <LoginForm
+            redirectTo={redirectTo}
+            initialMode={initialMode}
+            confirmErrorMessage={confirmErrorMessage}
+            passwordUpdated={passwordUpdated}
+          />
         </div>
       </div>
     </section>

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { ButtonLink } from "./button-link";
 import { HeroVisualPanel } from "./hero-visual-panel";
+import { PageContainer } from "./page-container";
 import { useSession } from "../_lib/use-session";
 
 const trustPoints = [
@@ -105,7 +106,7 @@ export function HeroSection() {
 
   return (
     <section className="border-b border-border bg-background">
-      <div className="mx-auto grid max-w-7xl gap-12 px-4 py-16 sm:px-6 sm:py-20 lg:grid-cols-2 lg:items-center lg:px-8">
+      <PageContainer className="grid gap-12 py-16 sm:py-20 lg:grid-cols-2 lg:items-center">
         <div>
           <span className="inline-flex items-center rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted-foreground">
             Türkiye&apos;nin lojistik hizmet platformu
@@ -172,7 +173,7 @@ export function HeroSection() {
         </div>
 
         <HeroVisualPanel />
-      </div>
+      </PageContainer>
     </section>
   );
 }

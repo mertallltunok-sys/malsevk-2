@@ -1,6 +1,7 @@
 "use client";
 
 import { ButtonLink } from "./button-link";
+import { PageContainer } from "./page-container";
 import { useSession } from "../_lib/use-session";
 
 /**
@@ -16,7 +17,7 @@ export function FinalCtaSection() {
 
   return (
     <section aria-labelledby="son-cta-baslik" className="bg-background">
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <PageContainer className="py-16">
         <div className="rounded-2xl bg-primary px-6 py-12 text-center sm:px-12 sm:py-16">
           <h2
             id="son-cta-baslik"
@@ -45,7 +46,7 @@ export function FinalCtaSection() {
             </ButtonLink>
           </div>
         </div>
-      </div>
+      </PageContainer>
     </section>
   );
 }

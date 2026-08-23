@@ -1,16 +1,36 @@
 import { isCustomsBrokerageCategory } from "./customs-brokerage-catalog";
 import { isSimplifiedLocationCategory } from "./job-location";
+import { isRecyclingCategory } from "./recycling-catalog";
+import { deriveWasteCodeHazardous } from "./recycling-waste-code-catalog";
+import { didCriticalJobContentChange, getJobModerationStatus } from "./job-moderation";
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "./job-requests";
 import { createPublishWindow, isJobListingExpired } from "./job-publish-window";
 import { isJobClosureReason, isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE } from "./job-closure";
 import { isJobDateInPast } from "./jobs";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { isFacilityInProvinceDistrict, isTransportationCategory } from "./nakliye-route";
+import { sanitizeNakliyeCargoGroups, sanitizeNakliyeDetails } from "./nakliye-transport-catalog";
 import { deletePhotoBlob, deletePhotoBlobs, getPhotoBlob, putPhotoBlob } from "./photo-blob-store";
-import { MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
+import { getMaxPhotos, getMinPhotos, getPhotosRequiredMessage, MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
 import { requiresProductInfo } from "./product-catalog";
-import { getServiceCategoryLabel, isServiceCategoryId } from "./service-catalog";
-import type { Job, JobClosureReason, JobCustomsDocument, JobPhoto, JobStatus, Offer, Session } from "./types";
+import { getServiceCategoryLabel, isServiceCategoryId, isStorageGroupCategory } from "./service-catalog";
+import { isContainerStorageCategory, sanitizeStorageContainerGroups } from "./storage-container-catalog";
+import { isHazardousStorageCategory, isTehlikeliMaddeDepolamaCategory, sanitizeStorageRiskGroups } from "./storage-hazard-catalog";
+import type {
+  Job,
+  JobClosureReason,
+  JobCustomsDocument,
+  JobPhoto,
+  JobStatus,
+  NakliyeCargoGroup,
+  NakliyeContainerTransport,
+  NakliyeDetails,
+  NakliyeHazmatDetail,
+  NakliyeMeasurementInfo,
+  Offer,
+  Session,
+  StorageContainerGroup,
+} from "./types";
 
 const USER_JOBS_STORAGE_KEY = "malsevk.jobs.v1";
 
@@ -98,6 +118,12 @@ function normalizeStoredJob(value: unknown): Job | null {
     productTonnage: typeof record.productTonnage === "number" && Number.isFinite(record.productTonnage)
       ? record.productTonnage
       : undefined,
+    // "Toplam Ağırlık" birimi — YALNIZCA "ton"/"kg" geçerli sayılır (bkz.
+    // types.ts#Job.productTonnageUnit); bu alandan önceki Nakliye ilanlarında
+    // hiç yoktur, o durumda job-detail-content.tsx/product-catalog.ts#
+    // formatProductTonnage zaten "ton" varsayılanına düşer.
+    productTonnageUnit:
+      record.productTonnageUnit === "ton" || record.productTonnageUnit === "kg" ? record.productTonnageUnit : undefined,
     productType: typeof record.productType === "string" ? record.productType : undefined,
     // Gümrük Müşavirliği'ne özel "Operasyon Bilgileri": AYNI "eksikliği hata
     // sayma" ilkesiyle (bkz. productQuantity üstündeki not) normalize edilir
@@ -148,6 +174,104 @@ function normalizeStoredJob(value: unknown): Job | null {
     deliveryFacilityId: typeof record.deliveryFacilityId === "string" ? record.deliveryFacilityId : undefined,
     deliveryFacilityName: typeof record.deliveryFacilityName === "string" ? record.deliveryFacilityName : undefined,
     deliveryAddressText: typeof record.deliveryAddressText === "string" ? record.deliveryAddressText : undefined,
+    // İlan Onayı: bu alandan önce oluşturulmuş TÜM ilanlarda (sabit örnek
+    // ilanlar dahil) yoktur — eksikliği job-moderation.ts#getJobModerationStatus
+    // tarafından "approved" olarak yorumlanır (bkz. o dosyanın dokümantasyonu),
+    // burada yalnızca bozuk/tanınmayan bir değeri undefined'a indirger.
+    moderationStatus:
+      record.moderationStatus === "pending_review" || record.moderationStatus === "approved" || record.moderationStatus === "rejected"
+        ? record.moderationStatus
+        : undefined,
+    moderationReviewedAt: typeof record.moderationReviewedAt === "string" ? record.moderationReviewedAt : undefined,
+    moderationReviewedBy: typeof record.moderationReviewedBy === "string" ? record.moderationReviewedBy : undefined,
+    moderationRejectionReason: typeof record.moderationRejectionReason === "string" ? record.moderationRejectionReason : undefined,
+    // Geri Dönüşüm & Atık Tahliye'ye özel alan grubu — AYNI "eksikliği hata
+    // sayma" ilkesiyle (bkz. customsTransactionType/deliveryProvince üstündeki
+    // notlar) normalize edilir — bu alanlardan önce oluşturulmuş ya da ilgisiz
+    // bir kategoride oluşturulmuş ilanlarda hiçbiri yoktur.
+    recyclingMaterialCategoryId: typeof record.recyclingMaterialCategoryId === "string" ? record.recyclingMaterialCategoryId : undefined,
+    recyclingMaterialSubtypeId: typeof record.recyclingMaterialSubtypeId === "string" ? record.recyclingMaterialSubtypeId : undefined,
+    recyclingQuantity:
+      typeof record.recyclingQuantity === "number" && Number.isFinite(record.recyclingQuantity)
+        ? record.recyclingQuantity
+        : undefined,
+    recyclingUnit:
+      record.recyclingUnit === "kg" ||
+      record.recyclingUnit === "ton" ||
+      record.recyclingUnit === "adet" ||
+      record.recyclingUnit === "litre"
+        ? record.recyclingUnit
+        : undefined,
+    recyclingMaterialCondition:
+      record.recyclingMaterialCondition === "ayristirilmis" ||
+      record.recyclingMaterialCondition === "karisik" ||
+      record.recyclingMaterialCondition === "diger"
+        ? record.recyclingMaterialCondition
+        : undefined,
+    recyclingMaterialConditionNote:
+      typeof record.recyclingMaterialConditionNote === "string" ? record.recyclingMaterialConditionNote : undefined,
+    recyclingScopeOfWork:
+      Array.isArray(record.recyclingScopeOfWork) &&
+      record.recyclingScopeOfWork.every((item): item is string => typeof item === "string")
+        ? record.recyclingScopeOfWork
+        : undefined,
+    recyclingRequestedOperation:
+      typeof record.recyclingRequestedOperation === "string" ? record.recyclingRequestedOperation : undefined,
+    recyclingWasteCode: typeof record.recyclingWasteCode === "string" ? record.recyclingWasteCode : undefined,
+    recyclingWasteCodeUnknown:
+      typeof record.recyclingWasteCodeUnknown === "boolean" ? record.recyclingWasteCodeUnknown : undefined,
+    recyclingHazardous: typeof record.recyclingHazardous === "boolean" ? record.recyclingHazardous : undefined,
+    recyclingHazardProperties:
+      Array.isArray(record.recyclingHazardProperties) &&
+      record.recyclingHazardProperties.every((item): item is string => typeof item === "string")
+        ? record.recyclingHazardProperties
+        : undefined,
+    // "Konteyner Grupları" — bu alandan önce oluşturulmuş TÜM Depolama
+    // ilanlarında (ve Konteyner Depolama dışındaki her ilanda) yoktur, bu bir
+    // hata değildir; bkz. storage-container-catalog.ts#sanitizeStorageContainerGroups
+    // (her grubu ayrı ayrı doğrular, bozuk bir grubu atlar).
+    storageContainerGroups: sanitizeStorageContainerGroups(record.storageContainerGroups),
+    // "Kimyasal Depolama / Tehlikeli Madde Depolama" — bu alandan önce
+    // oluşturulmuş TÜM ilanlarda (ve bu iki alt kategori dışındaki her
+    // ilanda) yoktur, bu bir hata değildir.
+    storageHazardous: typeof record.storageHazardous === "boolean" ? record.storageHazardous : undefined,
+    storageRiskGroups: sanitizeStorageRiskGroups(record.storageRiskGroups),
+    // "Nakliye Yeniden Tasarımı" — bu alandan önce oluşturulmuş TÜM Nakliye
+    // ilanlarında (ve Nakliye dışındaki her ilanda) yoktur, bu bir hata
+    // değildir; bkz. nakliye-transport-catalog.ts#sanitizeNakliyeDetails.
+    nakliyeDetails: sanitizeNakliyeDetails(record.nakliyeDetails),
+    // "Nakliye Çoklu Yük Grubu" — bu alandan önce oluşturulmuş (ya da tek
+    // grup asla eklenmemiş) TÜM Nakliye ilanlarında yoktur, bu bir hata
+    // değildir; nakliye-cargo-groups.ts#getJobCargoGroups bu durumda
+    // yukarıdaki tekil alanlardan "Yük Grubu 1" sentezler (SALT OKUNUR).
+    nakliyeCargoGroups: sanitizeNakliyeCargoGroups(record.nakliyeCargoGroups),
+    // DEPRECATED düz alanlar — types.ts#Job'un kendi notuna bkz., yalnızca
+    // storageContainerGroups'tan ÖNCE oluşturulmuş (bu oturumun erken test
+    // verisi dahil) bir ilanın geriye dönük okunabilmesi için normalize
+    // edilir, yeni kod bunlara YAZMAZ.
+    storageContainerSize:
+      record.storageContainerSize === "20" || record.storageContainerSize === "40" || record.storageContainerSize === "45"
+        ? record.storageContainerSize
+        : undefined,
+    storageContainerType:
+      record.storageContainerType === "standart" ||
+      record.storageContainerType === "high-cube" ||
+      record.storageContainerType === "reefer" ||
+      record.storageContainerType === "open-top" ||
+      record.storageContainerType === "tank"
+        ? record.storageContainerType
+        : undefined,
+    storageContainerStatus:
+      record.storageContainerStatus === "dolu" || record.storageContainerStatus === "bos" ? record.storageContainerStatus : undefined,
+    storageContainerHazardous: typeof record.storageContainerHazardous === "boolean" ? record.storageContainerHazardous : undefined,
+    storageContainerUnNumber: typeof record.storageContainerUnNumber === "string" ? record.storageContainerUnNumber : undefined,
+    storageContainerImoClass: typeof record.storageContainerImoClass === "string" ? record.storageContainerImoClass : undefined,
+    storageContainerReeferTemperature:
+      typeof record.storageContainerReeferTemperature === "number" && Number.isFinite(record.storageContainerReeferTemperature)
+        ? record.storageContainerReeferTemperature
+        : undefined,
+    storageContainerReeferElectrical:
+      typeof record.storageContainerReeferElectrical === "boolean" ? record.storageContainerReeferElectrical : undefined,
   } as Job;
 }
 
@@ -353,23 +477,30 @@ function resolveLocationFields(input: LocationInput) {
 type ProductInfoInput = {
   productQuantity?: number;
   productTonnage?: number;
+  /** Bkz. types.ts#Job.productTonnageUnit — yalnızca Nakliye'de yazılır. */
+  productTonnageUnit?: "ton" | "kg";
   productType?: string;
 };
 
 /**
  * `resolveLocationFields` ile AYNI "TEK yer, kopyalanmaz" ilkesi — kategori
- * `product-catalog.ts#requiresProductInfo` kapsamı DIŞINDAYSA üç alan da
+ * `product-catalog.ts#requiresProductInfo` kapsamı DIŞINDAYSA dört alan da
  * HER ZAMAN temizlenir (girdi olarak ne gelirse gelsin), bu yüzden bir ilan
  * düzenlemede ilgisiz bir kategoriye geçirilirse eski ürün bilgisi sessizce
- * kaybolur, yanlış kategoriyle birlikte sürüklenmez.
+ * kaybolur, yanlış kategoriyle birlikte sürüklenmez. `productTonnageUnit`
+ * AYRICA daha DAR bir kapsama sahiptir — yalnızca Nakliye'de (Liman
+ * Hizmetleri requiresProductInfo kapsamında olsa da bu birimi HİÇ kullanmaz,
+ * bkz. görev tanımı) yazılır; kategori Liman Hizmetleri'yse (ya da kapsam
+ * dışıysa) HER ZAMAN temizlenir.
  */
 function resolveProductInfoFields(category: string, input: ProductInfoInput) {
   if (!requiresProductInfo(category)) {
-    return { productQuantity: undefined, productTonnage: undefined, productType: undefined };
+    return { productQuantity: undefined, productTonnage: undefined, productTonnageUnit: undefined, productType: undefined };
   }
   return {
     productQuantity: input.productQuantity,
     productTonnage: input.productTonnage,
+    productTonnageUnit: isTransportationCategory(category) ? input.productTonnageUnit : undefined,
     productType: input.productType?.trim() || undefined,
   };
 }
@@ -431,6 +562,166 @@ function resolveCustomsBrokerageFields(category: string, input: CustomsBrokerage
         : undefined,
     customsProductType: input.customsProductType?.trim() || undefined,
     customsDocuments: input.customsDocuments && input.customsDocuments.length > 0 ? input.customsDocuments : undefined,
+  };
+}
+
+type RecyclingInput = {
+  recyclingMaterialCategoryId?: string;
+  recyclingMaterialSubtypeId?: string;
+  recyclingQuantity?: number;
+  recyclingUnit?: "kg" | "ton" | "adet" | "litre";
+  recyclingMaterialCondition?: "ayristirilmis" | "karisik" | "diger";
+  recyclingMaterialConditionNote?: string;
+  recyclingScopeOfWork?: string[];
+  recyclingRequestedOperation?: string;
+  recyclingWasteCode?: string;
+  recyclingWasteCodeUnknown?: boolean;
+  /** Ham girdi — HER ZAMAN yok sayılır, bkz. fonksiyonun kendi notu: tehlike durumu istemciden asla güvenilmez, atık kodundan yeniden türetilir. */
+  recyclingHazardous?: boolean;
+  recyclingHazardProperties?: string[];
+};
+
+/**
+ * `resolveCustomsBrokerageFields`/`resolveDeliveryLocationFields` ile AYNI
+ * "TEK yer, kopyalanmaz" ilkesi — kategori `isRecyclingCategory` kapsamı
+ * DIŞINDAYSA alanların tamamı HER ZAMAN temizlenir (girdi olarak ne gelirse
+ * gelsin), bu yüzden bir ilan düzenlemede ilgisiz bir kategoriye geçirilirse
+ * eski Geri Dönüşüm bilgisi sessizce kaybolur, yanlış kategoriyle birlikte
+ * sürüklenmez. `recyclingMaterialConditionNote` yalnızca durum "diger" iken
+ * taşınır — başka bir durum seçiliyken (ya da hiç seçilmemişken) girdi ne
+ * olursa olsun temizlenir.
+ *
+ * `recyclingHazardous` istemciden gelen ham değer HİÇBİR ZAMAN doğrudan
+ * kullanılmaz — `deriveWasteCodeHazardous` ile atık kodundan (ya da kod
+ * bilinmiyorsa `null`'dan) burada yeniden türetilir. Bu, storage-hazard
+ * tarafındaki `resolveStorageHazardFields`'in "tehlike bayrağını istemciye
+ * bırakma" ilkesiyle aynıdır — yıldızlı (tehlikeli) bir kod hiçbir zaman
+ * kullanıcı tarafından tehlikesiz olarak override edilemez, çünkü bu alan
+ * hiç kullanıcı girdisinden okunmaz. `recyclingHazardProperties` de aynı
+ * nedenle yalnızca türetilen tehlike durumu `true` iken taşınır.
+ */
+function resolveRecyclingFields(category: string, input: RecyclingInput) {
+  if (!isRecyclingCategory(category)) {
+    return {
+      recyclingMaterialCategoryId: undefined,
+      recyclingMaterialSubtypeId: undefined,
+      recyclingQuantity: undefined,
+      recyclingUnit: undefined,
+      recyclingMaterialCondition: undefined,
+      recyclingMaterialConditionNote: undefined,
+      recyclingScopeOfWork: undefined,
+      recyclingRequestedOperation: undefined,
+      recyclingWasteCode: undefined,
+      recyclingWasteCodeUnknown: undefined,
+      recyclingHazardous: undefined,
+      recyclingHazardProperties: undefined,
+    };
+  }
+  const wasteCodeUnknown = input.recyclingWasteCodeUnknown === true;
+  const wasteCode = wasteCodeUnknown ? undefined : input.recyclingWasteCode?.trim() || undefined;
+  const hazardous = deriveWasteCodeHazardous(wasteCode ?? null) ?? undefined;
+  return {
+    recyclingMaterialCategoryId: input.recyclingMaterialCategoryId,
+    recyclingMaterialSubtypeId: input.recyclingMaterialSubtypeId,
+    recyclingQuantity: input.recyclingQuantity,
+    recyclingUnit: input.recyclingUnit,
+    recyclingMaterialCondition: input.recyclingMaterialCondition,
+    recyclingMaterialConditionNote:
+      input.recyclingMaterialCondition === "diger" ? input.recyclingMaterialConditionNote?.trim() || undefined : undefined,
+    recyclingScopeOfWork:
+      input.recyclingScopeOfWork && input.recyclingScopeOfWork.length > 0 ? input.recyclingScopeOfWork : undefined,
+    recyclingRequestedOperation: input.recyclingRequestedOperation || undefined,
+    recyclingWasteCode: wasteCode,
+    recyclingWasteCodeUnknown: wasteCodeUnknown,
+    recyclingHazardous: hazardous,
+    recyclingHazardProperties:
+      hazardous && input.recyclingHazardProperties && input.recyclingHazardProperties.length > 0
+        ? input.recyclingHazardProperties
+        : undefined,
+  };
+}
+
+type StorageProductInput = {
+  storageProductType?: string;
+  storageProductQuantity?: number;
+  storageProductUnit?: "kg" | "ton" | "adet";
+  storageProductTonnage?: number;
+  storageContainerGroups?: StorageContainerGroup[];
+};
+
+const EMPTY_STORAGE_CONTAINER_FIELDS: StorageProductInput = {
+  storageProductType: undefined,
+  storageProductQuantity: undefined,
+  storageProductUnit: undefined,
+  storageProductTonnage: undefined,
+  storageContainerGroups: undefined,
+};
+
+/**
+ * `resolveRecyclingFields`/`resolveCustomsBrokerageFields` ile AYNI "TEK
+ * yer, kopyalanmaz" ilkesi — kategori `isStorageGroupCategory` kapsamı
+ * DIŞINDAYSA her alan HER ZAMAN temizlenir (girdi olarak ne gelirse
+ * gelsin), bu yüzden bir ilan düzenlemede ilgisiz bir kategoriye geçirilirse
+ * eski Depolama bilgisi sessizce kaybolur, yanlış kategoriyle birlikte
+ * sürüklenmez. Kategori "Konteyner Depolama" İSE `storageProductType/
+ * Quantity/Unit/Tonnage` DÖRDÜ DE her zaman temizlenir (bkz. storage-
+ * container-catalog.ts'in kendi başlık dokümanındaki 3. tasarım notu — bir
+ * ilan birden fazla konteyner grubu taşıyabildiği için TEK değerli bu
+ * alanlar artık bu kategoride HİÇ KULLANILMAZ) ve `storageContainerGroups`
+ * `sanitizeStorageContainerGroups` ile (bileşenin kendi canlı
+ * temizlemesinden BAĞIMSIZ, ikinci/sunucu tarafı bir güvenlik ağı olarak —
+ * HER grubun kendi Yük Durumu/Tipine göre koşullu alanları TEK TEK süzülür)
+ * yeniden doğrulanır. Depolama ailesinin BAŞKA bir alt türüyse davranış
+ * DEĞİŞMEDİ (storageProductType/Quantity/Unit/Tonnage aynen geçirilir),
+ * `storageContainerGroups` temizlenir.
+ */
+/**
+ * "Kimyasal Depolama / Tehlikeli Madde Depolama" görevi — `resolveStorageProductFields`
+ * İLE AYNI "TEK yer, kopyalanmaz" ilkesi: kategori `isHazardousStorageCategory`
+ * kapsamı DIŞINDAYSA (Konteyner Depolama dahil — o kategori kendi grup
+ * başına `hazardous` alanını kullanır, bu ikisiyle KARIŞTIRILMAZ) her iki
+ * alan HER ZAMAN temizlenir. "Tehlikeli Madde Depolama" İSE `storageHazardous`
+ * girdi ne olursa olsun HER ZAMAN `true` yazılır (görev talimatı: "ürün
+ * zaten tehlikeli kabul edilecek, soru sorulmasın") — istemci formu zaten bu
+ * kategoride soruyu HİÇ göstermez, burası yalnızca ikinci/sunucu tarafı bir
+ * güvenlik ağıdır. Derin doğrulama (risk grubu id'lerinin geçerliliği/en az
+ * bir grup zorunluluğu) job-form-validation.ts#validateStorageHazardFields'e
+ * bırakılır — burada yalnızca TİP güvenliği sağlanır.
+ */
+function resolveStorageHazardFields(
+  category: string,
+  input: { storageHazardous?: boolean; storageRiskGroups?: string[] },
+): { storageHazardous?: boolean; storageRiskGroups?: string[] } {
+  if (!isHazardousStorageCategory(category)) {
+    return { storageHazardous: undefined, storageRiskGroups: undefined };
+  }
+  const riskGroups = sanitizeStorageRiskGroups(input.storageRiskGroups);
+  const hazardous = isTehlikeliMaddeDepolamaCategory(category) ? true : input.storageHazardous === true;
+  return {
+    storageHazardous: hazardous,
+    storageRiskGroups: hazardous ? riskGroups : undefined,
+  };
+}
+
+function resolveStorageProductFields(category: string, input: StorageProductInput) {
+  if (!isStorageGroupCategory(category)) {
+    return EMPTY_STORAGE_CONTAINER_FIELDS;
+  }
+  if (isContainerStorageCategory(category)) {
+    return {
+      storageProductType: undefined,
+      storageProductQuantity: undefined,
+      storageProductUnit: undefined,
+      storageProductTonnage: undefined,
+      storageContainerGroups: sanitizeStorageContainerGroups(input.storageContainerGroups),
+    };
+  }
+  return {
+    ...EMPTY_STORAGE_CONTAINER_FIELDS,
+    storageProductType: input.storageProductType,
+    storageProductQuantity: input.storageProductQuantity,
+    storageProductUnit: input.storageProductUnit,
+    storageProductTonnage: input.storageProductTonnage,
   };
 }
 
@@ -515,6 +806,74 @@ function resolveDeliveryLocationFields(category: string, input: DeliveryLocation
 }
 
 /**
+ * "Tehlikeli Madde / ADR Kartı Sadeleştirmesi" görevinin kendi kesin kuralı:
+ * UN Numarası/Resmî Taşımacılık Adı/Ambalaj Grubu artık hiçbir formda
+ * toplanmadığı için `fromNakliyeDetailsFields`in ürettiği YENİ hazmat objesi
+ * bu üç anahtarı hiç İÇERMEZ — ama bir eski ilan yalnız görüntülenip
+ * düzenlendiğinde (ADR ile hiç ilgisi olmayan bir alan değiştirilse bile)
+ * bu, `nakliyeDetails` bütün obje olarak yeniden yazılırken eski değerleri
+ * SESSİZCE SİLERDİ (jsonb sütunu tam-değer değiştirilir, alan bazında
+ * birleştirilmez). Bu fonksiyon, sanitize ETMEDEN ÖNCE, hâlâ "evet" olan bir
+ * hazmat durumunda eski değerleri (varsa) YENİ objeye geri taşır — yeni
+ * status/adrClass her zaman kazanır, yalnızca form'un hiç toplamadığı üç
+ * anahtar korunur. Bu, diğer alan-kaldırma görevlerinin (Şasi/Free Time/
+ * SDS-MSDS vb.) izlediği "bir sonraki düzenlemede doğal olarak düşer"
+ * ilkesinden BİLEREK farklıdır — bu görevin talimatı açıkça "gizlenen
+ * alanlara otomatik null göndererek mevcut veriyi silme" der.
+ */
+function mergeLegacyHazmatFields(rawInput: unknown, existing?: NakliyeDetails): unknown {
+  if (existing?.hazmat?.status !== "evet" || typeof rawInput !== "object" || rawInput === null) return rawInput;
+  const rawObj = rawInput as Record<string, unknown>;
+  const rawHazmat = rawObj.hazmat;
+  if (typeof rawHazmat !== "object" || rawHazmat === null || (rawHazmat as Record<string, unknown>).status !== "evet") {
+    return rawInput;
+  }
+  return {
+    ...rawObj,
+    hazmat: {
+      unNumber: existing.hazmat.unNumber,
+      properShippingName: existing.hazmat.properShippingName,
+      packingGroup: existing.hazmat.packingGroup,
+      ...(rawHazmat as Record<string, unknown>),
+    },
+  };
+}
+
+/**
+ * `resolveDeliveryLocationFields` İLE AYNI "TEK yer, kopyalanmaz, kategori
+ * kapsamı dışındaysa HER ZAMAN temizlenir" ilkesi — Nakliye dışı bir
+ * kategoriye geçirilen bir ilanın eski `nakliyeDetails`i sessizce kaybolur.
+ * Derin doğrulama `sanitizeNakliyeDetails`e devredilir (ikinci bir
+ * doğrulama mantığı İCAT EDİLMEDİ, bileşenin kendi canlı doğrulamasından
+ * BAĞIMSIZ bir sunucu-tarafı güvenlik ağı olarak). `existing`: yalnızca bir
+ * DÜZENLEME sırasında (createJob/createJobsForOperation'da yok — yeni bir
+ * ilanda korunacak eski değer olamaz) geçirilir, `mergeLegacyHazmatFields`
+ * için — bkz. o fonksiyonun kendi doküman notu.
+ */
+function resolveNakliyeDetails(category: string, input: { nakliyeDetails?: unknown }, existing?: NakliyeDetails) {
+  if (!isTransportationCategory(category)) return undefined;
+  return sanitizeNakliyeDetails(mergeLegacyHazmatFields(input.nakliyeDetails, existing));
+}
+
+/**
+ * "Nakliye Çoklu Yük Grubu" görevi — `resolveNakliyeDetails` İLE AYNI "TEK
+ * yer, kopyalanmaz, kategori kapsamı dışındaysa HER ZAMAN temizlenir" ilkesi:
+ * Nakliye dışı bir kategoriye geçirilen bir ilanın eski `nakliyeCargoGroups`u
+ * sessizce kaybolur. Derin doğrulama `sanitizeNakliyeCargoGroups`e
+ * devredilir (ikinci bir doğrulama mantığı İCAT EDİLMEDİ). `input.nakliyeCargoGroups`
+ * her zaman çağıranın (job-request-form.tsx/job-edit-form.tsx#
+ * fromCargoGroupsFields) zaten ürettiği TAM/GÜNCEL dizi olduğu için —
+ * `mergeLegacyHazmatFields`in ADR alanları için yaptığı gibi eski bir
+ * değerle birleştirmeye gerek YOKTUR; caller zaten her grubun tüm alanlarını
+ * (container moduna göre doğru şekilde boş/dolu) her seferinde yeniden
+ * üretir.
+ */
+function resolveNakliyeCargoGroups(category: string, input: { nakliyeCargoGroups?: unknown }): NakliyeCargoGroup[] | undefined {
+  if (!isTransportationCategory(category)) return undefined;
+  return sanitizeNakliyeCargoGroups(input.nakliyeCargoGroups);
+}
+
+/**
  * Nakliye "Yük Alınacak Yer" (pickup) İÇİN — `resolveLocationFields`in
  * kendisi (yukarıda) Nakliye DAHİL HER kategori için paylaşılan/değişmemiş
  * kalır; bu fonksiyon SADECE Nakliye ilanlarında, `resolveLocationFields`in
@@ -552,6 +911,8 @@ export type CreateJobInput = {
   /** Bkz. types.ts#Job.productQuantity/productTonnage/productType. Yalnızca category product-catalog.ts#requiresProductInfo kapsamındaysa anlamlıdır — aksi halde resolveProductInfoFields tarafından yok sayılır. */
   productQuantity?: number;
   productTonnage?: number;
+  /** Bkz. types.ts#Job.productTonnageUnit — yalnızca Nakliye'de anlamlı, resolveProductInfoFields diğer kategorilerde HER ZAMAN temizler. */
+  productTonnageUnit?: "ton" | "kg";
   productType?: string;
   /** Bkz. types.ts#Job.customsTransactionType/vb. Yalnızca category customs-brokerage-catalog.ts#isCustomsBrokerageCategory kapsamındaysa anlamlıdır — aksi halde resolveCustomsBrokerageFields tarafından yok sayılır. */
   customsTransactionType?: string;
@@ -566,6 +927,35 @@ export type CreateJobInput = {
   deliveryFacilityId?: string;
   deliveryFacilityName?: string;
   deliveryAddressText?: string;
+  /** Bkz. types.ts#Job.recyclingMaterialCategoryId/vb. Yalnızca category recycling-catalog.ts#isRecyclingCategory kapsamındaysa anlamlıdır — aksi halde resolveRecyclingFields tarafından yok sayılır. */
+  recyclingMaterialCategoryId?: string;
+  recyclingMaterialSubtypeId?: string;
+  recyclingQuantity?: number;
+  recyclingUnit?: "kg" | "ton" | "adet" | "litre";
+  recyclingMaterialCondition?: "ayristirilmis" | "karisik" | "diger";
+  recyclingMaterialConditionNote?: string;
+  recyclingScopeOfWork?: string[];
+  /** Bkz. types.ts#Job.recyclingRequestedOperation. Yalnızca recycling kapsamında; hangi faaliyet yetkilerinin gerektiğini belirler (bkz. getRequiredRecyclingActivities). */
+  recyclingRequestedOperation?: string;
+  /** Bkz. types.ts#Job.recyclingWasteCode/recyclingWasteCodeUnknown. `recyclingHazardous` HER ZAMAN resolveRecyclingFields tarafından bu koddan yeniden türetilir — çağıranın gönderdiği ham değer asla doğrudan kullanılmaz. */
+  recyclingWasteCode?: string;
+  recyclingWasteCodeUnknown?: boolean;
+  recyclingHazardous?: boolean;
+  recyclingHazardProperties?: string[];
+  /** Bkz. types.ts#Job.storageProductType/vb. Yalnızca category service-catalog.ts#isStorageGroupCategory kapsamındaysa anlamlıdır — aksi halde resolveStorageProductFields tarafından yok sayılır. */
+  storageProductType?: string;
+  storageProductQuantity?: number;
+  storageProductUnit?: "kg" | "ton" | "adet";
+  storageProductTonnage?: number;
+  /** Bkz. types.ts#Job.storageContainerGroups. Yalnızca kategori "Konteyner Depolama" iken anlamlıdır — aksi halde resolveStorageProductFields tarafından yok sayılır. */
+  storageContainerGroups?: StorageContainerGroup[];
+  /** Bkz. types.ts#Job.storageHazardous/storageRiskGroups. Yalnızca storage-hazard-catalog.ts#isHazardousStorageCategory kapsamındaysa anlamlıdır — aksi halde resolveStorageHazardFields tarafından yok sayılır. */
+  storageHazardous?: boolean;
+  storageRiskGroups?: string[];
+  /** Bkz. types.ts#Job.nakliyeDetails. Yalnızca category nakliye-route.ts#isTransportationCategory kapsamındaysa anlamlıdır — aksi halde resolveNakliyeDetails tarafından yok sayılır. */
+  nakliyeDetails?: NakliyeDetails;
+  /** Bkz. types.ts#Job.nakliyeCargoGroups. Yalnızca category nakliye-route.ts#isTransportationCategory kapsamındaysa anlamlıdır — aksi halde resolveNakliyeCargoGroups tarafından yok sayılır. */
+  nakliyeCargoGroups?: NakliyeCargoGroup[];
   operationDetails: string;
   photos: ProcessedPhotoInput[];
 };
@@ -628,11 +1018,20 @@ export async function createJob(
   if (session.role !== "hizmet-alan") {
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan oluşturabilir." };
   }
-  if (input.photos.length < MIN_PHOTOS) {
-    return { ok: false, error: PHOTOS_REQUIRED_MESSAGE };
+  // Depolama İlan Oluşturma: Depo Hizmetleri grubu (bkz. service-catalog.ts#
+  // isStorageGroupCategory) için sınırlar 1-10 yerine 4-15'tir (görev
+  // gereksinimi, mevcut genel sınırlarla BİLEREK çelişir — bkz. photo-
+  // validation.ts#getMinPhotos/getMaxPhotos'ın kendi dokümanı, ÇÖZÜM
+  // Depolamaya özel ikinci bir yükleme modülü DEĞİL, bu TEK merkezi
+  // sınırın kategoriye duyarlı hâle getirilmesidir). Diğer TÜM kategoriler
+  // için davranış BİREBİR eskisiyle aynıdır.
+  const jobMinPhotos = getMinPhotos(input.category);
+  const jobMaxPhotos = getMaxPhotos(input.category);
+  if (input.photos.length < jobMinPhotos) {
+    return { ok: false, error: getPhotosRequiredMessage(input.category) };
   }
-  if (input.photos.length > MAX_PHOTOS) {
-    return { ok: false, error: `En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.` };
+  if (input.photos.length > jobMaxPhotos) {
+    return { ok: false, error: `En fazla ${jobMaxPhotos} fotoğraf yükleyebilirsiniz.` };
   }
 
   const photos = await persistPhotosOrRollback(input.photos);
@@ -672,6 +1071,11 @@ export async function createJob(
     ...resolveProductInfoFields(input.category, input),
     ...resolveCustomsBrokerageFields(input.category, { ...input, customsDocuments }),
     ...resolveDeliveryLocationFields(input.category, input),
+    ...resolveRecyclingFields(input.category, input),
+    ...resolveStorageProductFields(input.category, input),
+    ...resolveStorageHazardFields(input.category, input),
+    nakliyeDetails: resolveNakliyeDetails(input.category, input),
+    nakliyeCargoGroups: resolveNakliyeCargoGroups(input.category, input),
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),
     status: "yayinda",
@@ -679,6 +1083,8 @@ export async function createJob(
     photos,
     createdAt,
     publishEndAt,
+    // İlan Onayı: her yeni ilan admin incelemesi bekler — bkz. job-moderation.ts.
+    moderationStatus: "pending_review",
   };
   job.facilityId = verifiedPickupFacilityId(job.category, jobProvince, jobDistrict, job.facilityId);
 
@@ -731,6 +1137,8 @@ export type OperationServiceInput = {
   /** Bkz. types.ts#Job.productQuantity/productTonnage/productType — her hizmet kendi ürün bilgisini bağımsız taşır. */
   productQuantity?: number;
   productTonnage?: number;
+  /** Bkz. types.ts#Job.productTonnageUnit — yalnızca Nakliye'de anlamlı, resolveProductInfoFields diğer kategorilerde HER ZAMAN temizler. */
+  productTonnageUnit?: "ton" | "kg";
   productType?: string;
   /** Bkz. types.ts#Job.customsTransactionType/vb. — YALNIZCA isCustomsBrokerageCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveCustomsBrokerageFields). */
   customsTransactionType?: string;
@@ -745,6 +1153,31 @@ export type OperationServiceInput = {
   deliveryFacilityId?: string;
   deliveryFacilityName?: string;
   deliveryAddressText?: string;
+  /** Bkz. types.ts#Job.recyclingMaterialCategoryId/vb. — YALNIZCA isRecyclingCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveRecyclingFields). */
+  recyclingMaterialCategoryId?: string;
+  recyclingMaterialSubtypeId?: string;
+  recyclingQuantity?: number;
+  recyclingUnit?: "kg" | "ton" | "adet" | "litre";
+  recyclingMaterialCondition?: "ayristirilmis" | "karisik" | "diger";
+  recyclingMaterialConditionNote?: string;
+  recyclingScopeOfWork?: string[];
+  recyclingRequestedOperation?: string;
+  recyclingWasteCode?: string;
+  recyclingWasteCodeUnknown?: boolean;
+  recyclingHazardous?: boolean;
+  recyclingHazardProperties?: string[];
+  /** Bkz. types.ts#Job.storageProductType/vb. — YALNIZCA isStorageGroupCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveStorageProductFields). */
+  storageProductType?: string;
+  storageProductQuantity?: number;
+  storageProductUnit?: "kg" | "ton" | "adet";
+  storageProductTonnage?: number;
+  storageContainerGroups?: StorageContainerGroup[];
+  storageHazardous?: boolean;
+  storageRiskGroups?: string[];
+  /** Bkz. types.ts#Job.nakliyeDetails — YALNIZCA isTransportationCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveNakliyeDetails). */
+  nakliyeDetails?: NakliyeDetails;
+  /** Bkz. types.ts#Job.nakliyeCargoGroups — YALNIZCA isTransportationCategory(category) true olan hizmet kartında anlamlıdır; diğer kardeş hizmetlere hiç kopyalanmaz (bkz. resolveNakliyeCargoGroups). */
+  nakliyeCargoGroups?: NakliyeCargoGroup[];
 };
 
 /**
@@ -935,6 +1368,11 @@ export async function createJobsForOperation(
         customsDocuments: persistedCustomsDocumentSets[index],
       }),
       ...resolveDeliveryLocationFields(service.category, service),
+      ...resolveRecyclingFields(service.category, service),
+      ...resolveStorageProductFields(service.category, service),
+      ...resolveStorageHazardFields(service.category, service),
+      nakliyeDetails: resolveNakliyeDetails(service.category, service),
+      nakliyeCargoGroups: resolveNakliyeCargoGroups(service.category, service),
       description: service.description.trim(),
       operationDetails,
       status: "yayinda",
@@ -943,6 +1381,10 @@ export async function createJobsForOperation(
       photos: persistedPhotoSets[index],
       createdAt,
       publishEndAt,
+      // İlan Onayı: createJob ile AYNI kural — her yeni hizmet kendi
+      // moderasyon durumunu bağımsız taşır (bkz. types.ts#Job.moderationStatus
+      // doc yorumu ve görev bölüm 10 — job-bazlı, operasyon-bazlı DEĞİL).
+      moderationStatus: "pending_review",
     };
     job.facilityId = verifiedPickupFacilityId(job.category, serviceProvince, serviceDistrict, job.facilityId);
     return job;
@@ -981,6 +1423,8 @@ export type UpdateJobInput = {
   /** Bkz. types.ts#Job.productQuantity/productTonnage/productType. category artık ürün bilgisi gerektirmiyorsa (kategori değiştirildiyse) resolveProductInfoFields üçünü de temizler. */
   productQuantity?: number;
   productTonnage?: number;
+  /** Bkz. types.ts#Job.productTonnageUnit — yalnızca Nakliye'de anlamlı, resolveProductInfoFields diğer kategorilerde HER ZAMAN temizler. */
+  productTonnageUnit?: "ton" | "kg";
   productType?: string;
   /** Bkz. types.ts#Job.customsTransactionType/vb. category artık Gümrük Müşavirliği değilse (kategori değiştirildiyse) resolveCustomsBrokerageFields dördünü de (evraklar dahil) temizler. */
   customsTransactionType?: string;
@@ -993,6 +1437,31 @@ export type UpdateJobInput = {
   deliveryFacilityId?: string;
   deliveryFacilityName?: string;
   deliveryAddressText?: string;
+  /** Bkz. types.ts#Job.recyclingMaterialCategoryId/vb. category artık Geri Dönüşüm & Atık Tahliye değilse (kategori değiştirildiyse) resolveRecyclingFields tamamını temizler. */
+  recyclingMaterialCategoryId?: string;
+  recyclingMaterialSubtypeId?: string;
+  recyclingQuantity?: number;
+  recyclingUnit?: "kg" | "ton" | "adet" | "litre";
+  recyclingMaterialCondition?: "ayristirilmis" | "karisik" | "diger";
+  recyclingMaterialConditionNote?: string;
+  recyclingScopeOfWork?: string[];
+  recyclingRequestedOperation?: string;
+  recyclingWasteCode?: string;
+  recyclingWasteCodeUnknown?: boolean;
+  recyclingHazardous?: boolean;
+  recyclingHazardProperties?: string[];
+  /** Bkz. types.ts#Job.storageProductType/vb. category artık Depo Hizmetleri grubunda değilse (kategori değiştirildiyse) resolveStorageProductFields dördünü de temizler. */
+  storageProductType?: string;
+  storageProductQuantity?: number;
+  storageProductUnit?: "kg" | "ton" | "adet";
+  storageProductTonnage?: number;
+  storageContainerGroups?: StorageContainerGroup[];
+  storageHazardous?: boolean;
+  storageRiskGroups?: string[];
+  /** Bkz. types.ts#Job.nakliyeDetails. category artık Nakliye değilse (kategori değiştirildiyse) resolveNakliyeDetails temizler. */
+  nakliyeDetails?: NakliyeDetails;
+  /** Bkz. types.ts#Job.nakliyeCargoGroups. category artık Nakliye değilse (kategori değiştirildiyse) resolveNakliyeCargoGroups temizler. */
+  nakliyeCargoGroups?: NakliyeCargoGroup[];
   description: string;
   operationDetails: string;
   /** Korunacak mevcut fotoğrafların id'leri (silinenler bu listede olmaz). */
@@ -1049,11 +1518,16 @@ export async function updateJob(
 
   const keptPhotos = existing.photos.filter((photo) => input.keptPhotoIds.includes(photo.id));
   const totalPhotoCount = keptPhotos.length + input.newPhotos.length;
-  if (totalPhotoCount < MIN_PHOTOS) {
-    return { ok: false, error: PHOTOS_REQUIRED_MESSAGE };
+  // Bkz. createJob'daki AYNI "Depolama İlan Oluşturma" notu — düzenlenen
+  // ilanın (olası yeni) kategorisi (input.category ?? existing.category)
+  // Depo Hizmetleri grubundaysa sınırlar 4-15'tir, aksi halde 1-10.
+  const editMinPhotos = getMinPhotos(input.category ?? existing.category);
+  const editMaxPhotos = getMaxPhotos(input.category ?? existing.category);
+  if (totalPhotoCount < editMinPhotos) {
+    return { ok: false, error: getPhotosRequiredMessage(input.category ?? existing.category) };
   }
-  if (totalPhotoCount > MAX_PHOTOS) {
-    return { ok: false, error: `En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.` };
+  if (totalPhotoCount > editMaxPhotos) {
+    return { ok: false, error: `En fazla ${editMaxPhotos} fotoğraf yükleyebilirsiniz.` };
   }
 
   const newlyPersisted = await persistPhotosOrRollback(input.newPhotos);
@@ -1098,11 +1572,33 @@ export async function updateJob(
     ...resolveProductInfoFields(input.category, input),
     ...resolveCustomsBrokerageFields(input.category, { ...input, customsDocuments: combinedCustomsDocuments }),
     ...resolveDeliveryLocationFields(input.category, input),
+    ...resolveRecyclingFields(input.category, input),
+    ...resolveStorageProductFields(input.category, input),
+    ...resolveStorageHazardFields(input.category, input),
+    nakliyeDetails: resolveNakliyeDetails(input.category, input, existing.nakliyeDetails),
+    nakliyeCargoGroups: resolveNakliyeCargoGroups(input.category, input),
     description: input.description.trim(),
     operationDetails: input.operationDetails.trim(),
     photos: combinedPhotos,
   };
   updated.facilityId = verifiedPickupFacilityId(updated.category, updatedProvince, updatedDistrict, updated.facilityId);
+
+  // İlan Onayı — görev bölüm 9: ilan sahibi, admin tarafından zaten
+  // karara bağlanmış (approved/rejected) bir ilanın içeriğini etkileyen bir
+  // alanı değiştirirse eski karar artık geçerli sayılmaz, ilan yeniden
+  // incelemeye alınır (bkz. job-moderation.ts#didCriticalJobContentChange —
+  // yalnızca görevin listelediği "içerik" alanları kritik sayılır; salt
+  // fotoğraf/operationDetails değişikliği gereksiz bir yeniden inceleme
+  // OLUŞTURMAZ). Zaten "pending_review" olan bir ilan bu dalda hiç
+  // değişmez — halihazırda incelemeyi bekliyor. Admin'in KENDİ düzenlemesi
+  // (admin-job-edit-form.tsx -> update_job_as_admin) bu fonksiyonu hiç
+  // çağırmaz, bu kural yalnızca sahibinin kendi düzenleme yoluna uygulanır.
+  if (getJobModerationStatus(existing) !== "pending_review" && didCriticalJobContentChange(existing, updated)) {
+    updated.moderationStatus = "pending_review";
+    updated.moderationReviewedAt = undefined;
+    updated.moderationReviewedBy = undefined;
+    updated.moderationRejectionReason = undefined;
+  }
 
   const all = readUserCreatedJobsSnapshot();
   if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
@@ -1142,6 +1638,231 @@ export async function updateJob(
   }
 
   return { ok: true, job: updated };
+}
+
+export type AdminModerationDecision =
+  | { status: "approved"; reviewedBy: string }
+  | { status: "rejected"; reviewedBy: string; reason: string };
+
+/**
+ * Admin onay/red kararının bu TARAYICININ paylaşılan localStorage ilan
+ * havuzuna best-effort yansıması — bkz. admin-jobs.ts#approveJobAsAdmin/
+ * rejectJobAsAdmin, ki gerçek yetkilendirme sınırı olan Supabase
+ * `approve_job_as_admin`/`reject_job_as_admin` RPC'lerini bu fonksiyondan
+ * ÖNCE çağırır. Bu fonksiyonun kendisi hiçbir session/rol kontrolü YAPMAZ
+ * (yetkilendirme zaten Supabase RPC'sinde gerçekleşti) — bir GÜVENLİK sınırı
+ * DEĞİLDİR, yalnızca bu ilan bu tarayıcıda da mevcutsa (Hizmet Alan/Hizmet
+ * Veren/Admin aynı origin'i paylaştığı demo/geliştirme/test ortamında, bkz.
+ * proje raporu "No real backend" notu) etkisi olur; farklı bir cihazdaki
+ * gerçek bir kullanıcıya asla ulaşmaz. Eşleşen ilan bu tarayıcıda yoksa
+ * (`false` döner) çağıran taraf bunu sessizce best-effort sayar, hata
+ * saymaz — tıpkı supabase-job-sync.ts'in ters yönlü (localStorage ->
+ * Supabase) senkronunun kendi başarısızlığını sessizce yutması gibi.
+ */
+export function applyAdminModerationDecision(jobId: string, decision: AdminModerationDecision): boolean {
+  const all = readUserCreatedJobsSnapshot();
+  const index = all.findIndex((job) => job.id === jobId);
+  if (index === -1) return false;
+
+  const updated: Job = {
+    ...all[index],
+    moderationStatus: decision.status,
+    moderationReviewedAt: new Date().toISOString(),
+    moderationReviewedBy: decision.reviewedBy,
+    moderationRejectionReason: decision.status === "rejected" ? decision.reason : undefined,
+  };
+  const next = [...all];
+  next[index] = updated;
+  return writeUserCreatedJobs(next);
+}
+
+/**
+ * "Kritik İlan Senkronizasyonu" görevi — bkz. types.ts#Job.supabaseSyncFailedAt
+ * için tam dokümantasyon. `job-request-form.tsx`nin gönderim akışı, yerel
+ * yazım BAŞARILI olduktan sonra Supabase senkronu BAŞARISIZ olursa bu
+ * fonksiyonu çağırır — `applyAdminModerationDecision` ile AYNI "bu ilan bu
+ * tarayıcıda mevcutsa etkisi olur" deseni (bulunamazsa sessizce `false`).
+ */
+export function markJobSupabaseSyncFailed(jobId: string, error: string): boolean {
+  const all = readUserCreatedJobsSnapshot();
+  const index = all.findIndex((job) => job.id === jobId);
+  if (index === -1) return false;
+
+  const updated: Job = {
+    ...all[index],
+    supabaseSyncFailedAt: new Date().toISOString(),
+    supabaseSyncError: error,
+  };
+  const next = [...all];
+  next[index] = updated;
+  return writeUserCreatedJobs(next);
+}
+
+/** Bkz. markJobSupabaseSyncFailed — bir yeniden deneme (retryJobSupabaseSync, supabase-job-sync.ts) başarılı olduğunda çağrılır. */
+export function clearJobSupabaseSyncFailure(jobId: string): boolean {
+  const all = readUserCreatedJobsSnapshot();
+  const index = all.findIndex((job) => job.id === jobId);
+  if (index === -1) return false;
+
+  const updated: Job = { ...all[index], supabaseSyncFailedAt: undefined, supabaseSyncError: undefined };
+  const next = [...all];
+  next[index] = updated;
+  return writeUserCreatedJobs(next);
+}
+
+export type AdminJobEditInput = {
+  title: string;
+  description: string;
+  province: string;
+  district: string;
+  workLocationType: string;
+  addressText: string;
+  workDate: string;
+  workEndDate?: string;
+  productQuantity?: number;
+  productTonnage?: number;
+  /** Bkz. types.ts#Job.productTonnageUnit — yalnızca Nakliye'de anlamlı, resolveProductInfoFields diğer kategorilerde HER ZAMAN temizler. */
+  productTonnageUnit?: "ton" | "kg";
+  productType?: string;
+  customsProductType?: string;
+  /** "Kritik İlan Senkronizasyonu" görevi bölüm 4 denetiminde bulunan boşluk — `customsProductType`'ın aksine bu ikisi daha önce hiç buraya taşınmamıştı, admin bu iki alanı ASLA değiştiremiyordu. */
+  customsTransactionType?: string;
+  customsRequestedServices?: string[];
+  deliveryFacilityName?: string;
+  deliveryAddressText?: string;
+  operationDetails?: string;
+  neighborhood?: string;
+  locationUrl?: string;
+  directionsNote?: string;
+  deliveryProvince?: string;
+  deliveryDistrict?: string;
+  recyclingMaterialCategoryId?: string;
+  recyclingMaterialSubtypeId?: string;
+  recyclingQuantity?: number;
+  recyclingUnit?: "kg" | "ton" | "adet" | "litre";
+  recyclingMaterialCondition?: "ayristirilmis" | "karisik" | "diger";
+  recyclingMaterialConditionNote?: string;
+  recyclingScopeOfWork?: string[];
+  recyclingRequestedOperation?: string;
+  recyclingWasteCode?: string;
+  recyclingWasteCodeUnknown?: boolean;
+  recyclingHazardProperties?: string[];
+  storageProductType?: string;
+  storageProductQuantity?: number;
+  storageProductUnit?: "kg" | "ton" | "adet";
+  storageProductTonnage?: number;
+  storageContainerGroups?: StorageContainerGroup[];
+  storageHazardous?: boolean;
+  storageRiskGroups?: string[];
+  /** Bkz. types.ts#NakliyeDetails.loadPreparationType/loadPreparationCustomText — yalnızca Nakliye ilanlarında admin-job-edit-form.tsx tarafından gönderilir. */
+  nakliyeLoadPreparationType?: string;
+  nakliyeLoadPreparationCustomText?: string;
+  /** Bkz. types.ts#NakliyeLoadingOperations.loadingMethod/loadingMethodCustomText. */
+  nakliyeLoadingMethod?: string;
+  nakliyeLoadingMethodCustomText?: string;
+  /** "MALSEVK Nakliye Ölçü ve Yerleşim Bilgileri" görevi — bkz. types.ts#NakliyeMeasurementInfo. */
+  nakliyeMeasurementInfo?: NakliyeMeasurementInfo;
+  /** "Konteyner Taşıması ve ADR Bağımsız Bölümleri" görevi — bkz. types.ts#NakliyeHazmatDetail/NakliyeContainerTransport. */
+  nakliyeHazmat?: NakliyeHazmatDetail;
+  nakliyeContainerTransport?: NakliyeContainerTransport;
+  /** "Nakliye Çoklu Yük Grubu" görevi — bkz. types.ts#Job.nakliyeCargoGroups. */
+  nakliyeCargoGroups?: NakliyeCargoGroup[];
+};
+
+/**
+ * Admin'in ilan içeriğini düzeltmesinin, `applyAdminModerationDecision` ile
+ * AYNI "yalnızca bu tarayıcıda mevcutsa etkisi olur" sınırına sahip yerel
+ * yansıması — gerçek yetkilendirme sınırı `update_job_as_admin` RPC'sidir
+ * (bkz. admin-jobs.ts#updateJobAsAdmin, bu fonksiyondan ÖNCE çağrılır). Bu
+ * yüzden `updateJob`ın (yukarıda) sahiplik/teklif-durumu kontrollerini VE
+ * `didCriticalJobContentChange` yeniden-inceleme tetikleyicisini KASITLI
+ * OLARAK atlar — admin zaten aynı akışın (İlanı Düzenle -> Onayla/Reddet)
+ * bir parçası olarak kendi kararını ayrıca verecektir (bkz. admin-job-detail.tsx).
+ */
+export function applyAdminJobEdit(jobId: string, input: AdminJobEditInput): boolean {
+  const all = readUserCreatedJobsSnapshot();
+  const index = all.findIndex((job) => job.id === jobId);
+  if (index === -1) return false;
+
+  // NOT: RPC tarafındaki (0037) AYNI coalesce-koruma ilkesi burada da
+  // uygulanır — formda görünmeyen/dokunulmamış bir alan (input.X undefined)
+  // yerel aynada da asla var olan değeri SİLMEZ, yalnızca `input.X` GERÇEKTEN
+  // bir değer taşıyorsa güncellenir. title/description/province/district/
+  // workLocationType/addressText/workDate her zaman zorunlu/dolu olduğu için
+  // (formun isValid kontrolü) doğrudan atanır; workEndDate formda HER ZAMAN
+  // görünür olduğu için admin bilerek temizleyebilmeli, o da doğrudan atanır.
+  const updated: Job = {
+    ...all[index],
+    title: input.title.trim(),
+    description: input.description.trim(),
+    province: input.province.trim(),
+    district: input.district.trim(),
+    workLocationType: input.workLocationType.trim(),
+    addressText: input.addressText.trim(),
+    workDate: input.workDate,
+    workEndDate: input.workEndDate,
+    productQuantity: input.productQuantity ?? all[index].productQuantity,
+    productTonnage: input.productTonnage ?? all[index].productTonnage,
+    productTonnageUnit: input.productTonnageUnit ?? all[index].productTonnageUnit,
+    productType: input.productType ?? all[index].productType,
+    customsProductType: input.customsProductType ?? all[index].customsProductType,
+    customsTransactionType: input.customsTransactionType ?? all[index].customsTransactionType,
+    customsRequestedServices: input.customsRequestedServices ?? all[index].customsRequestedServices,
+    deliveryFacilityName: input.deliveryFacilityName ?? all[index].deliveryFacilityName,
+    deliveryAddressText: input.deliveryAddressText ?? all[index].deliveryAddressText,
+    operationDetails: input.operationDetails ?? all[index].operationDetails,
+    neighborhood: input.neighborhood ?? all[index].neighborhood,
+    locationUrl: input.locationUrl ?? all[index].locationUrl,
+    directionsNote: input.directionsNote ?? all[index].directionsNote,
+    deliveryProvince: input.deliveryProvince ?? all[index].deliveryProvince,
+    deliveryDistrict: input.deliveryDistrict ?? all[index].deliveryDistrict,
+    recyclingMaterialCategoryId: input.recyclingMaterialCategoryId ?? all[index].recyclingMaterialCategoryId,
+    recyclingMaterialSubtypeId: input.recyclingMaterialSubtypeId ?? all[index].recyclingMaterialSubtypeId,
+    recyclingQuantity: input.recyclingQuantity ?? all[index].recyclingQuantity,
+    recyclingUnit: input.recyclingUnit ?? all[index].recyclingUnit,
+    recyclingMaterialCondition: input.recyclingMaterialCondition ?? all[index].recyclingMaterialCondition,
+    recyclingMaterialConditionNote: input.recyclingMaterialConditionNote ?? all[index].recyclingMaterialConditionNote,
+    recyclingScopeOfWork: input.recyclingScopeOfWork ?? all[index].recyclingScopeOfWork,
+    recyclingRequestedOperation: input.recyclingRequestedOperation ?? all[index].recyclingRequestedOperation,
+    // NOT: recyclingHazardous admin girdisinden ASLA doğrudan alınmaz —
+    // resmi atık kodundan yeniden türetilir (bkz. resolveRecyclingFields'in
+    // aynı ilkesi), böylece admin de yıldızlı bir kodu tehlikesiz olarak
+    // override edemez. Kod değişmediyse mevcut değer korunur.
+    recyclingWasteCode: input.recyclingWasteCode ?? all[index].recyclingWasteCode,
+    recyclingWasteCodeUnknown: input.recyclingWasteCodeUnknown ?? all[index].recyclingWasteCodeUnknown,
+    recyclingHazardous:
+      input.recyclingWasteCode !== undefined || input.recyclingWasteCodeUnknown !== undefined
+        ? deriveWasteCodeHazardous(
+            (input.recyclingWasteCodeUnknown ?? all[index].recyclingWasteCodeUnknown)
+              ? null
+              : (input.recyclingWasteCode ?? all[index].recyclingWasteCode) ?? null,
+          ) ?? undefined
+        : all[index].recyclingHazardous,
+    recyclingHazardProperties: input.recyclingHazardProperties ?? all[index].recyclingHazardProperties,
+    storageProductType: input.storageProductType ?? all[index].storageProductType,
+    storageProductQuantity: input.storageProductQuantity ?? all[index].storageProductQuantity,
+    storageProductUnit: input.storageProductUnit ?? all[index].storageProductUnit,
+    storageProductTonnage: input.storageProductTonnage ?? all[index].storageProductTonnage,
+    storageContainerGroups: input.storageContainerGroups ?? all[index].storageContainerGroups,
+    storageHazardous: input.storageHazardous ?? all[index].storageHazardous,
+    storageRiskGroups: input.storageRiskGroups ?? all[index].storageRiskGroups,
+    nakliyeCargoGroups: input.nakliyeCargoGroups ?? all[index].nakliyeCargoGroups,
+    nakliyeDetails: input.nakliyeLoadPreparationType !== undefined
+      ? {
+          ...all[index].nakliyeDetails,
+          loadPreparationType: input.nakliyeLoadPreparationType || undefined,
+          loadPreparationCustomText: input.nakliyeLoadPreparationCustomText,
+          measurementInfo: input.nakliyeMeasurementInfo ?? all[index].nakliyeDetails?.measurementInfo,
+          loadingMethod: input.nakliyeLoadingMethod || undefined,
+          loadingMethodCustomText: input.nakliyeLoadingMethodCustomText,
+          hazmat: input.nakliyeHazmat ?? all[index].nakliyeDetails?.hazmat,
+          containerTransport: input.nakliyeContainerTransport ?? all[index].nakliyeDetails?.containerTransport,
+        }
+      : all[index].nakliyeDetails,
+  };
+  const next = [...all];
+  next[index] = updated;
+  return writeUserCreatedJobs(next);
 }
 
 export type DeleteJobPhotoResult = { ok: true; job: Job } | { ok: false; error: string };

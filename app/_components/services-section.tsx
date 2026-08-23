@@ -16,6 +16,7 @@ import {
   STORAGE_SERVICE_GROUP_ID,
   type ServiceCategoryWithGroup,
 } from "../_lib/service-catalog";
+import { PageContainer } from "./page-container";
 import { useSession } from "../_lib/use-session";
 
 /** Ana sayfada tek kart olarak gösterilen "Depolama Hizmetleri" — service-catalog.ts#STORAGE_SERVICE_GROUP_ID'nin görünen adı. Katalogdaki gerçek grup etiketi ("Depo Hizmetleri") KASITLI OLARAK farklı bırakılır ve DEĞİŞTİRİLMEZ — bu yalnızca bu bir kartın tanıtım metnidir, service-catalog.ts'teki hiçbir yeri etkilemez (bkz. görev tanımı). */
@@ -183,7 +184,7 @@ export function ServicesSection() {
       aria-labelledby="hizmetler-baslik"
       className="scroll-mt-20 bg-background"
     >
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <PageContainer className="py-16">
         <div className="max-w-2xl">
           <h2
             id="hizmetler-baslik"
@@ -197,7 +198,7 @@ export function ServicesSection() {
               : "İhtiyacınıza uygun hizmet kategorisini inceleyin ve uzman hizmet verenlerden teklif alın."}
           </p>
         </div>
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           {items.map((item) =>
             item.kind === "storage-group" ? (
               <StorageServicesCard key={STORAGE_SERVICE_GROUP_ID} interactive={isProvider} />
@@ -206,7 +207,7 @@ export function ServicesSection() {
             ),
           )}
         </div>
-      </div>
+      </PageContainer>
     </section>
   );
 }

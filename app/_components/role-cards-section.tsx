@@ -2,6 +2,7 @@
 
 import { ArrowRight, ClipboardList, Handshake, type LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { PageContainer } from "./page-container";
 import { useSession } from "../_lib/use-session";
 
 const roles: {
@@ -42,7 +43,7 @@ export function RoleCardsSection() {
 
   return (
     <section aria-labelledby="roller-baslik" className="bg-surface">
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <PageContainer className="py-16">
         <div className="max-w-2xl">
           <h2
             id="roller-baslik"
@@ -83,7 +84,7 @@ export function RoleCardsSection() {
             </Link>
           ))}
         </div>
-      </div>
+      </PageContainer>
     </section>
   );
 }

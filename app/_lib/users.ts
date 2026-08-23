@@ -3,25 +3,8 @@ import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { deletePhotoBlob, putPhotoBlob } from "./photo-blob-store";
 import { isPasswordValid } from "./password-rules";
 import { normalizePhoneNumber } from "./phone";
-import {
-  recordProviderDocumentConsent,
-  hasAcceptedProviderDocumentDeclaration,
-  CUSTOMS_LICENSE_STATEMENT_ID,
-} from "./provider-document-consents";
-import {
-  addProviderDocuments,
-  getProviderDocumentsForUser,
-  updateProviderDocumentReviewFields,
-  CUSTOMS_LICENSE_DOCUMENT_TYPE,
-} from "./provider-documents";
-import { getProviderServiceCategoryIds, setProviderServiceCategoryIds } from "./provider-services";
 import { validateProviderProfileForm } from "./provider-profile";
-import {
-  GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID,
-  NAKLIYE_SERVICE_CATEGORY_ID,
-  isExperienceRange,
-  isServiceFeature,
-} from "./service-catalog";
+import { isExperienceRange, isServiceFeature } from "./service-catalog";
 import type { ExperienceRange, ProviderProfile, ServiceFeature, Session, UserRole } from "./types";
 
 const USERS_STORAGE_KEY = "malsevk.users.v1";
@@ -113,7 +96,10 @@ function isValidProviderProfile(value: unknown): value is ProviderProfile {
         profile.serviceCategories.every((item) => typeof item === "string"))) &&
     (profile.serviceFeatures === undefined ||
       (Array.isArray(profile.serviceFeatures) && profile.serviceFeatures.every((item) => isServiceFeature(item)))) &&
-    (profile.experienceRange === undefined || isExperienceRange(profile.experienceRange))
+    (profile.experienceRange === undefined || isExperienceRange(profile.experienceRange)) &&
+    (profile.recyclingMaterialSpecialties === undefined ||
+      (Array.isArray(profile.recyclingMaterialSpecialties) &&
+        profile.recyclingMaterialSpecialties.every((item) => typeof item === "string")))
   );
 }
 
@@ -378,448 +364,192 @@ export async function verifyLogin(email: string, password: string): Promise<Logi
   return { ok: true, user };
 }
 
-const DEV_ACCOUNTS: RegisterInput[] = [
-  {
-    name: "Zeynep",
-    email: "zeynep@test.com",
-    phone: "+905551111111",
-    password: "Zeynep1!",
-    role: "hizmet-alan",
-  },
-  {
-    name: "Mert",
-    email: "mert@test.com",
-    phone: "+905552222222",
-    password: "Mert123!",
-    role: "hizmet-veren",
-  },
-  {
-    name: "Mehmet Demir",
-    email: "mehmet.demir.demo@malsevk.com",
-    phone: "+905553334455",
-    password: "Demo123!",
-    role: "hizmet-veren",
-  },
-  {
-    // Nakliye izolasyon kuralını (bkz. job-visibility.ts) elle veri
-    // hazırlamadan test edebilmek için — bu hesabın hizmet seçimi
-    // (yalnızca Nakliye), belgesi ve beyanı `seedNakliyeciProviderProfileIfNeeded`
-    // tarafından, bu döngü tamamlandıktan SONRA ayrıca kurulur (bkz. aşağıda);
-    // burada yalnızca temel StoredUser alanları (login-form.tsx'teki gerçek
-    // Hizmet Veren kaydıyla aynı şekle sahip: firma adı/tipi/il/ilçe) yer alır.
-    // "Ad: Nakliye, Soyad: Demo" — registerUser'ın `name` alanını nasıl
-    // ürettiğiyle (Ad+Soyad birleşimi) AYNI şekle uysun diye tek bir alanda
-    // birleştirilmiştir; StoredUser.name zaten yalnızca birleşik adı tutar,
-    // ayrı ad/soyad alanı yok (bkz. RegisterInput.name).
-    name: "Nakliye Demo",
-    email: "nakliyeci@test.com",
-    phone: "+905556667788",
-    password: "Nakliye123!",
-    role: "hizmet-veren",
-    companyName: "MALSEVK Nakliye Demo",
-    companyType: "limited-sirket",
-    province: "Kocaeli",
-    district: "Gebze",
-  },
-  {
-    // Gümrük Müşavirliği belge doğrulama akışını (bkz. customs-license.ts)
-    // elle veri hazırlamadan test edebilmek için — bu hesabın hizmet seçimi
-    // (yalnızca Gümrük Müşavirliği), belgesi (ONAYLANMIŞ durumda) ve her iki
-    // beyanı `seedGumrukMusaviriProviderProfileIfNeeded` tarafından, bu döngü
-    // tamamlandıktan SONRA ayrıca kurulur (bkz. aşağıda) — Nakliyeci demo
-    // hesabıyla BİREBİR aynı desen.
-    name: "Ahmet Yılmaz",
-    email: "gumrukdemo@malsevk.demo",
-    phone: "+905325555555",
-    password: "Demo1234!",
-    role: "hizmet-veren",
-    companyName: "Marmara Gümrük Müşavirliği Ltd. Şti.",
-    companyType: "limited-sirket",
-    province: "Kocaeli",
-    district: "Dilovası",
-  },
-  {
-    // Yalnızca app/admin (Hizmet Veren Belge Kontrolü) panelini test etmek için —
-    // kayıt formunda "admin" hiçbir zaman bir Hesap Türü seçeneği olarak sunulmaz
-    // (bkz. types.ts#UserRole), bu rolün TEK oluşturulma yolu bu dev-seed'dir.
-    name: "Admin Kullanıcı",
-    email: "admin@test.com",
-    phone: "+905554445566",
-    password: "Admin123!",
-    role: "admin",
-  },
-];
-
-/**
- * Demo/seed hesaplarının e-posta adresleri — tek doğruluk kaynağı
- * DEV_ACCOUNTS'tur, burada tahmin edilmez/tekrar yazılmaz. Yalnızca demo
- * kullanıcıları e-posta üzerinden kesin olarak tespit etmesi gereken
- * araçlar (bkz. reset-demo-data.ts) için dışa açılır.
- */
-export const DEV_ACCOUNT_EMAILS: readonly string[] = DEV_ACCOUNTS.map((account) =>
-  account.email.trim().toLowerCase(),
-);
-
-/**
- * Var olan bir dev hesabını (id'sini koruyarak — ilan/teklif ilişkileri
- * bozulmasın diye) güncel ad/telefon/şifre/rol ile senkronlar; yoksa
- * oluşturur. Eski "123" şifreli kayıtlar bu şekilde güvenli biçimde
- * güncellenir, yinelenmez.
- */
-async function upsertDevAccount(account: RegisterInput): Promise<void> {
-  const phoneResult = normalizePhoneNumber(account.phone);
-  if (!phoneResult.ok) return;
-
-  const passwordHash = await hashPassword(account.password);
-  const existing = findUserByEmail(account.email);
-
-  if (existing) {
-    const alreadyUpToDate =
-      existing.name === account.name &&
-      existing.phone === phoneResult.value &&
-      existing.passwordHash === passwordHash &&
-      existing.role === account.role &&
-      existing.companyName === account.companyName &&
-      existing.companyType === account.companyType &&
-      existing.province === account.province &&
-      existing.district === account.district &&
-      typeof existing.createdAt === "string";
-    if (alreadyUpToDate) return;
-
-    const updated: StoredUser = {
-      ...existing,
-      name: account.name,
-      phone: phoneResult.value,
-      passwordHash,
-      role: account.role,
-      // companyName/companyType/province/district önceki DEV_ACCOUNTS
-      // girdilerinde hiç kullanılmıyordu (hepsi undefined), Nakliyeci
-      // hesabıyla birlikte ilk kez gerçek değerler taşıyorlar — RegisterInput
-      // zaten bu alanları tanımlıyordu, yalnızca bu fonksiyon onları
-      // StoredUser'a hiç KOPYALAMIYORDU; bu, o eksikliğin düzeltmesidir.
-      companyName: account.companyName,
-      companyType: account.companyType,
-      province: account.province,
-      district: account.district,
-      // Zaten bir createdAt'i varsa dokunulmaz (demo hesap "katılım tarihi"
-      // her senkronda ileri kaymasın diye) — yalnızca bu alandan önce
-      // oluşturulmuş demo kayıtlarda bir kerelik eklenir.
-      createdAt: existing.createdAt ?? new Date().toISOString(),
-    };
-    writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)));
-    return;
-  }
-
-  // Bu telefon numarası başka (gerçek) bir hesapta kayıtlıysa dev seed onu ezmesin.
-  if (findUserByPhone(phoneResult.value)) return;
-
-  const user: StoredUser = {
-    id: crypto.randomUUID(),
-    name: account.name,
-    email: normalizeEmail(account.email),
-    phone: phoneResult.value,
-    passwordHash,
-    role: account.role,
-    companyName: account.companyName,
-    companyType: account.companyType,
-    province: account.province,
-    district: account.district,
-    createdAt: new Date().toISOString(),
-  };
-  writeUsers([...readUsers(), user]);
-}
-
-/**
- * Yalnızca `next dev` altında (NODE_ENV==="development") çalışır — Vercel
- * preview/production dahil `next build`+`next start` ile çalışan HİÇBİR
- * ortamda demo hesap oluşturulmaz/güncellenmez (o ortamlarda NODE_ENV her
- * zaman "production"dur). Kasıtlı olarak "!== production" değil "===
- * development" (allow-list) kontrolü kullanılır: NODE_ENV beklenmedik bir
- * değer alırsa bile demo hesap oluşturma varsayılan olarak KAPALI kalır.
- * Idempotenttir — tekrar tekrar çağrılsa da hesapları yinelemez, yalnızca
- * güncel olmayan alanları senkronlar; mevcut kullanıcı kayıtlarına dokunmaz.
- *
- * `login-form.tsx` bu fonksiyonu HEM mount anındaki bir efektten (fire-and-
- * forget) HEM her giriş denemesinde (`await` ile) çağırır — bu iki çağrı
- * neredeyse aynı anda üst üste binebilir. `upsertDevAccount` "oku -> hashle
- * (await ile asenkron boşluk) -> yaz" şeklinde çalıştığı için, aynı anda
- * çalışan İKİ bağımsız döngü, birbirinin `writeUsers` yazımını (o yazımdan
- * ÖNCEKİ bir localStorage anlık görüntüsünden hareketle) ezerek en son
- * eklenen hesabı (dizideki SON hesap, DEV_ACCOUNTS'a yeni bir hesap
- * eklendikçe risk penceresi büyür) sessizce kaybedebilir — kalıcı, gözlenmiş
- * bir "lost update" yarışı. `inFlightSeeding` bunu, aynı anda yalnızca TEK
- * bir gerçek döngünün çalışmasını garanti ederek (ikinci çağıran, YENİ bir
- * döngü başlatmak yerine SÜREN döngünün aynı promise'ini bekler) ortadan
- * kaldırır.
- */
-const NAKLIYECI_DEMO_EMAIL = "nakliyeci@test.com";
-const ADMIN_DEMO_EMAIL = "admin@test.com";
-const NAKLIYECI_DEMO_DOCUMENT: { originalFileName: string; mimeType: string; extension: string } = {
-  originalFileName: "malsevk-nakliye-demo-faaliyet-belgesi.pdf",
-  mimeType: "application/pdf",
-  extension: "pdf",
+export type SupabaseUserMirrorInput = {
+  /** Supabase Auth'ın gerçek `auth.users.id`si (uuid) — bu fonksiyonun TEK, zorunlu kimlik kaynağıdır, asla üretilmez. */
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: UserRole;
+  companyName?: string;
+  companyType?: CompanyType;
+  province?: string;
+  district?: string;
 };
 
-const GUMRUK_DEMO_EMAIL = "gumrukdemo@malsevk.demo";
 /**
- * Ahmet Yılmaz'ın "Yetki Belgeleri" — iki AYRI belge (görev gereksinimi:
- * "Yetkilendirilmiş Gümrük Müşaviri" + "Gümrük Müşavirliği Ruhsatı"), ikisi
- * de `CUSTOMS_LICENSE_DOCUMENT_TYPE` ile etiketlenir ve ikisi de doğrudan
- * "approved" işaretlenir. `customs-license.ts#getCustomsLicenseDocumentForUser`
- * zaten birden fazla yüklemeyi (en sonuncusunu esas alarak) desteklediği için
- * bu, veri modelinde HİÇBİR değişiklik gerektirmez.
+ * Hiçbir kod artık bir gerçek şifreyle karşılaştırmaz (`verifyLogin` yeni
+ * Supabase Auth akışında hiç çağrılmaz) — `upsertSupabaseUserMirror`ın
+ * yazdığı satırlarda bu, yalnızca `StoredUser.passwordHash`ın (zorunlu
+ * string) tip sözleşmesini karşılamak için var olan, işlevsiz bir işaretçidir.
  */
-const GUMRUK_DEMO_DOCUMENTS: { originalFileName: string; mimeType: string; extension: string }[] = [
-  {
-    originalFileName: "yetkilendirilmis-gumruk-musaviri-belgesi.pdf",
-    mimeType: "application/pdf",
-    extension: "pdf",
-  },
-  {
-    originalFileName: "gumruk-musavirligi-ruhsati.pdf",
-    mimeType: "application/pdf",
-    extension: "pdf",
-  },
+export const SUPABASE_MANAGED_PASSWORD_MARKER = "supabase-auth-managed";
+
+/**
+ * SUPABASE AUTH GEÇİŞİ: gerçek hesap artık Supabase Auth'ta (signUp +
+ * complete_registration RPC'si, bkz. complete-registration.ts) oluşturulduktan
+ * SONRA, o hesabın AYNI id'siyle bu localStorage StoredUser dizinine bir
+ * "ayna" (mirror) satırı yazar/günceller. `registerUser`den (üstte) KASITLI
+ * OLARAK AYRIDIR: o fonksiyon kendi id'sini `crypto.randomUUID()` ile ÜRETİR
+ * ve bir şifreyi doğrulayıp hashler (yalnızca artık orphan olan
+ * provider-registration.ts tarafından hâlâ çağrılıyor — bkz. "Supabase Auth
+ * migration"); bu fonksiyon HİÇBİR şifre almaz
+ * (gerçek kimlik doğrulama artık tamamen Supabase Auth'ta) ve id'yi HER ZAMAN
+ * dışarıdan alır.
+ *
+ * Bu, contact-access.ts/ratings.ts/provider profil ekranları/my-offers-panel
+ * gibi jobs/offers DIŞINDAKİ (bu görevin kapsamı dışında bırakılan, bkz. görev
+ * tanımı) her ekranın `findUserById`/`getAllUsers` üzerinden değişmeden
+ * çalışmaya devam etmesini sağlayan TEK mekanizmadır.
+ *
+ * Idempotenttir: aynı id ile tekrar çağrılırsa (ör. `/kayit-tamamla`
+ * formunun ikinci bir denemesi, ya da `complete_registration`in kendisi
+ * ML101 ile reddettiği bir tekrar) var olan satırı alanlarıyla GÜNCELLER,
+ * asla çoğaltmaz — `providerProfile`/`showEmailAfterAgreement`/
+ * `showPhoneAfterAgreement` gibi bu fonksiyonun bilmediği alanlar var olan
+ * satırdan olduğu gibi korunur.
+ */
+export function upsertSupabaseUserMirror(input: SupabaseUserMirrorInput): boolean {
+  const phoneResult = normalizePhoneNumber(input.phone);
+  const phone = phoneResult.ok ? phoneResult.value : input.phone;
+
+  const existing = findUserById(input.id);
+  const mirrored: StoredUser = {
+    id: input.id,
+    name: input.name.trim(),
+    email: normalizeEmail(input.email),
+    phone,
+    passwordHash: SUPABASE_MANAGED_PASSWORD_MARKER,
+    role: input.role,
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    companyName: input.companyName?.trim() || undefined,
+    companyType: input.companyType,
+    province: input.province?.trim() || undefined,
+    district: input.district?.trim() || undefined,
+    providerProfile: existing?.providerProfile,
+    showEmailAfterAgreement: existing?.showEmailAfterAgreement ?? true,
+    showPhoneAfterAgreement: existing?.showPhoneAfterAgreement ?? true,
+  };
+
+  if (existing) {
+    return writeUsers(readUsers().map((user) => (user.id === input.id ? mirrored : user)));
+  }
+  return writeUsers([...readUsers(), mirrored]);
+}
+
+export type HydrateProviderProfileInput = {
+  /** Sadece BOŞ bir yerel `providerProfile.companyName` için yedek — bkz. aşağıdaki kullanım notu. */
+  companyNameFallback?: string;
+  bio?: string;
+  foundedYear?: number;
+  regions?: string[];
+  serviceFeatures?: ServiceFeature[];
+  experienceRange?: ExperienceRange;
+  logoStorageKey?: string;
+};
+
+/**
+ * DÜZELTME (uçtan uca doğrulama görevi — "hâlâ yalnızca localStorage/
+ * IndexedDB'den okuyan ekranlar"): `upsertSupabaseUserMirror` yalnızca
+ * `StoredUser`in TEMEL alanlarını (ad/e-posta/telefon/rol/firma) yazar —
+ * `providerProfile` (bio/kuruluş yılı/bölgeler/hizmet özellikleri/deneyim/
+ * logo) hiç dokunulmadan `existing?.providerProfile`den (yani bu tarayıcıda
+ * daha önce hiç yoksa `undefined`) geçirilir. Gerçek (yeni) bir tarayıcıda
+ * giriş yapan bir Hizmet Veren için bu, `ProviderProfileEditor`/
+ * `ServiceInfoEditor`in (ikisi de yalnızca `user.providerProfile`den okur)
+ * GERÇEKTE dolu olan verisini BOŞ göstermesi demekti — veri kaybı değil,
+ * yalnızca yerel aynanın henüz bu tarayıcıda hiç doldurulmamış olması
+ * (bkz. app/_lib/hydrate-provider-mirror.ts, bu fonksiyonun TEK çağıranı).
+ * Yalnızca GERÇEK uzak veriden (`RemoteProviderProfile`) gelen alanları
+ * birleştirir — `companyName`/`expertise` (provider_profiles'ta hiç
+ * karşılığı olmayan, bkz. o dosyanın kendi notu) var olan yerel değerini
+ * korur, asla sıfırlamaz.
+ */
+export function hydrateProviderProfileFromRemote(userId: string, fields: HydrateProviderProfileInput): boolean {
+  const existing = findUserById(userId);
+  if (!existing) return false;
+
+  const merged: ProviderProfile = {
+    // DÜZELTME (canlı Supabase testinde bulunan gerçek blokaj): `||` BİLEREK
+    // kullanılır (`??` DEĞİL) — `companyName` `validateProviderProfileForm`
+    // tarafından ZORUNLU kılındığı için gerçek/kaydedilmiş bir satırda asla
+    // meşru şekilde boş string OLAMAZ; bu yüzden boş string de "yok" sayılıp
+    // `companyNameFallback`e (StoredUser'ın üst seviye `companyName`si —
+    // kayıt formundan, HER ZAMAN güvenilir şekilde hidrate edilir) düşülür.
+    // Bu olmadan (yalnızca `??`), bu fonksiyonun kendisinin YAZDIĞI boş
+    // string ("" ilk hidrasyonda), sonraki bir `ProviderProfileEditor`
+    // kaydında "Firma adı zorunludur" hatasıyla GERÇEKTEN engelliyordu.
+    companyName: existing.providerProfile?.companyName || fields.companyNameFallback || "",
+    bio: fields.bio ?? existing.providerProfile?.bio ?? "",
+    foundedYear: fields.foundedYear ?? existing.providerProfile?.foundedYear,
+    regions: fields.regions ?? existing.providerProfile?.regions ?? [],
+    expertise: existing.providerProfile?.expertise ?? [],
+    serviceFeatures: fields.serviceFeatures ?? existing.providerProfile?.serviceFeatures,
+    experienceRange: fields.experienceRange ?? existing.providerProfile?.experienceRange,
+    logoStorageKey: fields.logoStorageKey ?? existing.providerProfile?.logoStorageKey,
+    // recyclingMaterialSpecialties'in hiçbir uzak (Supabase) karşılığı yok —
+    // expertise/companyName ile AYNI gerekçe (bkz. bu fonksiyonun kendi
+    // başlığı): var olan yerel değeri olduğu gibi korur.
+    recyclingMaterialSpecialties: existing.providerProfile?.recyclingMaterialSpecialties,
+  };
+
+  return writeUsers(readUsers().map((user) => (user.id === userId ? { ...user, providerProfile: merged } : user)));
+}
+
+/**
+ * "Kritik İlan Senkronizasyonu" görevi bölüm 8 — bu dosya (users.ts)
+ * localStorage tablosu okuyan/yazan onlarca "use client" bileşen tarafından
+ * içe aktarıldığı için client bundle'ına dahil olur. Eskiden burada
+ * `DEV_ACCOUNTS` adında, her hesap için ŞİFRESİNİ DÜZ METİN olarak taşıyan bir
+ * modül-seviyesi dizi vardı — bu dizi yalnızca (ve bu yorum da dahil hiçbir
+ * yerde gerçek şifre değerleri artık tekrar yazılmaz, çünkü kaynak haritaları
+ * (`.js.map`) yorum metnini de derlenmiş çıktıya taşır)
+ * `seedDevAccountsIfNeeded()` (aşağıda TAMAMEN kaldırıldı; SUPABASE AUTH
+ * GEÇİŞİ'nden beri hiçbir çağıranı yoktu, bkz. CLAUDE.md "No real backend")
+ * tarafından kullanılıyordu, ama `DEV_ACCOUNT_EMAILS`in (aşağıda, gerçekten
+ * kullanılan tek parça — reset-demo-data.ts) `DEV_ACCOUNTS.map(...)` ile ondan
+ * türetilmesi, bu şifre dizisinin build zamanında STATİK olarak referans
+ * edilmesine ve bu yüzden `NODE_ENV` denetiminden BAĞIMSIZ olarak Production
+ * dahil HER derlemede modül kapsamında inşa edilmesine (ve dolayısıyla
+ * client bundle'ına gömülmesine) neden oluyordu. Düzeltme: kullanılmayan tüm
+ * seed mekanizması (DEV_ACCOUNTS dizisi, upsertDevAccount,
+ * seedNakliyeciProviderProfileIfNeeded, seedGumrukMusaviriProviderProfileIfNeeded,
+ * seedDevAccountsIfNeeded) SİLİNDİ — hiçbiri artık çağrılmıyordu, "kaldır"
+ * seçeneği "yalnızca sunucu tarafında yükle" seçeneğine göre daha az risklidir
+ * (ölü kod, korunacak bir davranışı yok). `DEV_ACCOUNT_EMAILS` yalnızca
+ * e-postaları (sır DEĞİL) taşıyan, ayrı ve şifresiz bir listeden türetilerek
+ * korunur — `reset-demo-data.ts`nin davranışı BİREBİR aynı kalır. Bu 6 hesabın
+ * kendisi Development ortamında hâlâ var olabilir (daha önceki bir oturumda
+ * elle/farklı bir yoldan oluşturulmuş olabilir) — yalnızca bu dosyanın onları
+ * ARTIK OTOMATİK OLARAK OLUŞTURMADIĞI/GÜNCELLEMEDİĞİ değişti. Yerel Demo
+ * Hesaplar paneli (`demo-accounts-panel.tsx`, 16 belgesiz demo Hizmet Veren
+ * hesabı + Demo İlan Veren) bu değişiklikten ETKİLENMEZ — o TAMAMEN AYRI bir
+ * mekanizma, kendi şifresini zaten `NEXT_PUBLIC_DEMO_ACCOUNT_PASSWORD`
+ * ortam değişkeninden okur, hiçbir zaman burada hardcode edilmemişti.
+ */
+const DEV_ACCOUNT_EMAIL_LIST: readonly string[] = [
+  "zeynep@test.com",
+  "mert@test.com",
+  "mehmet.demir.demo@malsevk.com",
+  "nakliyeci@test.com",
+  "gumrukdemo@malsevk.demo",
+  "admin@test.com",
 ];
 
 /**
- * Nakliyeci demo hesabının (bkz. DEV_ACCOUNTS'taki "nakliyeci@test.com"
- * girdisi) provider-services.ts/provider-documents.ts/
- * provider-document-consents.ts kayıtlarını kurar — bu üç tablo `upsertDevAccount`'un
- * bilmediği, StoredUser'ın DIŞINDA duran ilişkisel veridir (bkz. o
- * modüllerin kendi dokümantasyonu), bu yüzden AYRI bir adımdır. Yalnızca
- * `nakliyeciEmail`in StoredUser'ı zaten varsa (yukarıdaki ana döngü onu
- * oluşturduktan/senkronladıktan SONRA) çalışır.
- *
- * Görev gereksinimi: "eski ProviderProfile.serviceCategories alanına
- * yazma" — provider-services.ts zaten TEK doğruluk kaynağı olduğu için
- * (bkz. o dosya) burada da başka hiçbir yere yazılmaz.
- *
- * İdempotentlik: hizmet kümesi `setProviderServiceCategoryIds` ile TAM
- * değiştirme (replace) olduğu için tekrar tekrar çağrılması çoğaltma
- * üretmez; belge/beyan yalnızca HİÇ yoksa (bkz. `hasDocuments`/
- * `hasAcceptedProviderDocumentDeclaration`) bir kez oluşturulur — kullanıcı
- * silinip yeniden oluşturulursa (yeni bir `user.id` ile) bu kontroller
- * doğal olarak "yok" bulur ve baştan kurar.
+ * Demo/seed hesaplarının e-posta adresleri — yalnızca demo kullanıcıları
+ * e-posta üzerinden kesin olarak tespit etmesi gereken araçlar (bkz.
+ * reset-demo-data.ts) için dışa açılır. ŞİFRE TAŞIMAZ (bkz. yukarıdaki not).
  */
-async function seedNakliyeciProviderProfileIfNeeded(): Promise<void> {
-  const user = findUserByEmail(NAKLIYECI_DEMO_EMAIL);
-  if (!user) return;
-
-  const currentServiceIds = getProviderServiceCategoryIds(user.id);
-  if (currentServiceIds.length !== 1 || currentServiceIds[0] !== NAKLIYE_SERVICE_CATEGORY_ID) {
-    setProviderServiceCategoryIds(user.id, [NAKLIYE_SERVICE_CATEGORY_ID]);
-  }
-
-  const hasDocuments = getProviderDocumentsForUser(user.id).length > 0;
-  if (!hasDocuments) {
-    const storageKey = crypto.randomUUID();
-    const demoBlob = new Blob(
-      ["MALSEVK Nakliye Demo - Faaliyet Belgesi (geliştirme ortamı demo hesabı için otomatik oluşturuldu)."],
-      { type: NAKLIYECI_DEMO_DOCUMENT.mimeType },
-    );
-    try {
-      await putPhotoBlob(storageKey, demoBlob);
-    } catch {
-      // IndexedDB bu ortamda kullanılamıyorsa (ör. bazı test/SSR bağlamları)
-      // yarım bir belge metadata kaydı bırakmamak için burada durulur —
-      // hizmet seçimi yine de yukarıda zaten kurulmuş olur.
-      return;
-    }
-
-    if (
-      !addProviderDocuments(user.id, [
-        {
-          originalFileName: NAKLIYECI_DEMO_DOCUMENT.originalFileName,
-          mimeType: NAKLIYECI_DEMO_DOCUMENT.mimeType,
-          extension: NAKLIYECI_DEMO_DOCUMENT.extension,
-          size: demoBlob.size,
-          indexedDbStorageKey: storageKey,
-        },
-      ])
-    ) {
-      await deletePhotoBlob(storageKey);
-      return;
-    }
-
-    const created = getProviderDocumentsForUser(user.id).find(
-      (doc) => doc.indexedDbStorageKey === storageKey,
-    );
-    if (created) {
-      // Demo kullanımını hiçbir admin onayı beklemeden test edilebilir
-      // kılmak için doğrudan "approved" olarak işaretlenir — reviewedByAdminId
-      // aynı seed döngüsünde zaten oluşturulmuş/senkronlanmış demo admin
-      // hesabına (bkz. ADMIN_DEMO_EMAIL) işaret eder; o hesap her nasılsa
-      // yoksa (ör. dev seed'in yalnızca bir kısmı çalıştıysa) kendi id'sine
-      // geri düşer — sahte bir kimlik uydurulmaz.
-      const admin = findUserByEmail(ADMIN_DEMO_EMAIL);
-      updateProviderDocumentReviewFields({
-        documentId: created.id,
-        status: "approved",
-        adminId: admin?.id ?? user.id,
-      });
-    }
-  }
-
-  if (!hasAcceptedProviderDocumentDeclaration(user.id)) {
-    recordProviderDocumentConsent(user.id);
-  }
-}
-
-/**
- * Ahmet Yılmaz / Gümrük demo hesabının (bkz. DEV_ACCOUNTS'taki
- * "gumrukdemo@malsevk.demo" girdisi) provider-services.ts/provider-documents.ts/
- * provider-document-consents.ts/StoredUser.providerProfile kayıtlarını kurar
- * — `seedNakliyeciProviderProfileIfNeeded` ile AYNI yapı/idempotentlik
- * garantisi, üç fark: (1) hizmet seçimi Nakliye yerine Gümrük Müşavirliği'dir,
- * (2) her ikisi de `CUSTOMS_LICENSE_DOCUMENT_TYPE` ile etiketlenen İKİ AYRI
- * "Yetki Belgesi" (bkz. GUMRUK_DEMO_DOCUMENTS) yüklenir ve genel "Belge
- * Doğruluk Beyanı"na EK olarak Gümrük'e özel "Yüklediğim belge bana aittir ve
- * günceldir." beyanı da (bkz. CUSTOMS_LICENSE_STATEMENT_ID) ayrıca kaydedilir
- * — gerçek kayıt formunun (login-form.tsx) ürettiği durumla birebir aynı
- * olsun diye; her iki belge de doğrudan "approved" (Onaylandı) olarak
- * işaretlenir (görev gereksinimi) — bu hesap hiçbir admin onayı beklemeden
- * teklif verebilir durumda test edilebilir. (3) demo tanıtım metninde
- * belirtilen zengin firma profili (bio/hizmet bölgeleri/çalışma alanları/
- * deneyim aralığı) yalnızca hiç yoksa BİR KEZ kurulur — kullanıcı Hesap
- * Ayarları > Firma Profili'nden bunu sonradan elle değiştirirse bir sonraki
- * seed çalıştırmasında ÜZERİNE YAZILMAZ (aynı "yalnızca eksikse kur" ilkesi).
- * Profil fotoğrafı/logosu kasıtlı olarak HİÇ ayarlanmaz — diğer tüm demo
- * hesaplarla (Nakliyeci/Mert/Zeynep/Mehmet Demir) AYNI şekilde, gerçek bir
- * logo yüklenmemiş her hesabın zaten kullandığı mevcut baş harf-avatarı
- * (bkz. profile.ts#getInitials) otomatik olarak devreye girer — yeni bir
- * "kapak görseli" alanı/özelliği İCAT EDİLMEZ (bu, mevcut veri modelinde hiç
- * yoktur).
- */
-async function seedGumrukMusaviriProviderProfileIfNeeded(): Promise<void> {
-  const user = findUserByEmail(GUMRUK_DEMO_EMAIL);
-  if (!user) return;
-
-  const currentServiceIds = getProviderServiceCategoryIds(user.id);
-  if (currentServiceIds.length !== 1 || currentServiceIds[0] !== GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID) {
-    setProviderServiceCategoryIds(user.id, [GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID]);
-  }
-
-  const hasCustomsDocument = getProviderDocumentsForUser(user.id).some(
-    (doc) => doc.documentType === CUSTOMS_LICENSE_DOCUMENT_TYPE,
-  );
-  if (!hasCustomsDocument) {
-    for (const demoDocument of GUMRUK_DEMO_DOCUMENTS) {
-      const storageKey = crypto.randomUUID();
-      const demoBlob = new Blob(
-        [
-          `Marmara Gümrük Müşavirliği Ltd. Şti. - ${demoDocument.originalFileName} (geliştirme ortamı demo hesabı için otomatik oluşturuldu).`,
-        ],
-        { type: demoDocument.mimeType },
-      );
-      try {
-        await putPhotoBlob(storageKey, demoBlob);
-      } catch {
-        // IndexedDB bu ortamda kullanılamıyorsa (ör. bazı test/SSR bağlamları)
-        // yarım bir belge metadata kaydı bırakmamak için burada durulur —
-        // hizmet seçimi yine de yukarıda zaten kurulmuş olur.
-        return;
-      }
-
-      if (
-        !addProviderDocuments(user.id, [
-          {
-            originalFileName: demoDocument.originalFileName,
-            mimeType: demoDocument.mimeType,
-            extension: demoDocument.extension,
-            size: demoBlob.size,
-            indexedDbStorageKey: storageKey,
-            documentType: CUSTOMS_LICENSE_DOCUMENT_TYPE,
-          },
-        ])
-      ) {
-        await deletePhotoBlob(storageKey);
-        return;
-      }
-
-      const created = getProviderDocumentsForUser(user.id).find(
-        (doc) => doc.indexedDbStorageKey === storageKey,
-      );
-      if (created) {
-        // Görev gereksinimi: "Belge durumu: Onaylandı" — hiçbir admin onayı
-        // beklemeden test edilebilir kılmak için doğrudan "approved" olarak
-        // işaretlenir (Nakliyeci demo hesabıyla AYNI gerekçe/desen).
-        const admin = findUserByEmail(ADMIN_DEMO_EMAIL);
-        updateProviderDocumentReviewFields({
-          documentId: created.id,
-          status: "approved",
-          adminId: admin?.id ?? user.id,
-        });
-      }
-    }
-  }
-
-  if (!hasAcceptedProviderDocumentDeclaration(user.id)) {
-    recordProviderDocumentConsent(user.id);
-  }
-  if (!hasAcceptedProviderDocumentDeclaration(user.id, CUSTOMS_LICENSE_STATEMENT_ID)) {
-    recordProviderDocumentConsent(user.id, CUSTOMS_LICENSE_STATEMENT_ID);
-  }
-
-  // Zengin demo firma profili — yalnızca hiç profil yoksa kurulur (bkz. bu
-  // fonksiyonun üstündeki dokümantasyon). Mevcut ProviderProfile alanları
-  // (types.ts) dışında HİÇBİR yeni alan kullanılmaz: "15 yıl sektör
-  // deneyimi" -> `experienceRange: "10+"` (service-catalog.ts#
-  // EXPERIENCE_RANGE_OPTIONS'taki en yakın/en üst aralık), "Çalışma
-  // Alanları" -> `expertise` (Hesap Ayarları > Firma Profili'nin hâlâ
-  // gösterdiği "Uzmanlık Alanları" chip'leri, bkz. types.ts#ProviderProfile.expertise'in
-  // kendi dokümantasyonu — burada yalnızca DEMO GÖRÜNTÜLEME amaçlı
-  // doldurulur, hizmet kategorisi/görünürlük/teklif yetkisi HÂLÂ yalnızca
-  // yukarıdaki provider-services.ts kaydından gelir, bu alan onu asla
-  // etkilemez).
-  if (!user.providerProfile) {
-    const demoProfile: ProviderProfile = {
-      companyName: "Marmara Gümrük Müşavirliği Ltd. Şti.",
-      bio:
-        "15 yıllık sektör tecrübesiyle ithalat, ihracat, transit ve antrepo işlemlerinde profesyonel gümrük müşavirliği hizmeti sunuyoruz. Liman operasyonları ve dış ticaret süreçlerinde hızlı ve güvenilir çözümler üretiyoruz.",
-      regions: ["Kocaeli", "İstanbul", "Sakarya"],
-      expertise: [
-        "İthalat Gümrükleme",
-        "İhracat Gümrükleme",
-        "Transit İşlemleri",
-        "Antrepo İşlemleri",
-        "Gümrük Danışmanlığı",
-        "Evrak Takibi",
-        "Tescil İşlemleri",
-        "Beyanname Hazırlama",
-      ],
-      experienceRange: "10+",
-    };
-    writeUsers(readUsers().map((u) => (u.id === user.id ? { ...u, providerProfile: demoProfile } : u)));
-  }
-}
-
-let inFlightSeeding: Promise<void> | null = null;
-
-export function seedDevAccountsIfNeeded(): Promise<void> {
-  if (process.env.NODE_ENV !== "development") return Promise.resolve();
-  if (typeof window === "undefined") return Promise.resolve();
-
-  if (!inFlightSeeding) {
-    inFlightSeeding = (async () => {
-      for (const account of DEV_ACCOUNTS) {
-        await upsertDevAccount(account);
-      }
-      await seedNakliyeciProviderProfileIfNeeded();
-      await seedGumrukMusaviriProviderProfileIfNeeded();
-    })().finally(() => {
-      inFlightSeeding = null;
-    });
-  }
-  return inFlightSeeding;
-}
+export const DEV_ACCOUNT_EMAILS: readonly string[] = DEV_ACCOUNT_EMAIL_LIST.map((email) =>
+  email.trim().toLowerCase(),
+);
 
 export type UpdateProviderProfileInput = {
   companyName: string;
   bio: string;
   foundedYear: number | null;
   regions: string[];
-  expertise: string[];
   /** undefined = logoyu değiştirme, null = mevcut logoyu kaldır, Blob = yeni logo ile değiştir. */
   logo?: Blob | null;
 };
@@ -887,7 +617,15 @@ export async function updateProviderProfile(
     bio: input.bio.trim(),
     foundedYear: input.foundedYear ?? undefined,
     regions: input.regions,
-    expertise: input.expertise,
+    // DÜZELTME ("Profilim/Hesap Ayarları Sadeleştirmesi" görevi): bu form
+    // artık "Uzmanlık Alanları"nı hiç düzenlemez (görevin kendi kuralı:
+    // "Hizmet Veren kendi profilinden hizmet veya uzmanlık alanı
+    // seçemez") — var olan `expertise` değeri olduğu gibi taşınır, asla
+    // boş diziyle EZİLMEZ. Alan tamamen SİLİNMEDİ (eski veriler hâlâ
+    // `service-catalog.ts#migrateLegacyExpertiseToServiceCategoryIds`
+    // tarafından okunabilir kalsın diye) — yalnızca bu formdan artık
+    // yazılabilir değil.
+    expertise: existing.providerProfile?.expertise ?? [],
     logoStorageKey,
     // Bu form (Hesap Ayarları > Firma Profili) serviceFeatures/
     // experienceRange'i hiç düzenlemez (bkz. Panel > Profilim > Hizmet
@@ -897,6 +635,10 @@ export async function updateProviderProfile(
     // provider-services.ts'te tutulur, bu profil nesnesinde hiç yoktur.
     serviceFeatures: existing.providerProfile?.serviceFeatures,
     experienceRange: existing.providerProfile?.experienceRange,
+    // Bkz. serviceFeatures/experienceRange üstündeki AYNI gerekçe — bu form
+    // recyclingMaterialSpecialties'i de hiç düzenlemez (bkz. Panel >
+    // Profilim > Hizmet Bilgilerim, updateProviderServiceInfo aşağıda).
+    recyclingMaterialSpecialties: existing.providerProfile?.recyclingMaterialSpecialties,
   };
 
   const updated: StoredUser = { ...existing, providerProfile: profile };
@@ -982,8 +724,6 @@ export function updateContactVisibility(
 
 export type UpdateProviderServiceInfoInput = {
   regions: string[];
-  serviceCategories: string[];
-  serviceFeatures: ServiceFeature[];
   experienceRange: ExperienceRange | null;
 };
 
@@ -997,15 +737,27 @@ export type UpdateProviderServiceInfoResult =
  * OLARAK AYRI bir fonksiyondur: o form companyName/bio'yu ZORUNLU kılar
  * (bkz. provider-profile.ts#validateProviderProfileForm, 50-500 karakter
  * bio), ama "Hizmet Bilgilerim" bir tamamlama akışıdır — kullanıcı Firma
- * Profili'ni hiç doldurmamış olsa bile yalnızca hizmet/bölge/deneyim
- * bilgisini kaydedebilmelidir. Bu yüzden companyName/bio/foundedYear/
- * logoStorageKey/expertise (bu formun sahibi olmadığı alanlar) var olan
- * profilden olduğu gibi taşınır, hiç doğrulanmaz/değiştirilmez; profil
- * daha önce hiç oluşturulmamışsa boş companyName/bio ile başlar (ekranlar
- * bunu zaten "Belirtilmemiş" gibi gösterip sahte veri üretmeden ele alır,
- * bkz. incoming-offer-card.tsx). `regions` de bilerek burada
- * düzenlenebilir — Hesap Ayarları'ndaki aynı alanla aynı veriyi paylaşır,
- * iki farklı ekrandan aynı tek doğruluk kaynağına yazılır.
+ * Profili'ni hiç doldurmamış olsa bile yalnızca bölge/deneyim bilgisini
+ * kaydedebilmelidir. Bu yüzden companyName/bio/foundedYear/logoStorageKey/
+ * expertise (bu formun sahibi olmadığı alanlar) var olan profilden olduğu
+ * gibi taşınır, hiç doğrulanmaz/değiştirilmez; profil daha önce hiç
+ * oluşturulmamışsa boş companyName/bio ile başlar (ekranlar bunu zaten
+ * "Belirtilmemiş" gibi gösterip sahte veri üretmeden ele alır, bkz.
+ * incoming-offer-card.tsx). `regions` de bilerek burada düzenlenebilir —
+ * Hesap Ayarları'ndaki aynı alanla aynı veriyi paylaşır, iki farklı
+ * ekrandan aynı tek doğruluk kaynağına yazılır.
+ *
+ * DÜZELTME ("Profilim/Hesap Ayarları Sadeleştirmesi" görevi): bu form
+ * artık `serviceCategories`/`serviceFeatures`/`recyclingMaterialSpecialties`
+ * hiçbirini KABUL ETMİYOR/YAZMIYOR — "Hizmet Veren kendi profilinden
+ * hizmet veya uzmanlık alanı seçemez" kuralı gereği. Önemli: bu, eskiden
+ * burada yapılan `setProviderServiceCategoryIds` çağrısının TAMAMEN
+ * KALDIRILDIĞI anlamına gelir — provider-services.ts tablosu (hâlâ
+ * `/panel/belge-yukleme`nin gerçek yazım yolu, admin yetkilendirme
+ * akışının veri kaynağı) bu fonksiyondan asla dokunulmaz/sıfırlanmaz.
+ * `serviceFeatures`/`recyclingMaterialSpecialties` de aynı şekilde var
+ * olan değerinden değişmeden taşınır (expertise'in zaten yaptığı gibi) —
+ * hiçbiri boş diziyle EZİLMEZ.
  */
 export async function updateProviderServiceInfo(
   session: Session | null,
@@ -1025,16 +777,6 @@ export async function updateProviderServiceInfo(
     return { ok: false, error: "Yalnızca Hizmet Veren kullanıcılar hizmet bilgilerini düzenleyebilir." };
   }
 
-  // Hizmet seçimleri artık provider-services.ts (userId -> serviceCategoryId
-  // ilişkisel tablosu) üzerinden yazılır — profile.serviceCategories'e BİR
-  // DAHA YAZILMAZ (bkz. types.ts#ProviderProfile.serviceCategories'in
-  // deprecated notu). Önce hizmet tablosu yazılır: bu adım başarısız olursa
-  // aşağıdaki profil yazımı hiç denenmez, iki tablo arasında yarım/tutarsız
-  // bir durum oluşmaz.
-  if (!setProviderServiceCategoryIds(session.id, input.serviceCategories)) {
-    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
-  }
-
   const currentProfile = existing.providerProfile;
   const profile: ProviderProfile = {
     companyName: currentProfile?.companyName ?? "",
@@ -1043,8 +785,9 @@ export async function updateProviderServiceInfo(
     logoStorageKey: currentProfile?.logoStorageKey,
     expertise: currentProfile?.expertise ?? [],
     regions: input.regions,
-    serviceFeatures: input.serviceFeatures,
+    serviceFeatures: currentProfile?.serviceFeatures,
     experienceRange: input.experienceRange ?? undefined,
+    recyclingMaterialSpecialties: currentProfile?.recyclingMaterialSpecialties,
   };
 
   const updated: StoredUser = { ...existing, providerProfile: profile };

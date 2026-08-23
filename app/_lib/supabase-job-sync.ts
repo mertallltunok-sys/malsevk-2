@@ -1,4 +1,6 @@
+import { markJobSupabaseSyncFailed } from "./job-store";
 import { getPhotoBlob } from "./photo-blob-store";
+import { reportSystemError } from "./system-health";
 import { createSupabaseBrowserClient } from "./supabase/browser-client";
 import { deleteJobPhotosFromStorage, uploadJobPhotoToStorage } from "./supabase-job-photos";
 import type { Job } from "./types";
@@ -41,11 +43,12 @@ import type { Job } from "./types";
  *   - `width`/`height` her zaman `null` (JobPhoto bu iki alanı hiç
  *     taşımıyor, kolonlar nullable) — Faz 3'ün kapsamı yalnızca gerçek dosya
  *     baytlarının Storage'a ulaşmasıdır, boyut metadata'sı ayrı bir konudur.
- *   - Gümrük Müşavirliği'nin customsTransactionType/customsRequestedServices/
- *     customsDocuments alanları — Supabase şemasında hiç karşılığı yok
- *     (0028'in kendi kapsam sınırı, Faz 4 bunu genişletmedi — görev
- *     tanımının kendi kapsam sınırı: "gümrük alanları bu fazın kapsamı
- *     değildir"), bu yüzden burada da senkronlanmaz.
+ *   - Gümrük Müşavirliği'nin `customsDocuments` (destekleyici evrak listesi)
+ *     — Supabase şemasında hiç karşılığı yok ve bilerek eklenmeyecek (bkz.
+ *     migration 0025→0027: `job_customs_documents` eklenip "MALSEVK sevkiyat
+ *     evrakı tutmaz" kararıyla tamamen geri alındı). `customsTransactionType`/
+ *     `customsRequestedServices` ise migration 0048 ile şemaya eklendi ve
+ *     aşağıda GERÇEKTEN senkronlanıyor — bu ikisi artık kapsam dışı DEĞİL.
  * Bu eksiklik SESSİZCE değil, açıkça (bu dosyanın kendi dokümantasyonu +
  * görev sonu raporu) belgelenmiştir.
  *
@@ -119,6 +122,171 @@ async function uploadJobPhotosOrRollback(
   return { ok: true, rpcPhotos, uploadedPaths };
 }
 
+/**
+ * "Kritik İlan Senkronizasyonu" görevi Bölüm 2 — ilan sahibinin, admin karar
+ * vermeden ÖNCE yaptığı bir düzenlemeyi (job-edit-form.tsx#updateJob YEREL
+ * yazımı zaten başarılı olduktan SONRA) Supabase'e iter. `update_job_as_admin`
+ * (0048) İLE AYNI alan kapsamı/coalesce disiplinini paylaşan, ama
+ * auth.uid() = requester_id VE moderation_status = 'pending_review'
+ * zorunluluğuyla çalışan `update_job_as_requester` RPC'sini (migration 0051)
+ * sarmalar — "en dar RPC çözümü" (görev gereksinimi), ikinci bir ilan sistemi
+ * İCAT EDİLMEZ. Fotoğraf/kategori/facility_id/location_mode/delivery_facility_id/
+ * delivery_location_type/customsDocuments senkronlanmaz — update_job_as_admin'in
+ * KENDİ zaten kabul ettiği aynı, bilerek bırakılmış sınır (bkz. o RPC'nin
+ * migration'ındaki not) — bir requester bunları değiştirirse o değişiklik bu
+ * çağrıda yalnızca yerel kalır, YENİ bir kapsam daralması değildir.
+ */
+async function updateJobAsRequesterOnSupabase(job: Job): Promise<JobSyncResult> {
+  const supabase = createSupabaseBrowserClient();
+  const { error } = await supabase.rpc("update_job_as_requester", {
+    p_job_id: job.id,
+    p_title: job.title,
+    p_description: job.description,
+    p_province: job.province,
+    p_district: job.district,
+    p_work_location_type: job.workLocationType,
+    p_address_text: job.addressText ?? "",
+    p_work_date: job.workDate,
+    p_work_end_date: job.workEndDate ?? null,
+    p_product_quantity: job.productQuantity ?? null,
+    p_product_tonnage: job.productTonnage ?? null,
+    p_product_type: job.productType ?? null,
+    p_customs_product_type: job.customsProductType ?? null,
+    p_delivery_facility_name: job.deliveryFacilityName ?? null,
+    p_delivery_address_text: job.deliveryAddressText ?? null,
+    p_operation_details: job.operationDetails ?? null,
+    p_neighborhood: job.neighborhood ?? null,
+    p_location_url: job.locationUrl ?? null,
+    p_directions_note: job.directionsNote ?? null,
+    p_delivery_province: job.deliveryProvince ?? null,
+    p_delivery_district: job.deliveryDistrict ?? null,
+    p_recycling_material_category_id: job.recyclingMaterialCategoryId ?? null,
+    p_recycling_material_subtype_id: job.recyclingMaterialSubtypeId ?? null,
+    p_recycling_quantity: job.recyclingQuantity ?? null,
+    p_recycling_unit: job.recyclingUnit ?? null,
+    p_recycling_material_condition: job.recyclingMaterialCondition ?? null,
+    p_recycling_material_condition_note: job.recyclingMaterialConditionNote ?? null,
+    p_recycling_scope_of_work: job.recyclingScopeOfWork ?? null,
+    p_customs_transaction_type: job.customsTransactionType ?? null,
+    p_customs_requested_services: job.customsRequestedServices ?? null,
+    p_storage_product_type: job.storageProductType ?? null,
+    p_storage_product_quantity: job.storageProductQuantity ?? null,
+    p_storage_product_unit: job.storageProductUnit ?? null,
+    p_storage_product_tonnage: job.storageProductTonnage ?? null,
+    p_storage_container_groups: job.storageContainerGroups ?? null,
+    p_product_tonnage_unit: job.productTonnageUnit ?? null,
+    p_nakliye_load_preparation_type: job.nakliyeDetails?.loadPreparationType ?? null,
+    p_nakliye_load_preparation_custom_text: job.nakliyeDetails?.loadPreparationCustomText ?? null,
+    p_nakliye_loading_method: job.nakliyeDetails?.loadingMethod ?? null,
+    p_nakliye_loading_method_custom_text: job.nakliyeDetails?.loadingMethodCustomText ?? null,
+    p_nakliye_measurement_info: job.nakliyeDetails?.measurementInfo ?? null,
+    p_nakliye_hazmat: job.nakliyeDetails?.hazmat ?? null,
+    p_nakliye_container_transport: job.nakliyeDetails?.containerTransport ?? null,
+    p_nakliye_cargo_groups: job.nakliyeCargoGroups ?? null,
+    p_storage_hazardous: job.storageHazardous ?? null,
+    p_storage_risk_groups: job.storageRiskGroups ?? null,
+    p_recycling_requested_operation: job.recyclingRequestedOperation ?? null,
+    p_recycling_waste_code: job.recyclingWasteCode ?? null,
+    p_recycling_waste_code_unknown: job.recyclingWasteCodeUnknown ?? null,
+    p_recycling_hazard_properties: job.recyclingHazardProperties ?? null,
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
+ * "Kritik İlan Senkronizasyonu" görevi — `markJobSupabaseSyncFailed` ile
+ * işaretlenmiş (ya da job-requests-panel.tsx'in mount-time reconciliation'ı
+ * tarafından RETROAKTİF olarak işaretlenmiş, bkz. reconcileLocalPendingJobsWithSupabase
+ * aşağıda) bir ilan için GÜVENLİ yeniden deneme. `job.id` zaten ilk denemede
+ * `p_client_id` olarak gönderilmişti (bkz. syncJobToSupabase) — yani ÖNCE bu
+ * id'nin Supabase'te GERÇEKTEN var olup olmadığı kontrol edilir:
+ *   - Yoksa: ilk deneme (create) GERÇEKTEN hiç ulaşmamış/tamamlanmamış —
+ *     normal `syncJobToSupabase` güvenle yeniden çalıştırılır (fotoğraflar da
+ *     dahil, hiçbiri henüz Storage'a ulaşmamıştır). `create_job`ı TEKRAR
+ *     çağırmak `jobs.id` birincil anahtarına çakışmaz çünkü satır hiç yok.
+ *   - Varsa: satır zaten var — YENİDEN INSERT DENENMEZ (görev gereksinimi).
+ *     Bunun İKİ olası nedeni var, ikisi de AYNI eylemi gerektirir (yerel
+ *     GÜNCEL durumu sunucuya İT): (a) ilk create aslında başarılı olmuş ama
+ *     yanıt tarayıcıya hiç ulaşmamış olabilir — bu durumda push no-op'a
+ *     yakındır (aynı veriyi tekrar yazar); (b) bu bir DÜZENLEME sonrası
+ *     yeniden deneme — satır zaten var ama YEREL düzenleme henüz sunucuya
+ *     yansımamış. `update_job_as_requester`in kendisi moderation_status
+ *     kontrolünü yapar (ilan bu arada admin tarafından karara bağlandıysa
+ *     MLK102 ile açıkça reddeder, sessizce üzerine yazmaz).
+ */
+export async function retryJobSupabaseSync(job: Job): Promise<JobSyncResult> {
+  const supabase = createSupabaseBrowserClient();
+  const { data: existing, error: checkError } = await supabase.from("jobs").select("id").eq("id", job.id).maybeSingle();
+  if (checkError) return { ok: false, error: checkError.message };
+  if (existing) return updateJobAsRequesterOnSupabase(job);
+  return syncJobToSupabase(job);
+}
+
+/**
+ * "Kritik İlan Senkronizasyonu" görevi Bölüm 1 takip düzeltmesi — düzeltmeden
+ * ÖNCE oluşturulmuş bir localStorage ilanının `supabaseSyncFailedAt`/
+ * `supabaseSyncError` alanları hiç yoktur (bu alanlar sonradan eklendi), bu
+ * yüzden yalnızca o alana bakmak eski takılı ilanları YAKALAYAMAZ. Bu
+ * fonksiyon "Hizmet Taleplerim" her yüklendiğinde (job-requests-panel.tsx)
+ * çağrılır: oturumdaki kullanıcıya ait, hâlâ `pending_review` VE henüz
+ * bilinen bir senkron hatası TAŞIMAYAN yerel ilanları TEK bir toplu sorguyla
+ * Supabase'e karşı doğrular.
+ *
+ * - Sunucuda GERÇEKTEN yoksa: bu "gerçek Onay Bekliyor" DEĞİLDİR (görev
+ *   gereksinimi) — retroaktif olarak `markJobSupabaseSyncFailed` ile
+ *   işaretlenir, tıpkı YENİ bir senkron hatası gibi aynı "Senkronizasyon
+ *   Başarısız" + Yeniden Dene UI'ı devreye girer (job-requests-panel.tsx/
+ *   job-detail-content.tsx, ayrı bir kod yolu İCAT EDİLMEZ).
+ * - Sunucuda varsa: dokunulmaz (yeniden INSERT denenmez, görev gereksinimi)
+ *   — hâlâ `pending_review` iken zaten `useAllJobs()`in `remoteWinsOverLocal`
+ *   kuralı yerel kopyayı korur (edit senkronu ayrı bir mekanizma, bkz.
+ *   updateJobAsRequesterOnSupabase), bu fonksiyon yalnızca VARLIK/YOKLUK
+ *   sinyalini doğrular, içerik uzlaştırması yapmaz.
+ * - "Tamamlanmamış gerçek taslaklar" bu kod tabanında AYRI bir kavram
+ *   DEĞİLDİR (görev gereksinimi notu) — job-store.ts#createJob/createJobsForOperation
+ *   yazma-sonra-kontrol disiplini nedeniyle (bkz. o dosyanın "Writes must not
+ *   silently claim success" ilkesi), userJobsStore'da var olan HER `Job`
+ *   zaten tam/başarılı bir yerel yazımı temsil eder — sahiden eksik bir
+ *   "taslak" hiçbir zaman bu diziye girmez, bu yüzden ayrıca bir taslak/
+ *   gönderildi ayrımına gerek yoktur.
+ * - `isSupabaseJobSyncEnabled()` KAPALIYKEN bu fonksiyon HİÇBİR şey yapmaz
+ *   (erken döner) — bayrak kapalıyken localStorage zaten TEK yetkili kaynak
+ *   olmaya devam eder (Faz 2'nin kendi "opt-in, localStorage her koşulda
+ *   yetkili kalır" ilkesi) — bu durumda "sunucuda yok" GERÇEK bir hata
+ *   DEĞİLDİR, uygulamanın bugünkü tasarlanmış davranışıdır; bayrak kapalıyken
+ *   her ilanı retroaktif olarak "Senkronizasyon Başarısız" işaretlemek YANLIŞ
+ *   bir alarm olurdu.
+ * - Sahiplik: çağıran zaten yalnızca `job.requesterId === session.id` olan
+ *   ilanları bu fonksiyona geçirir (bkz. job-requests-panel.tsx); Supabase
+ *   sorgusunun kendisi de RLS (`jobs_select_visible`, sahibi/admin) altında
+ *   çalışır — `auth.uid()` sunucu tarafında JWT'den gelir, bu fonksiyon bir
+ *   kullanıcı id'sini asla parametre olarak GEÇİRMEZ.
+ */
+export async function reconcileLocalPendingJobsWithSupabase(jobs: readonly Job[]): Promise<void> {
+  if (!isSupabaseJobSyncEnabled()) return;
+
+  const candidates = jobs.filter((job) => job.moderationStatus === "pending_review" && !job.supabaseSyncFailedAt);
+  if (candidates.length === 0) return;
+
+  const supabase = createSupabaseBrowserClient();
+  const { data: existingRows, error } = await supabase
+    .from("jobs")
+    .select("id")
+    .in("id", candidates.map((job) => job.id));
+  if (error) return; // Ağ/erişim hatası — mevcut duruma dokunmadan sessizce vazgeç, sahte bir "başarısız" işareti KOYMA.
+
+  const existingIds = new Set((existingRows ?? []).map((row) => row.id as string));
+  for (const job of candidates) {
+    if (!existingIds.has(job.id)) {
+      markJobSupabaseSyncFailed(
+        job.id,
+        "Bu ilan sunucuda bulunamadı — senkronizasyon hiç tamamlanmamış olabilir (eski sürüm hatası).",
+      );
+    }
+  }
+}
+
 /** Tek ilan (createJob) yolu için — job-request-form.tsx'in `services.length === 1` dalından çağrılır. */
 export async function syncJobToSupabase(job: Job): Promise<JobSyncResult> {
   const supabase = createSupabaseBrowserClient();
@@ -151,6 +319,8 @@ export async function syncJobToSupabase(job: Job): Promise<JobSyncResult> {
     p_product_tonnage: job.productTonnage ?? null,
     p_product_type: job.productType ?? null,
     p_customs_product_type: job.customsProductType ?? null,
+    p_customs_transaction_type: job.customsTransactionType ?? null,
+    p_customs_requested_services: job.customsRequestedServices ?? null,
     p_client_id: job.id,
     p_delivery_province: job.deliveryProvince ?? null,
     p_delivery_district: job.deliveryDistrict ?? null,
@@ -158,11 +328,39 @@ export async function syncJobToSupabase(job: Job): Promise<JobSyncResult> {
     p_delivery_facility_id: job.deliveryFacilityId ?? null,
     p_delivery_facility_name: job.deliveryFacilityName ?? null,
     p_delivery_address_text: job.deliveryAddressText ?? null,
+    p_recycling_material_category_id: job.recyclingMaterialCategoryId ?? null,
+    p_recycling_material_subtype_id: job.recyclingMaterialSubtypeId ?? null,
+    p_recycling_quantity: job.recyclingQuantity ?? null,
+    p_recycling_unit: job.recyclingUnit ?? null,
+    p_recycling_material_condition: job.recyclingMaterialCondition ?? null,
+    p_recycling_material_condition_note: job.recyclingMaterialConditionNote ?? null,
+    p_recycling_scope_of_work: job.recyclingScopeOfWork ?? null,
+    p_storage_product_type: job.storageProductType ?? null,
+    p_storage_product_quantity: job.storageProductQuantity ?? null,
+    p_storage_product_unit: job.storageProductUnit ?? null,
+    p_storage_product_tonnage: job.storageProductTonnage ?? null,
+    p_storage_container_groups: job.storageContainerGroups ?? null,
+    p_product_tonnage_unit: job.productTonnageUnit ?? null,
+    p_nakliye_load_preparation_type: job.nakliyeDetails?.loadPreparationType ?? null,
+    p_nakliye_load_preparation_custom_text: job.nakliyeDetails?.loadPreparationCustomText ?? null,
+    p_nakliye_loading_method: job.nakliyeDetails?.loadingMethod ?? null,
+    p_nakliye_loading_method_custom_text: job.nakliyeDetails?.loadingMethodCustomText ?? null,
+    p_nakliye_measurement_info: job.nakliyeDetails?.measurementInfo ?? null,
+    p_nakliye_hazmat: job.nakliyeDetails?.hazmat ?? null,
+    p_nakliye_container_transport: job.nakliyeDetails?.containerTransport ?? null,
+    p_nakliye_cargo_groups: job.nakliyeCargoGroups ?? null,
+    p_storage_hazardous: job.storageHazardous ?? null,
+    p_storage_risk_groups: job.storageRiskGroups ?? null,
+    p_recycling_requested_operation: job.recyclingRequestedOperation ?? null,
+    p_recycling_waste_code: job.recyclingWasteCode ?? null,
+    p_recycling_waste_code_unknown: job.recyclingWasteCodeUnknown ?? null,
+    p_recycling_hazard_properties: job.recyclingHazardProperties ?? null,
   });
   if (error) {
     // Metadata satırı hiç yazılamadı — az önce yüklenen fotoğraflar Storage'da
     // yetim kalmasın diye geri silinir (bkz. modülün üstündeki dokümantasyon).
     await deleteJobPhotosFromStorage(photosResult.uploadedPaths);
+    reportSystemError({ message: error.message, source: "server", errorCode: error.code, affectedAction: "create_job", affectedScreen: "İlan Oluşturma" });
     return { ok: false, error: error.message };
   }
   return { ok: true };
@@ -229,6 +427,8 @@ export async function syncOperationToSupabase(
     product_tonnage: job.productTonnage ?? null,
     product_type: job.productType ?? null,
     customs_product_type: job.customsProductType ?? null,
+    customs_transaction_type: job.customsTransactionType ?? null,
+    customs_requested_services: job.customsRequestedServices ?? null,
     // Yalnızca Nakliye kardeşi doludur (job-store.ts'in kendi aktif
     // temizleme ilkesi) — diğer kardeşlerde zaten `undefined`, RPC'ye her
     // zaman `null` gider (migration 0031).
@@ -238,6 +438,39 @@ export async function syncOperationToSupabase(
     delivery_facility_id: job.deliveryFacilityId ?? null,
     delivery_facility_name: job.deliveryFacilityName ?? null,
     delivery_address_text: job.deliveryAddressText ?? null,
+    // Yalnızca Geri Dönüşüm & Atık Tahliye kardeşi doludur (job-store.ts'in
+    // kendi aktif temizleme ilkesi) — diğer kardeşlerde zaten `undefined`.
+    recycling_material_category_id: job.recyclingMaterialCategoryId ?? null,
+    recycling_material_subtype_id: job.recyclingMaterialSubtypeId ?? null,
+    recycling_quantity: job.recyclingQuantity ?? null,
+    recycling_unit: job.recyclingUnit ?? null,
+    recycling_material_condition: job.recyclingMaterialCondition ?? null,
+    recycling_material_condition_note: job.recyclingMaterialConditionNote ?? null,
+    recycling_scope_of_work: job.recyclingScopeOfWork ?? null,
+    recycling_requested_operation: job.recyclingRequestedOperation ?? null,
+    recycling_waste_code: job.recyclingWasteCode ?? null,
+    recycling_waste_code_unknown: job.recyclingWasteCodeUnknown ?? null,
+    recycling_hazard_properties: job.recyclingHazardProperties ?? null,
+    // Yalnızca Depo Hizmetleri grubundaki kardeşte doludur (job-store.ts'in
+    // kendi aktif temizleme ilkesi) — diğer kardeşlerde zaten `undefined`.
+    storage_product_type: job.storageProductType ?? null,
+    storage_product_quantity: job.storageProductQuantity ?? null,
+    storage_product_unit: job.storageProductUnit ?? null,
+    storage_product_tonnage: job.storageProductTonnage ?? null,
+    storage_container_groups: job.storageContainerGroups ?? null,
+    // Yalnızca Kimyasal Depolama/Tehlikeli Madde Depolama kardeşinde
+    // doludur (job-store.ts'in kendi aktif temizleme ilkesi).
+    storage_hazardous: job.storageHazardous ?? null,
+    storage_risk_groups: job.storageRiskGroups ?? null,
+    // Yalnızca Nakliye kardeşi doludur (job-store.ts'in kendi aktif
+    // temizleme ilkesi) — diğer kardeşlerde zaten `undefined`.
+    product_tonnage_unit: job.productTonnageUnit ?? null,
+    nakliye_load_preparation_type: job.nakliyeDetails?.loadPreparationType ?? null,
+    nakliye_load_preparation_custom_text: job.nakliyeDetails?.loadPreparationCustomText ?? null,
+    nakliye_loading_method: job.nakliyeDetails?.loadingMethod ?? null,
+    nakliye_loading_method_custom_text: job.nakliyeDetails?.loadingMethodCustomText ?? null,
+    nakliye_measurement_info: job.nakliyeDetails?.measurementInfo ?? null,
+    nakliye_cargo_groups: job.nakliyeCargoGroups ?? null,
     // Yalnızca gerçekten paylaşılandan farklıysa gönderilir (bkz. bu
     // fonksiyonun dokümantasyonu) — diğer tüm kardeş hizmetler için bu
     // anahtar hiç yoktur, RPC 0030'un coalesce'i p_province'e düşer.

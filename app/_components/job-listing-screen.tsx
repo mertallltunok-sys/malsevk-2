@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { useSession } from "../_lib/use-session";
 import { GuestAccessCard } from "./guest-access-card";
 import { JobList } from "./job-list";
+import { PageContainer } from "./page-container";
 import { ProviderJobListing } from "./provider-job-listing";
 
 /**
@@ -16,8 +17,9 @@ import { ProviderJobListing } from "./provider-job-listing";
  * henüz hidrasyon tamamlanmadı) mevcut, değişmemiş tek-grid görünüm
  * (`JobList`) korunur. Bu bileşen kendi section+kapsayıcı sarmalayıcısını
  * taşıyor — `page.tsx` yalnızca ince bir kabuk (bkz. app/ilanlar/page.tsx) —
- * çünkü giriş-gerekli kartı (max-w-3xl) ile gerçek ilan listesi (max-w-7xl)
- * farklı genişlikte kapsayıcılara ihtiyaç duyuyor.
+ * çünkü giriş-gerekli kartı (`PageContainer size="form"`) ile gerçek ilan
+ * listesi (`PageContainer` varsayılan boyut) farklı genişlikte
+ * kapsayıcılara ihtiyaç duyuyor.
  */
 export function JobListingScreen() {
   const session = useSession();
@@ -41,12 +43,13 @@ export function JobListingScreen() {
             ve header ile filtre arasındaki büyük boşluk tamamen kaldırıldı —
             kompakt filtre araç çubuğu header'ın hemen altında başlar, kullanıcı
             sayfayı açar açmaz ilan kartlarını görsün diye (bkz. provider-job-listing.tsx).
-            Diğer sayfaların py-16 kuralı değişmedi. `2xl:max-w-[96rem]`: yalnızca
-            çok geniş ekranlarda (≥1536px) kapsayıcı kontrollü biçimde biraz
-            genişler (1280px -> 1536px) — masaüstü/dizüstü (1024-1280px) genişliği
-            (max-w-7xl) DEĞİŞMEDEN kalır, bu yüzden tablonun sütun hizası orada
-            etkilenmez; genişleyen alan yalnızca tablo/kart listesine gider. */}
-        <div className="mx-auto max-w-7xl px-4 pt-4 pb-16 sm:px-6 lg:px-8 2xl:max-w-[96rem]">
+            Diğer sayfaların py-16 kuralı değişmedi. Genişlik artık merkezi
+            `PageContainer` (varsayılan boyut) üzerinden geliyor — eski tek
+            seferlik `2xl:max-w-[96rem]` özel durumu kaldırıldı, aynı 1536px
+            değeri şimdi `--container-page-lg` token'ından geliyor (bkz.
+            page-container.tsx), site genelindeki üç kademeli masaüstü
+            genişlemesiyle (lg/xl/2xl) tutarlı. */}
+        <PageContainer className="pt-4 pb-16">
           {/* ProviderJobListing, ana sayfadaki hizmet kartlarından gelen
               `?kategori=` başlangıç filtresini okumak için useSearchParams
               kullanır — bu, statik üretimde bu alt ağacın Suspense sınırına
@@ -62,14 +65,14 @@ export function JobListingScreen() {
           >
             <ProviderJobListing session={session} />
           </Suspense>
-        </div>
+        </PageContainer>
       </section>
     );
   }
 
   return (
     <section className="bg-background">
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <PageContainer className="py-16">
         <div className="max-w-2xl">
           <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
             İş İlanları
@@ -81,7 +84,7 @@ export function JobListingScreen() {
         </div>
 
         <JobList />
-      </div>
+      </PageContainer>
     </section>
   );
 }

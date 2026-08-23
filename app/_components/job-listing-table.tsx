@@ -118,6 +118,9 @@ export function JobListingTable({
                     {row.productInfoLine && (
                       <p className="mt-1.5 truncate text-xs text-muted-foreground">{row.productInfoLine}</p>
                     )}
+                    {row.recyclingSummaryLine && (
+                      <p className="mt-1.5 truncate text-xs text-muted-foreground">{row.recyclingSummaryLine}</p>
+                    )}
                   </>
                 )}
               </td>
@@ -140,13 +143,17 @@ export function JobListingTable({
                   Konum görünümü AYNEN kalır. */}
               <td className="max-w-[220px] px-3 py-3 align-top text-muted-foreground">
                 {showNakliyeRoute && row.nakliyeRoute ? (
-                  <NakliyeListingRoute pickup={row.nakliyeRoute.pickup} delivery={row.nakliyeRoute.delivery} />
+                  <NakliyeListingRoute
+                    pickup={row.nakliyeRoute.pickup}
+                    delivery={row.nakliyeRoute.delivery}
+                    isRevealed={row.isLocationRevealed}
+                  />
                 ) : (
                   <>
-                    {row.location.companyOrFactoryName && (
+                    {row.isLocationRevealed && row.location.companyOrFactoryName && (
                       <p className="truncate font-medium text-foreground">{row.location.companyOrFactoryName}</p>
                     )}
-                    {row.location.facilityDisplayName && (
+                    {row.isLocationRevealed && row.location.facilityDisplayName && (
                       <p className="truncate">
                         {row.location.facilityDisplayName}
                         {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`}

@@ -8,6 +8,7 @@ import {
 import { formatJobDate } from "../_lib/jobs";
 import { formatJobLocationLine } from "../_lib/job-location";
 import { formatJobProductInfoLine } from "../_lib/product-catalog";
+import { formatRecyclingSummaryLine } from "../_lib/recycling-catalog";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import type { Job, Offer } from "../_lib/types";
 import { StatusBadge } from "./status-badge";
@@ -28,6 +29,7 @@ export function JobCard({
   const rawAvailability = getJobOfferAvailability(job, offers);
   const availability = forceClosed && rawAvailability === "acik" ? "kapali" : rawAvailability;
   const productInfoLine = formatJobProductInfoLine(job);
+  const recyclingSummaryLine = formatRecyclingSummaryLine(job);
 
   return (
     <Link
@@ -71,6 +73,12 @@ export function JobCard({
           <span className="flex items-center gap-2">
             <Package className="h-4 w-4 shrink-0" aria-hidden="true" />
             {productInfoLine}
+          </span>
+        )}
+        {recyclingSummaryLine && (
+          <span className="flex items-center gap-2">
+            <Package className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {recyclingSummaryLine}
           </span>
         )}
       </div>

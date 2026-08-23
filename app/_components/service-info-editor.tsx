@@ -3,25 +3,14 @@
 import { CheckCircle2, Circle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useId, useMemo, useState } from "react";
-import { getProviderServiceCategoryIds } from "../_lib/provider-services";
-import {
-  EXPERIENCE_RANGE_OPTIONS,
-  SERVICE_CATEGORY_GROUPS,
-  SERVICE_FEATURE_OPTIONS,
-  getProviderServiceInfoCompletion,
-  isServiceFeature,
-  migrateLegacyExpertiseToServiceCategoryIds,
-} from "../_lib/service-catalog";
+import { EXPERIENCE_RANGE_OPTIONS, getProviderServiceInfoCompletion } from "../_lib/service-catalog";
+import { upsertMyProviderProfileRemote } from "../_lib/supabase-provider-profile";
 import { getProvinces } from "../_lib/turkey-locations";
 import type { ExperienceRange, Session } from "../_lib/types";
 import { updateProviderServiceInfo, type StoredUser } from "../_lib/users";
 import { MultiSelectChips } from "./multi-select-chips";
 
 const REGION_OPTIONS = getProvinces().map((province) => ({ value: province.name, label: province.name }));
-const SERVICE_FEATURE_MULTISELECT_OPTIONS = SERVICE_FEATURE_OPTIONS.map((option) => ({
-  value: option.value,
-  label: option.label,
-}));
 
 /**
  * Panel > Profilim'e eklenen, Hizmet Veren'e özel "Hizmet Bilgilerim"
@@ -29,45 +18,40 @@ const SERVICE_FEATURE_MULTISELECT_OPTIONS = SERVICE_FEATURE_OPTIONS.map((option)
  * KASITLI OLARAK AYRIDIR: o form companyName/bio'yu zorunlu kılar, bu ise
  * bir tamamlama akışıdır (bkz. users.ts#updateProviderServiceInfo) —
  * kullanıcı Firma Profili'ni hiç doldurmamış olsa bile yalnızca
- * hizmet/bölge/deneyim bilgisini kaydedebilir. "Çalışma Bölgeleri" alanı,
- * Firma Profili'ndeki aynı `regions` alanını paylaşır (tek doğruluk
- * kaynağı, iki farklı ekrandan düzenlenir).
+ * bölge/deneyim bilgisini kaydedebilir. "Çalışma Bölgeleri" alanı, Firma
+ * Profili'ndeki aynı `regions` alanını paylaşır (tek doğruluk kaynağı, iki
+ * farklı ekrandan düzenlenir).
  *
- * MİGRASYON: `serviceCategories`in başlangıç değeri, provider-services.ts'teki
- * (kayıt formu veya bu ekranın önceki bir kaydından yazılmış) güncel
- * seçimlerle, kullanıcının eski `expertise` (Uzmanlık Alanları, Hesap
- * Ayarları) seçimlerinden mümkün olanların yeni katalog id'lerine çevrilmiş
- * hâlinin BİRLEŞTİRİLMESİYLE oluşur (bkz.
- * service-catalog.ts#migrateLegacyExpertiseToServiceCategoryIds) — bu
- * yüzden bu sayfayı ilk kez açan, daha önce yalnızca eski "Uzmanlık
- * Alanları"nı doldurmuş bir Hizmet Veren, uygulanabilir seçimlerinin
- * burada ZATEN işaretli geldiğini görür. Bu yalnızca OKUMA anındaki bir
- * birleştirmedir — orijinal `expertise` dizisi hiç değiştirilmez/silinmez,
- * yalnızca kullanıcı "Kaydet"e basarsa birleşik küme provider-services.ts'e
- * yazılır (bkz. users.ts#updateProviderServiceInfo).
+ * DÜZELTME ("Profilim/Hesap Ayarları Sadeleştirmesi" görevi — çekirdek
+ * kural: "Hizmet Veren kendi profilinden hizmet veya uzmanlık alanı
+ * seçemez. Profilde yalnız admin tarafından onaylanmış ve aktif
+ * durumdaki hizmet yetkileri gösterilir."): bu bileşen eskiden "Hizmet
+ * Seçimi" (SERVICE_CATEGORY_GROUPS chip'leri), "Hizmet Özellikleri" ve
+ * "Geri Dönüşüm Uzmanlık Alanları" bölümlerini de içeriyordu — üçü de
+ * TAMAMEN KALDIRILDI (yalnız gizlenmedi): ilgili React state'leri, kayıt
+ * payload alanları, ve `provider-services.ts`/uzak `provider_services`e
+ * yazım çağrıları hiç yok. Hizmet Veren artık HANGİ kategoride teklif
+ * verebileceğini yalnızca `provider-service-status-card.tsx`'in salt
+ * okunur "Hizmet Yetkileri" kartından (admin onaylı `provider_service_
+ * authorizations`) görür — bu form o veriye asla dokunmaz/yazmaz. Kaldırılan
+ * alanların ESKİ verisi (varsa) `StoredUser.providerProfile`/`provider-
+ * services.ts`te DEĞİŞMEDEN kalır (bkz. users.ts#updateProviderServiceInfo'nun
+ * kendi güncellenmiş dokümantasyonu) — yalnızca bu formdan artık
+ * okunamaz/yazılamaz, başka hiçbir yerde silinmedi.
  */
 export function ServiceInfoEditor({ session, user }: { session: Session; user: StoredUser }) {
   const existing = user.providerProfile;
 
   const [regions, setRegions] = useState<string[]>(existing?.regions ?? []);
-  const [serviceCategories, setServiceCategories] = useState<string[]>(() =>
-    Array.from(
-      new Set([
-        ...getProviderServiceCategoryIds(user.id),
-        ...migrateLegacyExpertiseToServiceCategoryIds(existing?.expertise ?? []),
-      ]),
-    ),
-  );
-  const [serviceFeatures, setServiceFeatures] = useState<string[]>(existing?.serviceFeatures ?? []);
   const [experienceRange, setExperienceRange] = useState<ExperienceRange | "">(existing?.experienceRange ?? "");
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [remoteSyncWarning, setRemoteSyncWarning] = useState<string | null>(null);
 
   const experienceRangeId = useId();
   const regionsId = useId();
-  const featuresId = useId();
 
   // Firma adı ya kayıt anında (StoredUser.companyName) ya da Hesap
   // Ayarları'ndan (providerProfile.companyName) girilmiş olabilir —
@@ -81,10 +65,9 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
         phone: user.phone,
         email: user.email,
         regions,
-        serviceCategories,
         experienceRange: experienceRange || undefined,
       }),
-    [companyName, user.phone, user.email, regions, serviceCategories, experienceRange],
+    [companyName, user.phone, user.email, regions, experienceRange],
   );
   const companyNameMissing = !completion.checklist.find((item) => item.label === "Firma Adı")?.met;
 
@@ -94,18 +77,36 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
     setSubmitting(true);
     setSubmitError(null);
     setJustSaved(false);
+    setRemoteSyncWarning(null);
 
     const result = await updateProviderServiceInfo(session, {
       regions,
-      serviceCategories,
-      serviceFeatures: serviceFeatures.filter(isServiceFeature),
+      experienceRange: experienceRange || null,
+    });
+
+    if (!result.ok) {
+      setSubmitting(false);
+      setSubmitError(result.error);
+      return;
+    }
+
+    // PROFİL/PROVIDER GEÇİŞİ: `regions`/`experienceRange` (tur 3) GERÇEK
+    // `provider_profiles`e de yazılır — yerel yazımın YANINDA, en iyi çaba
+    // (bkz. supabase-provider-profile.ts'in "kısmi güncelleme"
+    // dokümantasyonu: yalnızca bu iki alan gönderilir — `serviceFeatures`
+    // anahtarı BİLEREK hiç geçirilmez, böylece var olan uzak değeri
+    // dokunulmadan korunur, `bio`/`foundedYear` de aynı şekilde
+    // ProviderProfileEditor'ın kendi satırından korunur). Yerel yazım
+    // zaten başarılı olduğu için bu adımın başarısızlığı genel
+    // "kaydedildi" sonucunu ENGELLEMEZ.
+    const remoteProfileResult = await upsertMyProviderProfileRemote({
+      regions,
       experienceRange: experienceRange || null,
     });
 
     setSubmitting(false);
-    if (!result.ok) {
-      setSubmitError(result.error);
-      return;
+    if (!remoteProfileResult.ok) {
+      setRemoteSyncWarning("Hizmet bilgileriniz kaydedildi ama bölge/deneyim bilgileriniz merkezi veritabanına yansıtılamadı. Lütfen daha sonra tekrar deneyin.");
     }
     setJustSaved(true);
   }
@@ -114,8 +115,9 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
     <div className="rounded-card border border-border bg-surface p-6">
       <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Hizmet Bilgilerim</h2>
       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-        Verebileceğiniz hizmetleri, çalışma bölgelerinizi ve deneyiminizi belirtin — bu bilgiler ilan
-        eşleştirme ve arama sonuçlarında kullanılacaktır.
+        Çalışma bölgelerinizi ve deneyiminizi belirtin. Hangi hizmetlere teklif verebileceğiniz, admin
+        tarafından onaylanan hizmet yetkilerinize göre belirlenir — aşağıdaki &quot;Hizmet Yetkileri&quot;
+        bölümünden görüntüleyebilirsiniz.
       </p>
 
       <div className="mt-5 rounded-md border border-border bg-background p-4">
@@ -158,31 +160,6 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
       </div>
 
       <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-6" noValidate>
-        <fieldset>
-          <legend className="text-sm font-medium text-foreground">Hizmet Seçimi</legend>
-          <p className="mt-1 text-xs text-muted-foreground">Birden fazla hizmet seçebilirsiniz.</p>
-          <div className="mt-3 flex flex-col gap-5">
-            {SERVICE_CATEGORY_GROUPS.map((group) => (
-              <MultiSelectChips
-                key={group.id}
-                id={`${group.id}-chips`}
-                label={group.label}
-                options={group.categories.map((category) => ({ value: category.id, label: category.label }))}
-                selected={serviceCategories}
-                onChange={setServiceCategories}
-              />
-            ))}
-          </div>
-        </fieldset>
-
-        <MultiSelectChips
-          id={featuresId}
-          label="Hizmet Özellikleri"
-          options={SERVICE_FEATURE_MULTISELECT_OPTIONS}
-          selected={serviceFeatures}
-          onChange={setServiceFeatures}
-        />
-
         <div className="sm:max-w-xs">
           <label htmlFor={experienceRangeId} className="text-sm font-medium text-foreground">
             Deneyim
@@ -220,6 +197,11 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
         {justSaved && (
           <p role="status" aria-live="polite" className="text-sm font-medium text-success">
             Hizmet bilgileriniz kaydedildi.
+          </p>
+        )}
+        {remoteSyncWarning && (
+          <p role="alert" className="text-sm text-danger">
+            {remoteSyncWarning}
           </p>
         )}
 

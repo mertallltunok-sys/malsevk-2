@@ -2,7 +2,6 @@
 
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
-import { SERVICE_CATEGORIES } from "../_lib/jobs";
 import { detectImageFormat, MAX_PHOTO_SIZE_BYTES } from "../_lib/photo-validation";
 import {
   PROVIDER_BIO_MAX_LENGTH,
@@ -12,6 +11,8 @@ import {
   validateProviderProfileForm,
   type ProviderProfileFormErrors,
 } from "../_lib/provider-profile";
+import { upsertMyProviderProfileRemote } from "../_lib/supabase-provider-profile";
+import { deleteMyProviderLogoRemote, uploadMyProviderLogoRemote } from "../_lib/supabase-provider-logo";
 import type { Session } from "../_lib/types";
 import { getProvinces } from "../_lib/turkey-locations";
 import { useJobPhotoUrl } from "../_lib/use-job-photo-url";
@@ -19,7 +20,6 @@ import { updateProviderProfile, type StoredUser } from "../_lib/users";
 import { MultiSelectChips } from "./multi-select-chips";
 
 const REGION_OPTIONS = getProvinces().map((province) => ({ value: province.name, label: province.name }));
-const EXPERTISE_OPTIONS = SERVICE_CATEGORIES.map((category) => ({ value: category, label: category }));
 
 /**
  * Hesap Ayarları'na eklenen, Hizmet Veren'e özel "Firma Profili" bölümü
@@ -31,15 +31,37 @@ const EXPERTISE_OPTIONS = SERVICE_CATEGORIES.map((category) => ({ value: categor
  * edilmez (dönüştürme adımı yok), EXIF temizliği uygulanmaz. Logo blob'u
  * yine de ilan fotoğraflarıyla aynı IndexedDB deposunu (photo-blob-store.ts)
  * paylaşır — yalnızca `users.ts#updateProviderProfile` üzerinden yazılır.
+ *
+ * DÜZELTME ("Profilim/Hesap Ayarları Sadeleştirmesi" görevi): "Uzmanlık
+ * Alanları" bölümü TAMAMEN KALDIRILDI (yalnız gizlenmedi) — "Hizmet Veren
+ * kendi profilinden hizmet veya uzmanlık alanı seçemez" kuralı gereği.
+ * "Hizmet Verilen Bölgeler" (`regions`) KASITLI OLARAK KORUNDU — görev
+ * tanımı bunu açıkça istisna tutuyor, coğrafi çalışma alanı bir "hizmet/
+ * uzmanlık" seçimi değildir. Eski `expertise` verisi (varsa) `StoredUser.
+ * providerProfile.expertise`te DEĞİŞMEDEN kalır (bkz. users.ts#
+ * updateProviderProfile'ın güncellenmiş dokümantasyonu) — yalnızca bu
+ * formdan artık okunamaz/yazılamaz.
  */
 export function ProviderProfileEditor({ session, user }: { session: Session; user: StoredUser }) {
   const existing = user.providerProfile;
 
-  const [companyName, setCompanyName] = useState(existing?.companyName ?? "");
+  // DÜZELTME (uçtan uca doğrulama görevi): `providerProfile.companyName`in
+  // (bu form) `provider_profiles`te hiçbir sütun karşılığı yok (bkz.
+  // supabase-provider-profile.ts'in kendi notu) — bu yüzden `existing` GERÇEK
+  // bir tarayıcıda (hydrate-provider-mirror.ts ile ilk kez doldurulmuş)
+  // BOŞ gelir. Bu, canlı Supabase testinde GERÇEK bir blokaja yol açtığını
+  // kanıtladı: kullanıcı yeni bir cihazda bu formdan yalnızca bio/kuruluş
+  // yılını güncellemeye çalışsa bile "Firma adı zorunludur" hatasıyla
+  // reddediliyordu (boş varsayılan zorunlu alanı geçersiz kılıyordu). `user.
+  // companyName` (StoredUser'ın ÜST seviye alanı, kayıt formundan `profiles.
+  // company_name`e yazılır ve HER ZAMAN güvenilir şekilde hidrate edilir) her
+  // firmanın gerçekte TEK bir adı olduğu için makul ve zararsız bir yedek
+  // değerdir — yalnızca provider-profile'a özgü bir isim hiç girilmemişse
+  // devreye girer, var olan bir `providerProfile.companyName`i asla ezmez.
+  const [companyName, setCompanyName] = useState(existing?.companyName ?? user.companyName ?? "");
   const [bio, setBio] = useState(existing?.bio ?? "");
   const [foundedYear, setFoundedYear] = useState(existing?.foundedYear ? String(existing.foundedYear) : "");
   const [regions, setRegions] = useState<string[]>(existing?.regions ?? []);
-  const [expertise, setExpertise] = useState<string[]>(existing?.expertise ?? []);
 
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoRemoved, setLogoRemoved] = useState(false);
@@ -49,13 +71,13 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [remoteSyncWarning, setRemoteSyncWarning] = useState<string | null>(null);
 
   const companyNameId = useId();
   const bioId = useId();
   const foundedYearId = useId();
   const logoInputId = useId();
   const regionsId = useId();
-  const expertiseId = useId();
 
   const savedLogoUrl = useJobPhotoUrl(logoRemoved ? null : (existing?.logoStorageKey ?? null));
 
@@ -116,22 +138,55 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
     setSubmitting(true);
     setSubmitError(null);
     setJustSaved(false);
+    setRemoteSyncWarning(null);
 
     const result = await updateProviderProfile(session, {
       companyName,
       bio,
       foundedYear: foundedYearNum,
       regions,
-      expertise,
       logo: logoRemoved ? null : (logoFile ?? undefined),
     });
 
-    setSubmitting(false);
     if (!result.ok) {
+      setSubmitting(false);
       setSubmitError(result.error);
       return;
     }
 
+    // PROFİL/PROVIDER GEÇİŞİ (tur 3): bio/foundedYear/regions artık GERÇEK
+    // `provider_profiles`e de yazılır (bkz. supabase-provider-profile.ts'in
+    // "kısmi güncelleme" dokümantasyonu — yalnızca BU ekranın sahibi olduğu
+    // alanlar gönderilir, `serviceFeatures`/`experienceRange`
+    // ServiceInfoEditor'ın uzak satırdan okunup DOKUNULMADAN korunur).
+    // `companyName`/`expertise`in provider_profiles'ta hiç karşılığı yok
+    // (companyName ayrı bir kavram, bkz. types.ts; expertise deprecated,
+    // hiçbir migrationda bir sütunu yok) — yalnızca yerelde kalır. Bu
+    // adımın başarısızlığı yerel "kaydedildi" sonucunu ENGELLEMEZ.
+    const remoteWarnings: string[] = [];
+
+    const remoteProfileResult = await upsertMyProviderProfileRemote({ bio, foundedYear: foundedYearNum, regions });
+    if (!remoteProfileResult.ok) {
+      remoteWarnings.push(`Firma profili merkezi veritabanına yansıtılamadı: ${remoteProfileResult.error}`);
+    }
+
+    if (logoRemoved) {
+      const deleted = await deleteMyProviderLogoRemote();
+      if (!deleted) {
+        remoteWarnings.push("Logo yerelden kaldırıldı ama merkezi depodan silinemedi.");
+      }
+    } else if (logoFile) {
+      const uploadResult = await uploadMyProviderLogoRemote(logoFile);
+      if (!uploadResult.ok) {
+        remoteWarnings.push(`Logo merkezi depoya yüklenemedi: ${uploadResult.error}`);
+      }
+    }
+
+    if (remoteWarnings.length > 0) {
+      setRemoteSyncWarning(`Firma profiliniz kaydedildi ama: ${remoteWarnings.join(" ")}`);
+    }
+
+    setSubmitting(false);
     setLogoFile(null);
     setLogoRemoved(false);
     setJustSaved(true);
@@ -273,14 +328,6 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
         </div>
 
         <MultiSelectChips
-          id={expertiseId}
-          label="Uzmanlık Alanları"
-          options={EXPERTISE_OPTIONS}
-          selected={expertise}
-          onChange={setExpertise}
-        />
-
-        <MultiSelectChips
           id={regionsId}
           label="Hizmet Verilen Bölgeler"
           options={REGION_OPTIONS}
@@ -298,6 +345,11 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
         {justSaved && (
           <p role="status" aria-live="polite" className="text-sm font-medium text-success">
             Firma profiliniz kaydedildi.
+          </p>
+        )}
+        {remoteSyncWarning && (
+          <p role="alert" className="text-sm text-danger">
+            {remoteSyncWarning}
           </p>
         )}
 

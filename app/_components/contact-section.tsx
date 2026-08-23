@@ -6,9 +6,9 @@ import {
   CONTACT_MESSAGE_MAX_LENGTH,
   CONTACT_MESSAGE_MIN_LENGTH,
   CONTACT_MESSAGE_SUBJECT_OPTIONS,
-  submitContactMessage,
   type ContactMessageSubject,
 } from "../_lib/contact-messages";
+import { submitContactMessageRemote } from "../_lib/supabase-contact-messages";
 import { findUserById } from "../_lib/users";
 import { useSession } from "../_lib/use-session";
 
@@ -30,9 +30,10 @@ const RESUBMIT_COOLDOWN_MS = 15_000;
  * bir görünüm DEĞİLDİR, TEK bileşen her iki durumda da render edilir;
  * yalnızca giriş yapılmışsa Ad Soyad/E-posta/Telefon `users.ts#findUserById`
  * ile önceden doldurulur (kullanıcı gönderimden önce değiştirebilir).
- * Gönderilen veri contact-messages.ts'in localStorage "tablosuna" yazılır ve
+ * Gönderilen veri gerçek Supabase `contact_messages` tablosuna yazılır
+ * (`submit_contact_message` RPC'si, bkz. supabase-contact-messages.ts) ve
  * Admin > Bize Ulaşın modülünde (bkz. contact-messages-admin-panel.tsx)
- * gerçek bir kayıt olarak görünür — bu yalnızca görsel bir demo değildir.
+ * cihazdan bağımsız gerçek bir kayıt olarak görünür.
  */
 export function ContactSection() {
   const session = useSession();
@@ -67,7 +68,7 @@ export function ContactSection() {
   // senkron/render'dan bağımsız asıl kilit budur.
   const submitLockRef = useRef(false);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitLockRef.current || cooldownActive) return;
 
@@ -98,8 +99,7 @@ export function ContactSection() {
 
     submitLockRef.current = true;
     setSubmitting(true);
-    const result = submitContactMessage({
-      session,
+    const result = await submitContactMessageRemote({
       name,
       email,
       phone,
@@ -114,7 +114,7 @@ export function ContactSection() {
       return;
     }
 
-    setSuccessInfo({ referenceNumber: result.contactMessage.referenceNumber });
+    setSuccessInfo({ referenceNumber: result.referenceNumber });
     setSubject("");
     setMessage("");
     setCooldownActive(true);

@@ -56,6 +56,21 @@
   --radius-card: var(--radius-lg);
 
   /*
+   * Masaüstü sayfa container kademeleri — `page-container.tsx#PageContainer`
+   * dışında hiçbir yerden doğrudan kullanılmamalı (bkz. o dosyanın kendi
+   * dokümantasyonu). `--container-*` namespace'i Tailwind v4'te otomatik
+   * olarak `max-w-page-sm`/`max-w-page-md`/`max-w-page-lg` utility'lerini
+   * üretir — mevcut `--container-7xl` (80rem) gibi yerleşik token'larla
+   * BİREBİR aynı mekanizma, yeni bir sistem değil. Üç kademe: küçük
+   * masaüstü (lg, ≥1024px), standart masaüstü (xl, ≥1280px), geniş masaüstü
+   * (2xl, ≥1536px — `job-listing-screen.tsx`'in eski tek seferlik
+   * `2xl:max-w-[96rem]` özel durumuyla birebir aynı değer, artık merkezi).
+   */
+  --container-page-sm: 75rem; /* 1200px */
+  --container-page-md: 85rem; /* 1360px */
+  --container-page-lg: 96rem; /* 1536px */
+
+  /*
    * Başlık tipografisi (kart/sayfa/bölüm başlıkları) için TEK doğruluk
    * kaynağı — `tracking-heading` utility'si buradan üretilir. Yalnızca
    * font-weight 700 (`font-bold`, zaten Tailwind'in kendi ölçeğinde) ve

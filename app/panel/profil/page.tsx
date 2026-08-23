@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ProfilePageContent } from "../../_components/profile-page-content";
+import { PageContainer } from "../../_components/page-container";
 
 export const metadata: Metadata = {
   title: "Profilim | MALSEVK.COM",
@@ -9,9 +10,9 @@ export const metadata: Metadata = {
 export default function ProfilPage() {
   return (
     <section className="bg-background">
-      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+      <PageContainer size="form" className="py-16">
         <ProfilePageContent />
-      </div>
+      </PageContainer>
     </section>
   );
 }

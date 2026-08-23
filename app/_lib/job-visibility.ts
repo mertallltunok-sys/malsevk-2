@@ -1,103 +1,72 @@
 "use client";
 
 import { useMemo } from "react";
-import { getProviderServiceCategoryIds } from "./provider-services";
-import {
-  GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID,
-  NAKLIYE_SERVICE_CATEGORY_ID,
-  resolveLegacyJobCategoryToId,
-} from "./service-catalog";
+import { isProviderEligibleForRecyclingJob, isRecyclingCategory } from "./recycling-catalog";
+import { resolveLegacyJobCategoryToId } from "./service-catalog";
+import { isProviderEligibleForContainerJob, STORAGE_CONTAINER_CATEGORY_ID, type ContainerStorageAuthorization } from "./storage-container-catalog";
+import { isHazardousStorageCategory, isProviderEligibleForHazardousStorageJob } from "./storage-hazard-catalog";
 import type { Job, Session } from "./types";
-import { useProviderServiceCategoryIds } from "./use-provider-services";
+import {
+  getAuthorizedContainerScopesSync,
+  getAuthorizedServiceCategoryIdsSync,
+} from "./supabase-provider-service-authorizations";
+import { getAuthorizedRecyclingActivityIdsSync, getAuthorizedRecyclingWasteCodesSync } from "./supabase-recycling-authorizations";
+import { getAuthorizedStorageRiskGroupIdsSync } from "./supabase-storage-risk-authorizations";
+import { useAuthorizedContainerScopes } from "./use-authorized-container-scopes";
+import { useAuthorizedRecyclingScopes } from "./use-recycling-authorizations";
+import { useAuthorizedServiceCategoryIds } from "./use-authorized-services";
+import { useAuthorizedStorageRiskGroupIds } from "./use-storage-risk-authorizations";
 
 /**
- * İZOLE EDİLMİŞ HİZMETLERE ÖZEL keşif izolasyonu — TEK doğruluk kaynağı.
- * Yalnızca aşağıdaki `ISOLATED_SERVICE_CATEGORY_IDS` listesindeki hizmetlere
- * uygulanır (bugün: Nakliye ve Gümrük Müşavirliği); diğer hizmetlere
- * (Lashing/Gözetim/Depolama/Forklift/Konteyner Dolum/Konteyner Boşaltım/vb.)
- * HİÇ uygulanmaz ve bu bilerek böyledir (görev gereksinimi: "bu özel
- * izolasyon şimdilik diğer hizmetlere uygulanmayacak"). Gümrük Müşavirliği,
- * Nakliye'nin İLK sürümdeki tek-kategorili halinin AYNI mantığının ikinci bir
- * kategoriye genellenmiş hâlidir — Nakliye'nin kendi davranışı bu genellemeyle
- * BİREBİR aynı kalır (bkz. aşağıdaki `resolveVisibility` dokümantasyonu).
+ * HİZMET BAZLI PROVIDER YETKİLENDİRMESİ — ilan görünürlüğünün TEK merkezi
+ * kapısı (bu modülün adı/rolü DEĞİŞMEDİ, YALNIZCA karar mantığı genelleşti).
  *
- * Kural: `provider-services.ts` (tek doğruluk kaynağı, bkz. o dosya) üzerinde
- * kayıtlı hizmetleri arasında izole edilmiş hizmetlerden EN AZ BİRİ bulunan
- * bir Hizmet Veren, ilan keşfi bakımından yalnızca KENDİ SEÇTİĞİ izole
- * hizmet(ler)in kategorili ilanlarını görebilir — izole olmayan başka
- * hizmetler de seçilmiş olsa bile (Nakliye + Lashing seçiliyse hâlâ yalnızca
- * Nakliye; Gümrük Müşavirliği + Lashing seçiliyse hâlâ yalnızca Gümrük
- * Müşavirliği). Hem Nakliye HEM Gümrük Müşavirliği seçiliyse (görev
- * kapsamında öngörülmeyen ama engellenmeyen bir kombinasyon) bu iki izole
- * kategorinin BİRLEŞİMİ (union) görünür kalır — kesişim değil; bu, tek bir
- * izole kategori seçen mevcut Nakliye sağlayıcılarının davranışını hiç
- * DEĞİŞTİRMEZ (aşağıdaki `getSelectedIsolatedCategoryIds` tek elemanlı bir
- * kümede zaten aynı sonucu üretir), yalnızca iki izole kategoriyi birden
- * seçen yeni/nadir bir durumu makul şekilde ele alır. Hiçbir izole kategori
- * seçili DEĞİLSE bu fonksiyon mevcut davranışı hiç değiştirmez (her ilan
- * görünür kalır, bugüne kadar olduğu gibi).
+ * ÖNCEKİ DAVRANIŞ (0038'den önce): yalnızca "izole" kategorilerde (Nakliye/
+ * Gümrük Müşavirliği) "seçim = görünürlük" kuralı vardı — provider bu
+ * kategorilerden birini SEÇMİŞ olması yeterliydi, admin onayı hiç
+ * aranmıyordu; izole olmayan kategorilerde (Lashing/Depolama/Forklift/
+ * Gözetim/Konteyner/vb.) HİÇBİR kısıtlama yoktu.
  *
- * Hizmet Alan/admin/misafir (oturum yok) bu kuraldan HİÇ etkilenmez — kural
- * yalnızca "hizmet-veren" rolü ve yalnızca izole bir hizmet seçili olduğunda
- * devreye girer.
+ * YENİ DAVRANIŞ (görev: "hizmet bazlı provider yetkilendirme"): SEÇİM ARTIK
+ * YETKİ VERMEZ. Her kategori için provider'ın GERÇEKTEN admin-onaylı bir
+ * yetkilendirmesi (bkz. supabase-provider-service-authorizations.ts) olması
+ * gerekir — hiç yetkilendirme yoksa (yeni kayıtlı bir provider, ya da hiçbir
+ * hizmeti onaylanmamış biri) HİÇBİR ilan görünmez (görev bölüm 30, "No-
+ * Authorization Scenario"). Bu, önceki "varsayılan açık" davranışın TAM
+ * TERSİDİR — bilinçli, görev gereksinimi.
+ *
+ * Yetki kaynağı artık `provider-services.ts` (localStorage, "SEÇTİĞİ
+ * hizmetler") DEĞİL, `supabase-provider-service-authorizations.ts`
+ * (GERÇEK Supabase, "ONAYLANMIŞ hizmetler") — bkz. o modülün kendi
+ * "cross-device" dokümantasyonu (localStorage bu iş için YETERSİZ, çünkü
+ * cihazlar arası paylaşılamaz).
+ *
+ * Hizmet Alan/admin/misafir (oturum yok) bu kuraldan HİÇ etkilenmez.
  *
  * BU MODÜL, ilan görünürlüğünün TEK merkezi kapısıdır — hiçbir ekran kendi
- * `job.category === "nakliye"` (ya da "gumruk-musavirligi") kontrolünü
- * yazmamalı, bunun yerine bu dosyadaki fonksiyonlardan/hook'lardan birini
- * kullanmalıdır:
+ * `job.category === "nakliye"` kontrolünü yazmamalı, aşağıdaki fonksiyon/
+ * hook'lardan birini kullanmalıdır:
  *  - `isJobVisibleToSession`/`filterVisibleJobs`: DÜZ (reaktif olmayan)
- *    fonksiyonlar — her çağrıda localStorage'ı TAZE okur ama bir React
- *    bileşenini OTOMATİK yeniden render ETMEZ. Bileşen dışı, tek seferlik
- *    kontroller için (ör. offers.ts#createOffer/canProviderSubmitNewOffer —
- *    bunlar zaten her tıklamada yeniden çağrılır, süregelen bir render'a
- *    abone olmaları gerekmez).
- *  - `useIsJobVisibleToSession`/`useFilterVisibleJobs`: AYNI mantığın
- *    `useProviderServiceCategoryIds` (bkz. use-provider-services.ts) üzerinden
- *    REAKTİF hâli — bir React bileşeninin SÜREGELEN render'ında kullanılmalı
- *    (provider-job-listing.tsx, job-detail-content.tsx, operation-status-card.tsx).
- *    Hizmet seçimi değiştiğinde (aynı sekmede ya da `storage` olayıyla farklı
- *    bir sekmede) bu hook'u kullanan bileşen SAYFA YENİLENMEDEN otomatik
- *    yeniden render olur — "provider hizmetleri değiştiğinde açık sekmede
- *    görünürlük anında güncellensin" gereksinimi budur.
- *  İkisi de AYNI saf `resolveVisibility` mantığını paylaşır — mantık iki
- *  yerde tekrar yazılmaz, yalnızca hizmet id'lerinin NASIL elde edildiği
- *  (düz okuma vs. reaktif hook) farklıdır.
+ *    fonksiyonlar — önceden doldurulmuş önbelleği senkron okur, kendisi ağ
+ *    isteği yapmaz (bkz. supabase-provider-service-authorizations.ts).
+ *    Bileşen dışı, tek seferlik kontroller için (offers.ts#createOffer/
+ *    canProviderSubmitNewOffer).
+ *  - `useIsJobVisibleToSession`/`useFilterVisibleJobs`: REAKTİF hâli —
+ *    mount olduğunda GERÇEK bir Supabase fetch'i tetikler VE önbellek
+ *    güncellendiğinde bileşeni yeniden render eder (provider-job-listing.tsx,
+ *    job-detail-content.tsx, operation-status-card.tsx).
  *
- * Süzme EN ERKEN noktada (veri okunduğu an, ör. `useAllJobs()`'tan hemen
- * sonra) yapılmalıdır — bu sayede aşağı akıştaki TÜM hesaplamalar (operasyon
- * gruplama toplamları, teklif sayıları, filtre sonuçları vb.) hiçbir ek
- * değişikliğe gerek kalmadan otomatik olarak doğru/izole sonuç üretir (bkz.
- * job-listing-row.ts#groupJobListingRowsByOperation'ın "rows TÜM ilanlar
- * olmalı" varsayımı — bu varsayım hâlâ doğrudur, yalnızca "TÜM" artık bu
- * view'cı için "TÜM GÖRÜNÜR" anlamına gelir).
- *
- * MİMARİ SINIRLAMA: bu projede gerçek bir backend/sunucu tarafı oturum
- * doğrulaması yok (bkz. CLAUDE.md "No real backend") — tüm veri (jobs,
- * provider-services) tarayıcının kendi localStorage'ında düz metin olarak
- * durur. Bu fonksiyon (ve onu çağıran her ekran) tarayıcı geliştirici
- * konsolundan doğrudan localStorage/JS state manipülasyonuna karşı MUTLAK bir
- * güvenlik sağlayamaz — teknik olarak yetkili bir kullanıcı kendi
- * tarayıcısında bu kısıtlamayı atlatabilir. Sağlanan garanti, UYGULAMANIN
- * KENDİ NORMAL kullanım yüzeyinin (linkler, doğrudan URL, bildirimler, teklif
- * formu, "Verdiğim Teklifler" geçmişi vb.) HİÇBİRİNİN gizli ilan bilgisini
- * sızdırmamasıdır — sunucu tarafı bir yetkilendirme sınırı değildir.
+ * MİMARİ SINIRLAMA (job/offer verisiyle AYNI, bkz. proje raporu): bu
+ * fonksiyon(lar) tarayıcı geliştirici konsolundan doğrudan JS state
+ * manipülasyonuna karşı MUTLAK bir güvenlik sağlayamaz — ama artık yetki
+ * verisinin KENDİSİ (localStorage'ın aksine) gerçek bir Supabase RLS
+ * sınırının (provider_service_authorizations, `provider_id = auth.uid()
+ * or is_admin()`) arkasındadır, bu yüzden bu modülü atlatan bir kullanıcı
+ * bile KENDİ yetkisini asla DEĞİŞTİREMEZ — yalnızca (teorik olarak) zaten
+ * doğru olan veriyi render etmemeyi seçebilir. Gerçek yetkilendirme sınırı
+ * her zaman olduğu gibi Supabase RLS/RPC katmanıdır (provider_can_view_
+ * category, create_offer/accept_offer — bkz. migration 0038).
  */
-
-/**
- * Keşif izolasyonu uygulanan hizmet kategorisi id'lerinin TEK listesi — yeni
- * bir hizmete bu izolasyon gerekirse TEK eklenmesi gereken yer burasıdır.
- * Sırasız bir küme olarak ele alınır (görüntüleme sırası bu listeden ASLA
- * türetilmez, bkz. service-catalog.ts#getServiceCategoryOrderIndex).
- */
-const ISOLATED_SERVICE_CATEGORY_IDS: readonly string[] = [
-  NAKLIYE_SERVICE_CATEGORY_ID,
-  GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID,
-];
-
-/** Bir Hizmet Veren'in seçtiği hizmetler arasından yalnızca izole edilmiş olanları döner — sırası `serviceCategoryIds`inkiyle aynıdır. */
-function getSelectedIsolatedCategoryIds(serviceCategoryIds: string[]): string[] {
-  return serviceCategoryIds.filter((id) => ISOLATED_SERVICE_CATEGORY_IDS.includes(id));
-}
 
 /** Bir ilanın kararlı katalog kategori id'sini çözer — eski (düz metin) ve yeni (id) kayıtların ikisiyle de çalışır. */
 function resolveJobCategoryId(job: Job): string | null {
@@ -105,68 +74,211 @@ function resolveJobCategoryId(job: Job): string | null {
 }
 
 /**
- * Saf karar mantığı — hem düz fonksiyonlar hem reaktif hook'lar tarafından
- * paylaşılır. `serviceCategoryIds`, çağıranın (düz okuma ya da reaktif hook)
- * elde ettiği, ZATEN `isServiceCategoryId` ile süzülmüş (bkz.
- * provider-services.ts/use-provider-services.ts) güncel hizmet kümesidir.
+ * "Ortak İlan Görünürlüğü" görevi — İş Makinesi Hizmetleri (forklift/reach-
+ * stacker/vinç/manlift) ve Operatör Hizmetleri (bunların operatörlü
+ * karşılıkları) — supabase/migrations/0076'daki
+ * `provider_can_view_category_or_group`in AYNI 8 kategori id'si (SQL bunu
+ * elle senkron tutar, migration 0044'ün PROVIDER_AUTHORIZATION_GROUPS
+ * kuralıyla AYNI ilke). BU LİSTE YALNIZCA GÖRÜNÜRLÜK içindir — teklif verme
+ * yetkisi (offers.ts#canProviderSubmitNewOffer/createOffer) BUNU HİÇ
+ * OKUMAZ, hâlâ tek kategoriye tam eşleşme arar (bkz. o dosyanın kendi
+ * dokümanı) — gerçek sınır zaten RLS/RPC'de aynı şekilde ayrıldı
+ * (provider_can_view_job vs. değişmeyen provider_can_view_category).
  */
-/** `job` yoksa (zaten "bulunamadı" olarak ele alınacak) bilerek `true` döner — bu fonksiyon yalnızca VAR OLAN bir ilanın gizlenip gizlenmeyeceğine karar verir. */
-function resolveVisibility(session: Session | null, serviceCategoryIds: string[], job: Job | null): boolean {
-  if (!job) return true;
-  if (!session || session.role !== "hizmet-veren") return true;
-  const isolatedSelected = getSelectedIsolatedCategoryIds(serviceCategoryIds);
-  if (isolatedSelected.length === 0) return true;
-  const jobCategoryId = resolveJobCategoryId(job);
-  return jobCategoryId !== null && isolatedSelected.includes(jobCategoryId);
+const SHARED_HEAVY_EQUIPMENT_OPERATOR_CATEGORY_IDS: readonly string[] = [
+  "forklift",
+  "reach-stacker",
+  "vinc",
+  "manlift",
+  "forklift-operatoru",
+  "reach-stacker-operatoru",
+  "vinc-operatoru",
+  "manlift-operatoru",
+];
+
+/**
+ * Bir provider'ın GÖRÜNÜRLÜK amaçlı yetkili sayılıp sayılmadığını kontrol
+ * eder — `jobCategoryId` paylaşılan İş Makinesi/Operatör grubundaysa,
+ * `authorizedServiceCategoryIds`in GRUP İÇİNDEKİ HERHANGİ BİR kategoriyi
+ * içermesi yeterlidir; değilse (her zamanki gibi) tam eşleşme aranır.
+ */
+function isAuthorizedForVisibility(jobCategoryId: string, authorizedServiceCategoryIds: string[]): boolean {
+  if (SHARED_HEAVY_EQUIPMENT_OPERATOR_CATEGORY_IDS.includes(jobCategoryId)) {
+    return authorizedServiceCategoryIds.some((id) => SHARED_HEAVY_EQUIPMENT_OPERATOR_CATEGORY_IDS.includes(id));
+  }
+  return authorizedServiceCategoryIds.includes(jobCategoryId);
 }
 
 /**
- * Tek bir ilan için görünürlük kontrolü — DÜZ (reaktif olmayan), her
- * çağrıda localStorage'ı taze okur. Bileşen içinde SÜREGELEN bir render
+ * Saf karar mantığı — hem düz fonksiyonlar hem reaktif hook'lar tarafından
+ * paylaşılır (dört dış API de artık BU TEK fonksiyona delege eder — önceden
+ * `filterVisibleJobs`/`useFilterVisibleJobs` aynı kontrolü KENDİ İÇLERİNDE
+ * ayrı ayrı tekrar ediyordu, bu bir tutarsızlık riskiydi). `authorizedService
+ * CategoryIds`, çağıranın (düz okuma ya da reaktif hook) elde ettiği GÜNCEL,
+ * admin-onaylı hizmet kümesidir.
+ *
+ * "İlan–Depocu Uygunluk Eşleştirmesi" (migration 0059, görev bölüm 7):
+ * kategori-seviyesi üyelik ARTIK Konteyner Depolama için YETERLİ DEĞİL —
+ * kategori yetkisi geçtikten SONRA, `containerAuthorization` ile İLANIN HER
+ * KONTEYNER GRUBUNUN gereksinimi ayrıca karşılaştırılır (bkz. storage-
+ * container-catalog.ts#isProviderEligibleForContainerJob, migration 0059'daki
+ * `provider_can_view_job` SQL fonksiyonu İLE ELLE SENKRON tutulan AYNI
+ * mantık — bu istemci tarafı kontrol yalnızca UI'ı erken gizlemek içindir,
+ * GERÇEK yetkilendirme sınırı her zaman olduğu gibi RLS/RPC katmanıdır, bkz.
+ * bu dosyanın üstündeki "MİMARİ SINIRLAMA" notu).
+ */
+function resolveVisibility(
+  session: Session | null,
+  authorizedServiceCategoryIds: string[],
+  containerAuthorization: ContainerStorageAuthorization | null,
+  authorizedStorageRiskGroupIds: string[],
+  recyclingActivityIds: string[],
+  recyclingWasteCodes: string[],
+  job: Job | null,
+  // "Ortak İlan Görünürlüğü" görevi — bulunan gerçek açık: offers.ts#
+  // canProviderSubmitNewOffer/createOffer bu fonksiyonun (isJobVisibleToSession
+  // üzerinden) SONUCUNU doğrudan "teklif verebilir mi" kapısı olarak
+  // kullanıyordu — İş Makinesi/Operatör grubu görünürlüğü genelleşince bu
+  // TEKLİF yetkisini de İSTEMEDEN genişletirdi (görev talimatının kendi
+  // açık uyardığı tam senaryo). `forOffer: true` iken grup genişlemesi
+  // uygulanmaz, yalnızca TAM kategori eşleşmesi aranır — SQL tarafında
+  // provider_can_view_job (grup-farkında) ile değişmeyen
+  // provider_can_view_category (tam eşleşme) arasındaki AYNI ayrım.
+  forOffer: boolean = false,
+): boolean {
+  if (!job) return true;
+  if (!session || session.role !== "hizmet-veren") return true;
+  const jobCategoryId = resolveJobCategoryId(job);
+  const isAuthorized = forOffer
+    ? authorizedServiceCategoryIds.includes(jobCategoryId ?? "")
+    : jobCategoryId !== null && isAuthorizedForVisibility(jobCategoryId, authorizedServiceCategoryIds);
+  if (jobCategoryId === null || !isAuthorized) return false;
+  if (jobCategoryId === STORAGE_CONTAINER_CATEGORY_ID) {
+    return isProviderEligibleForContainerJob(job.storageContainerGroups, containerAuthorization);
+  }
+  if (isHazardousStorageCategory(jobCategoryId)) {
+    return isProviderEligibleForHazardousStorageJob(job.storageHazardous, job.storageRiskGroups, authorizedStorageRiskGroupIds);
+  }
+  if (isRecyclingCategory(jobCategoryId)) {
+    return isProviderEligibleForRecyclingJob(job, recyclingActivityIds, recyclingWasteCodes);
+  }
+  return true;
+}
+
+/**
+ * Tek bir ilan için görünürlük kontrolü — DÜZ (reaktif olmayan), önceden
+ * doldurulmuş önbelleği senkron okur. Bileşen içinde SÜREGELEN bir render
  * bağlamında kullanılacaksa bunun yerine `useIsJobVisibleToSession` tercih
  * edilmelidir (bkz. bu dosyanın üstündeki dokümantasyon).
  */
 export function isJobVisibleToSession(session: Session | null, job: Job | null): boolean {
   if (!job) return true;
   if (!session || session.role !== "hizmet-veren") return true;
-  const serviceCategoryIds = getProviderServiceCategoryIds(session.id);
-  return resolveVisibility(session, serviceCategoryIds, job);
+  const authorizedServiceCategoryIds = getAuthorizedServiceCategoryIdsSync(session.id);
+  const containerAuthorization = getAuthorizedContainerScopesSync(session.id);
+  const authorizedStorageRiskGroupIds = getAuthorizedStorageRiskGroupIdsSync(session.id);
+  const recyclingActivityIds = getAuthorizedRecyclingActivityIdsSync(session.id);
+  const recyclingWasteCodes = getAuthorizedRecyclingWasteCodesSync(session.id);
+  return resolveVisibility(
+    session,
+    authorizedServiceCategoryIds,
+    containerAuthorization,
+    authorizedStorageRiskGroupIds,
+    recyclingActivityIds,
+    recyclingWasteCodes,
+    job,
+  );
 }
 
 /**
- * `isJobVisibleToSession`in dizi üzerindeki kısayolu — sıralamayı korur,
- * yalnızca görünmeyen ilanları eler. Normal (izole bir hizmete kilitlenmemiş)
- * bir oturum için bu her zaman girdiyle AYNI içeriği (referans olarak farklı
- * ama elemanları birebir aynı bir dizi) döner — bu yüzden aşağı akıştaki
- * hiçbir kod bu filtrenin var olup olmadığını bilmek/dallanmak ZORUNDA değildir.
+ * "Ortak İlan Görünürlüğü" görevi — `isJobVisibleToSession` İLE AYNI alt
+ * yapıyı (kategori yetkisi + konteyner/tehlikeli-depolama/geri-dönüşüm
+ * uygunluğu) paylaşır, ama İş Makinesi/Operatör GRUP genişlemesi UYGULANMAZ
+ * — yalnızca gerçekten yetkili olunan TEK kategori `true` döner. Teklif
+ * verilebilirliğinin (offers.ts#canProviderSubmitNewOffer/createOffer) TEK
+ * doğru kaynağı budur; `isJobVisibleToSession` artık YALNIZCA "bu ilan
+ * ekranda görünsün mü" sorusuna cevap verir, teklif yetkisiyle
+ * KARIŞTIRILMAMALIDIR.
  */
+export function isProviderAuthorizedToOfferOnJob(session: Session | null, job: Job | null): boolean {
+  if (!job) return true;
+  if (!session || session.role !== "hizmet-veren") return true;
+  const authorizedServiceCategoryIds = getAuthorizedServiceCategoryIdsSync(session.id);
+  const containerAuthorization = getAuthorizedContainerScopesSync(session.id);
+  const authorizedStorageRiskGroupIds = getAuthorizedStorageRiskGroupIdsSync(session.id);
+  const recyclingActivityIds = getAuthorizedRecyclingActivityIdsSync(session.id);
+  const recyclingWasteCodes = getAuthorizedRecyclingWasteCodesSync(session.id);
+  return resolveVisibility(
+    session,
+    authorizedServiceCategoryIds,
+    containerAuthorization,
+    authorizedStorageRiskGroupIds,
+    recyclingActivityIds,
+    recyclingWasteCodes,
+    job,
+    true,
+  );
+}
+
+/** `isJobVisibleToSession`in dizi üzerindeki kısayolu — sıralamayı korur, yalnızca görünmeyen ilanları eler. */
 export function filterVisibleJobs(session: Session | null, jobs: Job[]): Job[] {
   if (!session || session.role !== "hizmet-veren") return jobs;
-  const serviceCategoryIds = getProviderServiceCategoryIds(session.id);
-  const isolatedSelected = getSelectedIsolatedCategoryIds(serviceCategoryIds);
-  if (isolatedSelected.length === 0) return jobs;
-  return jobs.filter((job) => {
-    const jobCategoryId = resolveJobCategoryId(job);
-    return jobCategoryId !== null && isolatedSelected.includes(jobCategoryId);
-  });
+  const authorizedServiceCategoryIds = getAuthorizedServiceCategoryIdsSync(session.id);
+  const containerAuthorization = getAuthorizedContainerScopesSync(session.id);
+  const authorizedStorageRiskGroupIds = getAuthorizedStorageRiskGroupIdsSync(session.id);
+  const recyclingActivityIds = getAuthorizedRecyclingActivityIdsSync(session.id);
+  const recyclingWasteCodes = getAuthorizedRecyclingWasteCodesSync(session.id);
+  return jobs.filter((job) =>
+    resolveVisibility(
+      session,
+      authorizedServiceCategoryIds,
+      containerAuthorization,
+      authorizedStorageRiskGroupIds,
+      recyclingActivityIds,
+      recyclingWasteCodes,
+      job,
+    ),
+  );
 }
 
 /** `isJobVisibleToSession`in REAKTİF hâli — bkz. bu dosyanın üstündeki dokümantasyon. `job` henüz çözülmemişse (`null`) `true` döner, çağıran taraf ayrıca kendi "bulunamadı" kontrolünü uygular. */
 export function useIsJobVisibleToSession(session: Session | null, job: Job | null): boolean {
-  const serviceCategoryIds = useProviderServiceCategoryIds(session?.role === "hizmet-veren" ? session.id : undefined);
-  return resolveVisibility(session, serviceCategoryIds, job);
+  const providerId = session?.role === "hizmet-veren" ? session.id : undefined;
+  const authorizedServiceCategoryIds = useAuthorizedServiceCategoryIds(providerId);
+  const containerAuthorization = useAuthorizedContainerScopes(providerId);
+  const authorizedStorageRiskGroupIds = useAuthorizedStorageRiskGroupIds(providerId);
+  const { activityIds: recyclingActivityIds, wasteCodes: recyclingWasteCodes } = useAuthorizedRecyclingScopes(providerId);
+  return resolveVisibility(
+    session,
+    authorizedServiceCategoryIds,
+    containerAuthorization,
+    authorizedStorageRiskGroupIds,
+    recyclingActivityIds,
+    recyclingWasteCodes,
+    job,
+  );
 }
 
 /** `filterVisibleJobs`in REAKTİF hâli — bkz. bu dosyanın üstündeki dokümantasyon. */
 export function useFilterVisibleJobs(session: Session | null, jobs: Job[]): Job[] {
-  const serviceCategoryIds = useProviderServiceCategoryIds(session?.role === "hizmet-veren" ? session.id : undefined);
-  return useMemo(() => {
-    if (!session || session.role !== "hizmet-veren") return jobs;
-    const isolatedSelected = getSelectedIsolatedCategoryIds(serviceCategoryIds);
-    if (isolatedSelected.length === 0) return jobs;
-    return jobs.filter((job) => {
-      const jobCategoryId = resolveJobCategoryId(job);
-      return jobCategoryId !== null && isolatedSelected.includes(jobCategoryId);
-    });
-  }, [session, serviceCategoryIds, jobs]);
+  const providerId = session?.role === "hizmet-veren" ? session.id : undefined;
+  const authorizedServiceCategoryIds = useAuthorizedServiceCategoryIds(providerId);
+  const containerAuthorization = useAuthorizedContainerScopes(providerId);
+  const authorizedStorageRiskGroupIds = useAuthorizedStorageRiskGroupIds(providerId);
+  const { activityIds: recyclingActivityIds, wasteCodes: recyclingWasteCodes } = useAuthorizedRecyclingScopes(providerId);
+  return useMemo(
+    () =>
+      jobs.filter((job) =>
+        resolveVisibility(
+          session,
+          authorizedServiceCategoryIds,
+          containerAuthorization,
+          authorizedStorageRiskGroupIds,
+          recyclingActivityIds,
+          recyclingWasteCodes,
+          job,
+        ),
+      ),
+    [session, authorizedServiceCategoryIds, containerAuthorization, authorizedStorageRiskGroupIds, recyclingActivityIds, recyclingWasteCodes, jobs],
+  );
 }

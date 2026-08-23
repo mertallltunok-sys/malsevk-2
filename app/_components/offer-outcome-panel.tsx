@@ -358,11 +358,11 @@ export function OfferOutcomePanel({
     setModal("none");
   }
 
-  function handleAgreementFailed() {
+  async function handleAgreementFailed() {
     if (submitting || !reason) return;
     setSubmitting(true);
     setError(null);
-    const result = recordAgreementFailure(session, offer.id, reason, note);
+    const result = await recordAgreementFailure(session, offer.id, reason, note);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error);
@@ -398,11 +398,11 @@ export function OfferOutcomePanel({
     setModal("none");
   }
 
-  function handleResolveDispute(resolution: "completed" | "cancelled") {
+  async function handleResolveDispute(resolution: "completed" | "cancelled") {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    const result = resolveCompletionDispute(session, offer.id, resolution);
+    const result = await resolveCompletionDispute(session, offer.id, resolution);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error);

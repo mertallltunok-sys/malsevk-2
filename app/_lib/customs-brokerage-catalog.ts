@@ -97,6 +97,37 @@ export function getCustomsRequestedServiceLabels(ids: readonly string[]): string
     .filter((label): label is string => Boolean(label));
 }
 
+type JobCustomsBrokerageSummaryFields = {
+  category: string;
+  customsTransactionType?: string;
+  customsProductType?: string;
+  customsRequestedServices?: string[];
+};
+
+/**
+ * Kart/tablo gibi kompakt bağlamlar için tek satırlık özet —
+ * product-catalog.ts#formatJobProductInfoLine ve recycling-catalog.ts#
+ * formatRecyclingSummaryLine ile AYNI "•"-ayraçlı desen (masaüstü
+ * genişlik/yoğunluk düzeltmesi görevi, Faz 2 — bu ikisi zaten vardı, bu
+ * üçüncüsü aynı deseni tamamlıyor). "Destekleyici Evraklar" (yüklenen
+ * dosya bağlantıları) BİLEREK bu satıra dahil DEĞİLDİR — metne indirgenecek
+ * bir alan değil, kendi ayrı görüntüleme yüzeyinde kalır. Kapsam dışı bir
+ * kategoride ya da hiç bilgi girilmemişse `null` döner.
+ */
+export function formatCustomsBrokerageSummaryLine(job: JobCustomsBrokerageSummaryFields): string | null {
+  if (!isCustomsBrokerageCategory(job.category)) return null;
+  const parts: string[] = [];
+  if (job.customsTransactionType) {
+    const label = getCustomsTransactionTypeLabel(job.customsTransactionType);
+    if (label) parts.push(label);
+  }
+  if (job.customsProductType) parts.push(job.customsProductType);
+  if (job.customsRequestedServices && job.customsRequestedServices.length > 0) {
+    parts.push(getCustomsRequestedServiceLabels(job.customsRequestedServices).join(", "));
+  }
+  return parts.length > 0 ? parts.join(" • ") : null;
+}
+
 /**
  * "Evrak Yükleme" alanının kabul ettiği DAR uzantı alt kümesi (görev tanımı:
  * PDF, JPG, PNG, DOCX, XLSX) — document-validation.ts#ALLOWED_EXTENSIONS'ın

@@ -1,30 +1,21 @@
 import { CUSTOMS_LICENSE_DOCUMENT_TYPE, getProviderDocumentsForUser } from "./provider-documents";
-import { getProviderServiceCategoryIds } from "./provider-services";
 import { GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID } from "./service-catalog";
 import type { ProviderDocumentReviewStatus } from "./types";
 
 /**
- * GÜMRÜK MÜŞAVİRLİĞİ'NE ÖZEL ek ruhsat/lisans doğrulama kapısı — TEK
- * doğruluk kaynağı. Diğer hiçbir hizmete (Nakliye dahil) UYGULANMAZ; bu
- * bilerek böyledir (görev gereksinimi: yalnızca Gümrük Müşavirliği için
- * "Gümrük Müşaviri İzin Belgesi" onayı, teklif verme yetkisini açıp kapatır).
+ * GÜMRÜK MÜŞAVİRLİĞİ'NE ÖZEL kayıt/belge-türü mantığı — Gümrük Müşavirliği'nin
+ * kendi "Gümrük Müşaviri İzin Belgesi" (bkz. provider-documents.ts#
+ * CUSTOMS_LICENSE_DOCUMENT_TYPE) genel Faaliyet Belgesi/Raporu'nun YERİNE
+ * ne zaman geçtiğini belirler (kayıt formu doğrulaması için).
  *
- * Kural: `provider-services.ts` üzerinde kayıtlı hizmetleri arasında Gümrük
- * Müşavirliği BULUNAN bir Hizmet Veren, kendi "gumruk-musaviri-izin-belgesi"
- * türündeki belgesi (bkz. provider-documents.ts#CUSTOMS_LICENSE_DOCUMENT_TYPE)
- * `reviewStatus === "approved"` olana kadar HİÇBİR teklif veremez — belge
- * "pending" (inceleniyor) ya da "rejected" (reddedildi) iken de aynı şekilde
- * engellenir (görev gereksinimi ikisini de aynı şekilde ele alır). Gümrük
- * Müşavirliği seçili DEĞİLSE bu fonksiyon her zaman `true` döner — mevcut
- * hiçbir hizmetin (Nakliye/Lashing/Depolama/Gözetim/Forklift/vb.) teklif
- * verme davranışı bu modülle HİÇ etkileşmez.
- *
- * Giriş yapma/profil düzenleme/ilan görüntüleme bu kapıdan bağımsızdır —
- * bunlar zaten TÜM Hizmet Veren hesapları için belge onay durumundan
- * bağımsız olarak açıktır (görev gereksinimi), bu modül yalnızca teklif
- * verme eylemini (offers.ts#canProviderSubmitNewOffer/createOffer) kısıtlar.
- * İlan GÖRÜNÜRLÜĞÜ (hangi ilanları görebildiği) ayrı, bağımsız bir kuraldır
- * — bkz. job-visibility.ts; belge onay durumundan hiç etkilenmez.
+ * TEKLİF VERME YETKİSİ artık bu modülden DEĞİL, genelleştirilmiş HİZMET
+ * BAZLI YETKİLENDİRME sisteminden gelir (bkz. job-visibility.ts,
+ * supabase-provider-service-authorizations.ts, migration 0038) — eski
+ * `canSubmitOffersAsCustomsBroker` (yalnızca Gümrük Müşavirliği'ne özel,
+ * SİTE GENELİNDE teklif engelleyen bir kapı) 0038 ile RETİRE edildi:
+ * job-visibility.ts artık HER hizmet için (Gümrük Müşavirliği dahil) aynı
+ * "admin onaylı yetkilendirme yoksa görünmez/teklif veremez" kuralını
+ * genel olarak uyguluyor, bu yüzden ayrı/ikinci bir kapı gerekmiyordu.
  */
 
 /** `serviceCategoryIds` çağıranın zaten okuduğu (provider-services.ts) güncel hizmet kümesidir — ikinci bir localStorage okuması yapmaz. */
@@ -76,15 +67,3 @@ export function getCustomsLicenseStatus(userId: string): ProviderDocumentReviewS
   return getCustomsLicenseDocumentForUser(userId)?.reviewStatus ?? "not_submitted";
 }
 
-/**
- * Teklif vermenin GÜMRÜK MÜŞAVİRLİĞİ'NE özel ek kapısı — offers.ts#
- * canProviderSubmitNewOffer/createOffer içinde, MEVCUT tüm kontrollerin
- * (görünürlük/kapasite/cooldown/vb.) YANINA eklenir, hiçbirinin YERİNE
- * geçmez. Gümrük Müşavirliği seçili olmayan bir Hizmet Veren için her zaman
- * `true` döner (davranış hiç değişmez).
- */
-export function canSubmitOffersAsCustomsBroker(userId: string): boolean {
-  const serviceCategoryIds = getProviderServiceCategoryIds(userId);
-  if (!isCustomsBrokerProvider(serviceCategoryIds)) return true;
-  return getCustomsLicenseStatus(userId) === "approved";
-}

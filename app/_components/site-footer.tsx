@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { getAllLegalDocuments } from "../_lib/legal-documents";
+import { PageContainer } from "./page-container";
 
 const platformLinks = [
   { href: "/", label: "Ana Sayfa" },
@@ -43,6 +45,29 @@ function FooterLinkList({
 }
 
 /**
+ * Faz 2 (masaüstü genişlik/yoğunluk düzeltmesi) — büyük pazarlama footer'ı
+ * (marka açıklaması + Platform/Hesap/Yasal sütunları) her sayfada aynı
+ * değildir; operasyonel/oturum-açılmış ekranlarda gereksiz/uygunsuz:
+ *  - İlan DETAY sayfaları (`/ilanlar/[id]`): footer HİÇ render edilmiyor
+ *    (`return null`) — bu sayfanın "ilk ekrana sığdırma" hedefi var,
+ *    tek satırlık bir telif satırı bile kullanılabilir alanı daraltabilir
+ *    (görev tanımı). `/ilanlar` listesinin KENDİSİ bu kapsamda DEĞİL, tam
+ *    footer'ı korur.
+ *  - `/panel`, `/admin`, `/hizmet-talebi-olustur`: sert bir viewport hedefi
+ *    yok, ama bunlar pazarlama sayfası değil — yalnızca kısa bir telif
+ *    hakkı satırı (Platform/Hesap/Yasal sütunları YOK) gösterilir. Bu aynı
+ *    zamanda admin panelinin altında bugüne kadar anlamsızca duran
+ *    "Kayıt Ol"/"Giriş Yap" linklerini de kaldırır.
+ *  - Diğer her yerde (ana sayfa, `/ilanlar` listesi, yasal sayfalar,
+ *    `/bize-ulasin`, giriş/kayıt) TAM pazarlama footer'ı değişmeden kalır.
+ */
+const COMPACT_FOOTER_PATH_PREFIXES = ["/panel", "/admin", "/hizmet-talebi-olustur"];
+
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+/**
  * "Bize Ulaşın" ve "Yasal" bağlantılarının TÜMÜ düz `<Link>`lerdir — hiçbiri
  * modal/dialog/pop-up AÇMAZ (görev tanımı: önceki modal kararı iptal
  * edildi; bkz. app/bize-ulasin/page.tsx, app/gizlilik-politikasi/page.tsx
@@ -54,12 +79,28 @@ function FooterLinkList({
  * render edilir.
  */
 export function SiteFooter() {
+  const pathname = usePathname();
   const year = new Date().getFullYear();
+
+  if (matchesPrefix(pathname, "/ilanlar") && pathname !== "/ilanlar") {
+    return null;
+  }
+
+  if (COMPACT_FOOTER_PATH_PREFIXES.some((prefix) => matchesPrefix(pathname, prefix))) {
+    return (
+      <footer className="border-t border-border bg-primary text-primary-foreground">
+        <PageContainer className="py-4">
+          <p className="text-xs text-primary-foreground/60">© {year} MALSEVK.com. Tüm hakları saklıdır.</p>
+        </PageContainer>
+      </footer>
+    );
+  }
+
   const legalDocuments = getAllLegalDocuments();
 
   return (
     <footer className="bg-primary text-primary-foreground">
-      <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
+      <PageContainer className="py-14">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-3 sm:col-span-2 lg:col-span-1">
             <div className="flex items-center gap-2">
@@ -105,7 +146,7 @@ export function SiteFooter() {
             © {year} MALSEVK.com. Tüm hakları saklıdır.
           </p>
         </div>
-      </div>
+      </PageContainer>
     </footer>
   );
 }

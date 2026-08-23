@@ -90,19 +90,23 @@ export function JobListingCards({
               {showNakliyeRoute && row.nakliyeRoute ? (
                 <span className="flex min-w-0 items-start gap-1.5">
                   <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <NakliyeListingRoute pickup={row.nakliyeRoute.pickup} delivery={row.nakliyeRoute.delivery} />
+                  <NakliyeListingRoute
+                    pickup={row.nakliyeRoute.pickup}
+                    delivery={row.nakliyeRoute.delivery}
+                    isRevealed={row.isLocationRevealed}
+                  />
                 </span>
               ) : (
                 <span className="flex min-w-0 items-start gap-1.5">
                   <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
-                    {row.location.companyOrFactoryName && (
+                    {row.isLocationRevealed && row.location.companyOrFactoryName && (
                       <span className="block truncate font-medium text-foreground">
                         {row.location.companyOrFactoryName}
                       </span>
                     )}
                     <span className="block truncate">
-                      {row.location.facilityDisplayName && (
+                      {row.isLocationRevealed && row.location.facilityDisplayName && (
                         <>
                           {row.location.facilityDisplayName}
                           {row.location.facilityTypeLabel && ` (${row.location.facilityTypeLabel})`} ·{" "}
@@ -122,6 +126,12 @@ export function JobListingCards({
                 <span className="flex items-center gap-1.5">
                   <Package className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   {row.productInfoLine}
+                </span>
+              )}
+              {item.kind === "single" && row.recyclingSummaryLine && (
+                <span className="flex items-center gap-1.5">
+                  <Package className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {row.recyclingSummaryLine}
                 </span>
               )}
               {item.kind === "operation" &&

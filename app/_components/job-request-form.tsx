@@ -8,11 +8,16 @@ import {
   getCustomsTransactionTypeLabel,
   isCustomsBrokerageCategory,
 } from "../_lib/customs-brokerage-catalog";
+import { ADDRESS_MAX_LENGTH } from "../_lib/field-limits";
 import {
   findDuplicateServiceCategoryIds,
   SERVICE_LOCATION_ERROR_KEYS,
+  validateNakliyeCargoGroups,
+  validateNakliyeDetails,
   validateServiceItem,
   validateSharedOperationFields,
+  type NakliyeCargoGroupErrors,
+  type NakliyeDetailsErrors,
   type ServiceItemErrors,
   type ServiceItemFields,
   type SharedOperationErrors,
@@ -24,25 +29,55 @@ import {
   toFacilitySelectOptions,
 } from "../_lib/job-location";
 import { FIXED_PROVINCE_LABEL } from "../_lib/job-listing-filters";
-import { createJob, createJobsForOperation } from "../_lib/job-store";
+import { createJob, createJobsForOperation, markJobSupabaseSyncFailed } from "../_lib/job-store";
 import { formatJobDate, getTodayLocalDateString } from "../_lib/jobs";
 import {
   DELIVERY_MANUAL_LOCATION_VALUE,
   isTransportationCategory,
   PICKUP_MANUAL_LOCATION_VALUE,
 } from "../_lib/nakliye-route";
-import { MIN_PHOTOS } from "../_lib/photo-validation";
+import { deriveLegacyMirrorFields } from "../_lib/nakliye-cargo-groups";
+import {
+  createEmptyNakliyeCargoGroupFields,
+  fromCargoGroupsFields,
+  isNakliyeContainerProductType,
+  type NakliyeCargoGroupFieldValues,
+} from "../_lib/nakliye-transport-catalog";
+import { getMaxPhotos, getMinPhotos } from "../_lib/photo-validation";
 import {
   formatProductQuantity,
   formatProductTonnage,
+  isProductTonnageUnit,
   isTonnageRequired,
   parseProductQuantity,
   parseProductTonnage,
+  PRODUCT_TONNAGE_UNIT_OPTIONS,
   PRODUCT_TYPE_CUSTOM_VALUE,
   PRODUCT_TYPE_SUGGESTIONS,
   requiresProductInfo,
 } from "../_lib/product-catalog";
+import {
+  formatRecyclingQuantity,
+  getRecyclingMaterialConditionLabel,
+  getRecyclingMaterialTypeDetailLine,
+  getRecyclingMaterialTypeLabel,
+  getRecyclingRequestedOperationLabel,
+  getRecyclingScopeOfWorkLabels,
+  isRecyclingCategory,
+  isRecyclingMaterialCondition,
+  isRecyclingUnit,
+  isWasteQuantityUnit,
+  parseRecyclingQuantity,
+} from "../_lib/recycling-catalog";
+import {
+  deriveWasteCodeHazardous,
+  formatWasteCodeForDisplay,
+  getWasteCodeEntry,
+  getWasteHazardPropertyLabel,
+} from "../_lib/recycling-waste-code-catalog";
 import { getServiceCategoryLabel, isStorageOnlyLocationCategory, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import { isContainerStorageCategory } from "../_lib/storage-container-catalog";
+import { isHazardousStorageCategory, isTehlikeliMaddeDepolamaCategory } from "../_lib/storage-hazard-catalog";
 import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
 import { isSupabaseJobSyncEnabled, syncJobToSupabase, syncOperationToSupabase } from "../_lib/supabase-job-sync";
 import {
@@ -54,6 +89,7 @@ import {
   getProvinces,
   type Facility,
 } from "../_lib/turkey-locations";
+import type { NakliyeCargoGroup, NakliyeDetails } from "../_lib/types";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { CustomsBrokerageFields, type CustomsBrokerageFieldValues } from "./customs-brokerage-fields";
@@ -61,9 +97,28 @@ import { GuestAccessCard, PageCardShell } from "./guest-access-card";
 import { JobCustomsDocumentUpload, type ReadyJobCustomsDocument } from "./job-customs-document-upload";
 import { JobPhotoUpload, type ReadyJobPhoto } from "./job-photo-upload";
 import { ManualFacilityNameField } from "./manual-facility-name-field";
+import { NakliyeCargoGroupsFields } from "./nakliye-cargo-group-fields";
 import { NakliyeLocationFields, type NakliyeLocationFieldValues } from "./nakliye-location-fields";
+import { NakliyeSectionCard } from "./nakliye-section-card";
+import {
+  createEmptyNakliyeDetailsFields,
+  fromNakliyeDetailsFields,
+  LoadingMethodField,
+  ShipmentPlanFields,
+  VehiclePreferenceFields,
+  type NakliyeDetailsFieldValues,
+} from "./nakliye-transport-fields";
 import { ProductTypeCombobox } from "./product-type-combobox";
+import { RecyclingFields, type RecyclingFieldValues } from "./recycling-fields";
 import { SearchableSelect } from "./searchable-select";
+import { StorageHazardFields, type StorageHazardFieldValues } from "./storage-hazard-fields";
+import { StorageProductFields, type StorageProductFieldValues } from "./storage-product-fields";
+import {
+  createEmptyStorageContainerGroupFields,
+  fromStorageContainerGroupsFields,
+  StorageContainerGroupsFields,
+  type StorageContainerGroupFieldValues,
+} from "./storage-container-details-fields";
 
 const PAGE_TITLE = "Hizmet Talebi Oluştur";
 const PAGE_DESCRIPTION =
@@ -113,6 +168,8 @@ type ServiceEntry = {
    */
   productQuantity: string;
   productTonnage: string;
+  /** Bkz. job-form-validation.ts#JobFormFields.productTonnageUnit — yalnızca isTransportationCategory(category) true iken gösterilir/anlamlıdır; Liman Hizmetleri bu alanı hiç okumaz, kendi Tonaj alanı sabit "ton" gösterir. Her zaman geçerli bir varsayılanla ("ton") başlar. */
+  productTonnageUnit: string;
   productType: string;
   /** Bkz. job-form-validation.ts#JobFormFields.productTypeCustomText — yalnızca productType === PRODUCT_TYPE_CUSTOM_VALUE iken anlamlı. */
   productTypeCustomText: string;
@@ -132,6 +189,55 @@ type ServiceEntry = {
   customsProductTypeCustomText: string;
   customsDocuments: ReadyJobCustomsDocument[];
   /**
+   * Geri Dönüşüm & Atık Tahliye'ye özel "Malzeme Bilgileri" —
+   * recycling-catalog.ts#isRecyclingCategory(category) true iken gösterilir.
+   * Diğer hizmete-özel alan gruplarıyla AYNI ilke: her hizmet, kategorisi ne
+   * olursa olsun HER ZAMAN kendi bilgisini taşır.
+   */
+  recyclingMaterialCategoryId: string;
+  recyclingMaterialSubtypeId: string;
+  recyclingQuantity: string;
+  recyclingUnit: string;
+  recyclingMaterialCondition: string;
+  recyclingMaterialConditionNote: string;
+  recyclingScopeOfWork: string[];
+  recyclingRequestedOperation: string;
+  recyclingWasteCode: string;
+  recyclingWasteCodeUnknown: boolean;
+  recyclingHazardProperties: string[];
+  /**
+   * Depolama'ya özel "Depolanacak Ürün Bilgileri" —
+   * service-catalog.ts#isStorageOnlyLocationCategory(category) (Depo
+   * Hizmetleri grubunun TAMAMI, 12 alt kategori) true iken gösterilir.
+   * Diğer hizmete-özel alan gruplarıyla AYNI ilke: her hizmet, kategorisi ne
+   * olursa olsun HER ZAMAN kendi bilgisini taşır.
+   */
+  storageProductType: string;
+  storageProductTypeCustomText: string;
+  storageProductQuantity: string;
+  storageProductUnit: string;
+  storageProductTonnage: string;
+  /**
+   * "Konteyner Grupları" — yalnızca storage-container-catalog.ts#
+   * isContainerStorageCategory(category) true iken (yalnızca "Konteyner
+   * Depolama" alt kategorisi) gösterilir/anlamlıdır. Bu kategoride
+   * yukarıdaki storageProductType/Quantity/Unit/Tonnage alanları HİÇ
+   * KULLANILMAZ (bir ilan birden fazla konteyner grubu taşıyabildiği için
+   * TEK değerli o alanlar artık yetersiz — bkz. storage-container-catalog.ts'in
+   * kendi başlık dokümanındaki 3. tasarım notu). Çoklu hizmet operasyonunda
+   * HER Konteyner Depolama kartı kendi bağımsız grup dizisini taşır (bu
+   * dizi zaten ServiceEntry'nin kendisinde olduğu için — ikinci bir
+   * izolasyon mekanizması gerekmez).
+   */
+  storageContainerGroups: StorageContainerGroupFieldValues[];
+  /**
+   * "Kimyasal Depolama / Tehlikeli Madde Depolama" görevi — yalnızca
+   * storage-hazard-catalog.ts#isHazardousStorageCategory(category) true
+   * iken (bu iki alt kategoride) gösterilir/anlamlıdır.
+   */
+  storageHazardous: string;
+  storageRiskGroups: string[];
+  /**
    * Nakliye Güzergâh Yönetimi — "Teslim Edilecek Yer" (delivery). Yalnızca
    * isTransportationCategory(category) true iken gösterilir. Ürün/Gümrük
    * alanlarıyla AYNI ilke: "Ana hizmetle aynı lokasyon" kavramı YOK — bu
@@ -144,6 +250,29 @@ type ServiceEntry = {
   /** Yalnızca deliveryFacilityId === DELIVERY_MANUAL_LOCATION_VALUE iken anlamlı — kullanıcının serbestçe yazdığı GERÇEK teslimat liman/sanayi/OSB adı (bkz. NakliyeLocationFieldValues.customFacilityName dokümanı). Pickup'ın otherFacilityText'iyle AYNI ilke, ayrı Job alanına (deliveryFacilityName) yazıldığı için ayrı bir state. */
   deliveryOtherFacilityText: string;
   deliveryAddressText: string;
+  /**
+   * "Nakliye Yeniden Tasarımı" / "Nakliye Alan Sadeleştirmesi" — Araç
+   * Tercihi/Yükleme-Teslimat operasyon detayları/Özel Taşıma Koşulları
+   * ve (bu görevle TEK seçimli birer dropdown'a indirgenmiş) Yükün
+   * Hazırlanış Biçimi/Yükleme Yöntemi dahil TÜM Nakliye'ye özel alanlar
+   * tek bir `NakliyeDetailsFieldValues` objesinde tutulur. Yalnızca
+   * isTransportationCategory(category) true iken gösterilir/anlamlıdır —
+   * diğer alan gruplarıyla AYNI "her hizmet kendi bilgisini taşır" ilkesi.
+   */
+  nakliyeDetails: NakliyeDetailsFieldValues;
+  /**
+   * "Nakliye Çoklu Yük Grubu" görevi — "2 — Yük Bilgileri" kartının artık
+   * TEK değil, bağımsız bir "Yük Grubu" dizisi taşıdığı YENİ alan (bkz.
+   * nakliye-transport-catalog.ts#NakliyeCargoGroupFieldValues). Yalnızca
+   * isTransportationCategory(category) true iken gösterilir/anlamlıdır —
+   * bu durumda üstteki `productQuantity`/`productTonnage`/`productType`/
+   * `productTonnageUnit` (job-üstü/paylaşılan alanlar) Nakliye için ARTIK
+   * KULLANILMAZ, her Yük Grubu kendi kopyasını taşır. Diğer alan gruplarıyla
+   * AYNI "her hizmet kendi bilgisini taşır" ilkesi — HER ZAMAN en az 1 grup
+   * içerir (createEmptyServiceEntry, storageContainerGroups İLE AYNI "ilk
+   * grup hazır gelir" ilkesi).
+   */
+  nakliyeCargoGroups: NakliyeCargoGroupFieldValues[];
 };
 
 type ServiceLocation = Pick<
@@ -163,12 +292,20 @@ type ServiceFieldName =
   | "addressText"
   | "productQuantity"
   | "productTonnage"
+  | "productTonnageUnit"
   | "productType"
   | "productTypeCustomText"
   | "customsTransactionType"
   | "customsRequestedServices"
   | "customsProductType"
-  | "customsProductTypeCustomText";
+  | "customsProductTypeCustomText"
+  | "recyclingMaterialCategoryId"
+  | "recyclingMaterialSubtypeId"
+  | "recyclingQuantity"
+  | "recyclingUnit"
+  | "recyclingMaterialCondition"
+  | "recyclingMaterialConditionNote"
+  | "recyclingScopeOfWork";
 
 function createEmptyServiceEntry(): ServiceEntry {
   return {
@@ -188,6 +325,9 @@ function createEmptyServiceEntry(): ServiceEntry {
     addressText: "",
     productQuantity: "",
     productTonnage: "",
+    // Varsayılan birim "ton" (bkz. görev tanımı) — yalnızca Nakliye
+    // kartlarında gösterilir/anlamlıdır, Liman Hizmetleri hiç okumaz.
+    productTonnageUnit: "ton",
     productType: "",
     productTypeCustomText: "",
     customsTransactionType: "",
@@ -195,11 +335,32 @@ function createEmptyServiceEntry(): ServiceEntry {
     customsProductType: "",
     customsProductTypeCustomText: "",
     customsDocuments: [],
+    recyclingMaterialCategoryId: "",
+    recyclingMaterialSubtypeId: "",
+    recyclingQuantity: "",
+    recyclingUnit: "",
+    recyclingMaterialCondition: "",
+    recyclingMaterialConditionNote: "",
+    recyclingScopeOfWork: [],
+    recyclingRequestedOperation: "",
+    recyclingWasteCode: "",
+    recyclingWasteCodeUnknown: false,
+    recyclingHazardProperties: [],
+    storageProductType: "",
+    storageProductTypeCustomText: "",
+    storageProductQuantity: "",
+    storageProductUnit: "",
+    storageProductTonnage: "",
+    storageContainerGroups: [createEmptyStorageContainerGroupFields()],
+    storageHazardous: "hayir",
+    storageRiskGroups: [],
     deliveryProvinceCode: "",
     deliveryDistrict: "",
     deliveryFacilityId: "",
     deliveryOtherFacilityText: "",
     deliveryAddressText: "",
+    nakliyeDetails: createEmptyNakliyeDetailsFields(),
+    nakliyeCargoGroups: [createEmptyNakliyeCargoGroupFields()],
   };
 }
 
@@ -208,8 +369,18 @@ function serviceFieldId(localId: string, field: ServiceFieldName): string {
   return `service-${field}-${localId}`;
 }
 
-/** NakliyeLocationFields'a geçilen `idPrefix` + bileşenin kendi içinde `${idPrefix}-${alan}` şeklinde birleştirdiği DOM id'lerle (bkz. o bileşenin dokümantasyonu) BİREBİR aynı üretim kuralını burada da tekrarlar (focusFirstServiceError'ın hedef elemanı bulabilmesi için). */
-function nakliyeSideFieldId(idPrefix: string, field: string): string {
+/**
+ * `idPrefix` + alan adını `${idPrefix}-${alan}` şeklinde birleştiren, bu
+ * dosyadaki HER "idPrefix tabanlı" alt-form bileşeninin (NakliyeLocationFields,
+ * CustomsBrokerageFields, RecyclingFields — üçü de kendi içinde AYNI
+ * `${idPrefix}-${alan}` kuralıyla DOM id üretir) GERÇEK DOM id'siyle birebir
+ * eşleşen TEK ortak üretim kuralı — `focusFirstServiceError`in hedef elemanı
+ * bulabilmesi için `serviceFieldId`in (genel/prefix'siz alanlar için) yerine
+ * BUNU kullanması gerekir. Yeni bir idPrefix'li alt-form bileşeni eklenirse
+ * (customs/recycling ile AYNI desende) buraya tekrar dokunmaya gerek yoktur —
+ * yalnızca çağıran taraf doğru `idPrefix`i geçirir.
+ */
+function prefixedFieldId(idPrefix: string, field: string): string {
   return `${idPrefix}-${field}`;
 }
 
@@ -233,11 +404,11 @@ function getEffectiveLocation(services: ServiceEntry[], index: number): ServiceL
   return service;
 }
 
-/** Bir hizmetin ham "Ürün Bilgileri" alanlarını createJob/createJobsForOperation'a gönderilecek son hâline (ayrıştırılmış sayı/trim'lenmiş metin) indirger — kategori requiresProductInfo kapsamı dışındaysa üçü de undefined döner (job-store.ts#resolveProductInfoFields zaten aynı korumayı uygular, burada erken/temiz bir payload üretmek içindir). */
+/** Bir hizmetin ham "Ürün Bilgileri" alanlarını createJob/createJobsForOperation'a gönderilecek son hâline (ayrıştırılmış sayı/trim'lenmiş metin) indirger — YALNIZCA Nakliye DIŞI requiresProductInfo kapsamındaki kategoriler için (bugün yalnızca Liman Hizmetleri). "Nakliye Çoklu Yük Grubu" görevi — Nakliye artık bu alanları hiç kullanmaz/göstermez; kendi Ürün Bilgisi'ni HER Yük Grubu kendi taşır (bkz. resolveNakliyeYukBilgileriPayload). */
 function resolveProductInfoPayload(
   service: ServiceEntry,
-): { productQuantity?: number; productTonnage?: number; productType?: string } {
-  if (!requiresProductInfo(service.category)) return {};
+): { productQuantity?: number; productTonnage?: number; productTonnageUnit?: "ton" | "kg"; productType?: string } {
+  if (!requiresProductInfo(service.category) || isTransportationCategory(service.category)) return {};
   const quantityResult = parseProductQuantity(service.productQuantity);
   const tonnageRaw = service.productTonnage.trim();
   const tonnageResult = tonnageRaw.length > 0 ? parseProductTonnage(service.productTonnage) : null;
@@ -388,6 +559,158 @@ function resolveCustomsBrokerageServicePayload(service: ServiceEntry) {
   };
 }
 
+/**
+ * `resolveCustomsBrokerageServicePayload` ile AYNI desen — Geri Dönüşüm &
+ * Atık Tahliye'ye özel alanlar için. KASITLI OLARAK bir "işlem türü" alanı
+ * YOK (bkz. recycling-fields.tsx başlığındaki gerekçe).
+ */
+function resolveRecyclingServicePayload(service: ServiceEntry) {
+  if (!isRecyclingCategory(service.category)) return {};
+  const quantityResult = parseRecyclingQuantity(service.recyclingQuantity);
+  return {
+    recyclingMaterialCategoryId: service.recyclingMaterialCategoryId || undefined,
+    recyclingMaterialSubtypeId: service.recyclingMaterialSubtypeId || undefined,
+    recyclingQuantity: quantityResult.ok ? quantityResult.value : undefined,
+    recyclingUnit: isWasteQuantityUnit(service.recyclingUnit) ? service.recyclingUnit : undefined,
+    recyclingMaterialCondition: isRecyclingMaterialCondition(service.recyclingMaterialCondition)
+      ? service.recyclingMaterialCondition
+      : undefined,
+    recyclingMaterialConditionNote:
+      service.recyclingMaterialCondition === "diger" ? service.recyclingMaterialConditionNote.trim() || undefined : undefined,
+    recyclingScopeOfWork: service.recyclingScopeOfWork.length > 0 ? service.recyclingScopeOfWork : undefined,
+    recyclingRequestedOperation: service.recyclingRequestedOperation || undefined,
+    recyclingWasteCode: service.recyclingWasteCodeUnknown ? undefined : service.recyclingWasteCode || undefined,
+    recyclingWasteCodeUnknown: service.recyclingWasteCodeUnknown,
+    // NOT: recyclingHazardous BİLEREK burada gönderilmiyor — job-store.ts#resolveRecyclingFields
+    // bunu HER ZAMAN resmi atık kodundan yeniden türetir, forma/istemciye asla güvenmez.
+    recyclingHazardProperties: service.recyclingHazardProperties.length > 0 ? service.recyclingHazardProperties : undefined,
+  };
+}
+
+/**
+ * `resolveRecyclingServicePayload` ile AYNI desen — Depolama'ya özel
+ * "Depolanacak Ürün Bilgileri" için. `storageProductType`,
+ * `resolveCustomsBrokerageServicePayload`in `customsProductType`'ıyla AYNI
+ * katalog+sentinel çözümlemesini kullanır.
+ *
+ * "Konteyner Depolama" BİLEREK AYRI bir dal: bu kategoride "Depolanacak
+ * Ürün Bilgileri" kartı hiç gösterilmez, storageProductType/Quantity/Unit/
+ * Tonnage HİÇ KULLANILMAZ (bir ilan birden fazla konteyner grubu
+ * taşıyabildiği için TEK değerli bu alanlar yetersiz — bkz. storage-
+ * container-catalog.ts'in kendi başlık dokümanındaki 3. tasarım notu) —
+ * aşağıdaki genel çözümleme (farklı ayrıştırma/doğrulama kuralları taşır)
+ * burada ÇALIŞTIRILMAZ, tüm konteyner verisi `storageContainerGroups`
+ * dizisinden `fromStorageContainerGroupsFields`e devredilir.
+ */
+function resolveStorageProductServicePayload(service: ServiceEntry) {
+  if (!isStorageOnlyLocationCategory(service.category)) return {};
+  if (isContainerStorageCategory(service.category)) {
+    return { storageContainerGroups: fromStorageContainerGroupsFields(service.storageContainerGroups) };
+  }
+  // NOT: `parseProductQuantity` DEĞİL — o yalnızca pozitif TAM SAYI kabul
+  // eder ("Ürün Adedi" içindir), ama Depolama'nın Miktar'ı birime (kg/ton/adet)
+  // bağlı olarak ondalıklı da olabilir (ör. "4,5 ton") — bkz.
+  // job-form-validation.ts#validateStorageProductFields'daki AYNI seçim
+  // (doğrulayıcı ile bu çözümleyici FARKLI parser kullanırsa, doğrulamadan
+  // geçen bir değer burada sessizce undefined'a düşebilirdi).
+  const quantityResult = parseProductTonnage(service.storageProductQuantity);
+  const tonnageRaw = service.storageProductTonnage.trim();
+  const tonnageResult = tonnageRaw.length > 0 ? parseProductTonnage(service.storageProductTonnage) : null;
+  const resolvedStorageProductType =
+    service.storageProductType === PRODUCT_TYPE_CUSTOM_VALUE
+      ? service.storageProductTypeCustomText.trim()
+      : service.storageProductType.trim();
+  return {
+    storageProductType: resolvedStorageProductType || undefined,
+    storageProductQuantity: quantityResult.ok ? quantityResult.value : undefined,
+    storageProductUnit: isRecyclingUnit(service.storageProductUnit) ? service.storageProductUnit : undefined,
+    storageProductTonnage: tonnageResult?.ok ? tonnageResult.value : undefined,
+  };
+}
+
+/**
+ * "Kimyasal Depolama / Tehlikeli Madde Depolama" görevi —
+ * `resolveStorageProductServicePayload` İLE AYNI desen, AYRI bir fonksiyon
+ * (iki alan grubu BAĞIMSIZ — bu iki kategoride HER İKİSİ de gösterilir,
+ * biri diğerinin YERİNE geçmez). Tehlikeli Madde Depolama'da soru hiç
+ * sorulmadığı için `storageHazardous` her zaman `true` gönderilir (job-
+ * store.ts#resolveStorageHazardFields zaten AYNI kuralı ikinci/sunucu
+ * tarafı güvenlik ağı olarak uygular — burası yalnızca formun kendi görünen
+ * davranışını yansıtır).
+ */
+function resolveStorageHazardServicePayload(service: ServiceEntry) {
+  if (!isHazardousStorageCategory(service.category)) return {};
+  const hazardous = isTehlikeliMaddeDepolamaCategory(service.category) || service.storageHazardous === "evet";
+  return {
+    storageHazardous: hazardous,
+    storageRiskGroups: hazardous && service.storageRiskGroups.length > 0 ? service.storageRiskGroups : undefined,
+  };
+}
+
+/**
+ * "Nakliye Çoklu Yük Grubu" görevi — Nakliye'nin TÜM "Yük Bilgileri"
+ * payload'unu (createJob/createJobsForOperation'ın productQuantity/
+ * productTonnage/productTonnageUnit/productType/nakliyeDetails/
+ * nakliyeCargoGroups anahtarlarının HEPSİ) TEK yerden üretir — Nakliye DIŞI
+ * kategorilerde hiçbir anahtar döndürmez (bu durumda resolveProductInfoPayload'ın
+ * kendi payı geçerli kalır, nakliyeDetails/nakliyeCargoGroups hiç gönderilmez).
+ * Gerçek grup dizisi (`fromCargoGroupsFields`) HER ZAMAN gönderilir;
+ * productQuantity/productTonnage/productTonnageUnit/productType VE
+ * nakliyeDetails.loadPreparationType/measurementInfo/containerTransport, İLK
+ * grubun bir KOPYASI olarak "aynalanır" (bkz. nakliye-cargo-groups.ts#
+ * deriveLegacyMirrorFields üstündeki doküman) — cargo-groups-farkında
+ * OLMAYAN eski okuyucular (job-listing-row.ts vb.) en azından ilk grubu
+ * doğru göstermeye devam eder. Araç Tercihi (vehiclePreference) yalnızca en
+ * az bir grup normal (Hayır) modundaysa korunur — TÜM gruplar Evet
+ * (konteyner) modundaysa formda kalmış eski bir değer bile olsa payload'a
+ * asla sızmaz (bkz. job-form-validation.ts#NakliyeDetailsFieldsForValidation.
+ * anyCargoGroupIsNormalMode İLE AYNI gerekçe/eşik).
+ */
+function resolveNakliyeYukBilgileriPayload(service: ServiceEntry): {
+  productQuantity?: number;
+  productTonnage?: number;
+  productTonnageUnit?: "ton" | "kg";
+  productType?: string;
+  nakliyeDetails?: NakliyeDetails;
+  nakliyeCargoGroups?: NakliyeCargoGroup[];
+} {
+  if (!isTransportationCategory(service.category)) return {};
+  const cargoGroups = fromCargoGroupsFields(service.nakliyeCargoGroups);
+  const mirror = deriveLegacyMirrorFields(cargoGroups);
+  const showVehiclePreference = cargoGroups.some((group) => group.containerTransport.status !== "evet");
+  const baseDetails = fromNakliyeDetailsFields(service.nakliyeDetails);
+  return {
+    productQuantity: mirror.productQuantity,
+    productTonnage: mirror.productTonnage,
+    productTonnageUnit: mirror.productTonnageUnit,
+    productType: mirror.productType,
+    nakliyeDetails: {
+      ...baseDetails,
+      vehiclePreference: showVehiclePreference ? baseDetails.vehiclePreference : undefined,
+      loadPreparationType: mirror.nakliyeLoadPreparationType,
+      loadPreparationCustomText: mirror.nakliyeLoadPreparationCustomText,
+      measurementInfo: mirror.nakliyeMeasurementInfo,
+      containerTransport: mirror.nakliyeContainerTransport,
+      hazmat: mirror.nakliyeHazmat,
+    },
+    nakliyeCargoGroups: cargoGroups,
+  };
+}
+
+
+/**
+ * "Depolama İlan Oluşturma" görevi: fotoğraf sayısı sınırlarının (bkz.
+ * photo-validation.ts#getMinPhotos/getMaxPhotos) yalnızca TEK hizmetli, GERÇEKTEN
+ * Depolama olan gönderimlerde genişletilmiş (4-15) aralığa geçmesi için TEK
+ * doğruluk kaynağı — çok-hizmetli bir operasyonda fotoğraflar TÜM hizmetler
+ * arasında PAYLAŞILDIĞI için (bkz. job-store.ts#createJobsForOperation'ın
+ * kendi, kasıtlı olarak DEĞİŞTİRİLMEMİŞ 1-10 kontrolü) bu durumda `undefined`
+ * döner, yani genel (1-10) aralık uygulanmaya devam eder.
+ */
+function getSingleServiceCategory(services: ServiceEntry[]): string | undefined {
+  return services.length === 1 ? services[0].category : undefined;
+}
+
 export function JobRequestForm() {
   const session = useSession();
   const router = useRouter();
@@ -401,6 +724,19 @@ export function JobRequestForm() {
 
   const [services, setServices] = useState<ServiceEntry[]>(() => [createEmptyServiceEntry()]);
   const [serviceErrors, setServiceErrors] = useState<Record<string, ServiceItemErrors>>({});
+  // Nakliye'nin Araç Tercihi/Yükün Hazırlanış Biçimi/Yükleme Yöntemi/Özel
+  // Taşıma Koşulları hataları (nakliyeErrors) BİLEREK `serviceErrors`in
+  // DIŞINDA, PARALEL bir yapıda tutulur — mevcut `ServiceItemErrors`/
+  // `validateServiceItem` tipini/gövdesini genişletmek yerine (zaten büyük,
+  // riskli bir yüzey), `localId`ye göre anahtarlanır, `serviceErrors` İLE
+  // AYNI "kart başına hata nesnesi" ilkesini izler.
+  const [nakliyeErrors, setNakliyeErrors] = useState<Record<string, NakliyeDetailsErrors>>({});
+  // "Nakliye Çoklu Yük Grubu" görevi — eski TEK karta ait `measurementErrors`
+  // yerine geçti: her Yük Grubu artık kendi ürün/konteyner/ölçü hatalarını
+  // KENDİ `id`sine göre anahtarlanmış bir alt nesnede taşır (bkz. job-form-
+  // validation.ts#validateNakliyeCargoGroups), bu yüzden ANAHTARLAMA iki
+  // seviyeli: önce hizmetin `localId`si, sonra grubun kendi `id`si.
+  const [cargoGroupErrors, setCargoGroupErrors] = useState<Record<string, Record<string, NakliyeCargoGroupErrors>>>({});
   // "Operasyon Detayları" form alanı kaldırıldı (bkz. görev tanımı) — bu
   // artık kullanıcı tarafından hiç değiştirilemeyen sabit bir değer, yalnızca
   // createJob/createJobsForOperation'ın hâlâ zorunlu kıldığı alanı doldurmak
@@ -494,11 +830,23 @@ export function JobRequestForm() {
     [getFacilitiesForDistrict],
   );
 
+  // `services`in GÜNCEL değerini, handlePhotosChange'in kararlılığını
+  // (aşağıdaki AYNI "KARARLI TUTULMASI ZORUNLU" gerekçesi) bozmadan okumak
+  // için — job-photo-upload.tsx#itemsRef ile AYNI desen.
+  const servicesRef = useRef(services);
+  useEffect(() => {
+    servicesRef.current = services;
+  });
+
   // useCallback İLE KARARLI TUTULMASI ZORUNLU: JobPhotoUpload, bu prop'u
   // kendi useEffect'inin bağımlılık dizisinde tutuyor (bkz. job-photo-upload.tsx).
   const handlePhotosChange = useCallback((nextPhotos: ReadyJobPhoto[]) => {
     setPhotos(nextPhotos);
-    if (nextPhotos.length >= MIN_PHOTOS) {
+    // Depolama (Depo Hizmetleri grubunun TAMAMI) TEK hizmet olarak
+    // gönderiliyorsa minimum 4 fotoğraf gerekir (bkz. photo-validation.ts#
+    // getMinPhotos) — genel MIN_PHOTOS (1) yalnızca diğer TÜM durumlarda
+    // (farklı kategori, ya da çok-hizmetli operasyon) geçerlidir.
+    if (nextPhotos.length >= getMinPhotos(getSingleServiceCategory(servicesRef.current))) {
       setSharedErrors((current) => {
         if (!("photoCount" in current)) return current;
         const next = { ...current };
@@ -584,6 +932,11 @@ export function JobRequestForm() {
     updateService(localId, { productTonnage: next });
     clearServiceFieldError(localId, "productTonnage");
   }
+  /** Birim değişince sayısal değere HİÇ dokunulmaz — kullanıcı arasında otomatik dönüşüm YAPILMAZ (bkz. görev tanımı). */
+  function handleServiceProductTonnageUnitChange(localId: string, next: string) {
+    updateService(localId, { productTonnageUnit: next });
+    clearServiceFieldError(localId, "productTonnageUnit");
+  }
   function handleServiceProductTypeChange(localId: string, next: string) {
     updateService(localId, { productType: next });
     clearServiceFieldError(localId, "productType");
@@ -599,6 +952,57 @@ export function JobRequestForm() {
     for (const field of Object.keys(patch) as (keyof CustomsBrokerageFieldValues)[]) {
       clearServiceFieldError(localId, field);
     }
+  }
+  /** RecyclingFields'ın tek `onChange(patch)` sözleşmesi — handleServiceCustomsFieldsChange ile AYNI desen. */
+  function handleServiceRecyclingFieldsChange(localId: string, patch: Partial<RecyclingFieldValues>) {
+    updateService(localId, patch);
+    for (const field of Object.keys(patch) as (keyof RecyclingFieldValues)[]) {
+      clearServiceFieldError(localId, field);
+    }
+  }
+  /** StorageProductFields'ın tek `onChange(patch)` sözleşmesi — handleServiceRecyclingFieldsChange ile AYNI desen. */
+  function handleServiceStorageFieldsChange(localId: string, patch: Partial<StorageProductFieldValues>) {
+    updateService(localId, patch);
+    for (const field of Object.keys(patch) as (keyof StorageProductFieldValues)[]) {
+      clearServiceFieldError(localId, field);
+    }
+  }
+  /** StorageHazardFields'ın tek `onChange(patch)` sözleşmesi — handleServiceStorageFieldsChange İLE AYNI desen. */
+  function handleServiceStorageHazardFieldsChange(localId: string, patch: Partial<StorageHazardFieldValues>) {
+    updateService(localId, patch);
+    for (const field of Object.keys(patch) as (keyof StorageHazardFieldValues)[]) {
+      clearServiceFieldError(localId, field);
+    }
+  }
+
+  /**
+   * StorageContainerGroupsFields'ın tek `onChange(nextGroups)` sözleşmesi —
+   * diğer hizmete-özel alan gruplarıyla AYNI desen — ama tekil bir `patch`
+   * yerine TÜM grup dizisini alır/değiştirir
+   * (bkz. storage-container-details-fields.tsx#StorageContainerGroupsFields'ın
+   * `onChange(nextGroups)` sözleşmesi). Durum "Dolu"dan "Boş"a değişince
+   * içeriği/Tehlikeli Madde=Hayır iken UN/IMO'yu/Tip≠Reefer iken sıcaklık-
+   * elektrik alanlarını CANLI temizleme bileşenin kendi onChange'i içinde
+   * zaten yapılır, burada ikinci bir temizleme gerekmez. Her değişiklikte
+   * bu servisin TÜM grup hatalarını temizler (granüler grup+alan bazlı takip
+   * yerine — bir sonraki gönderim denemesi gerçek hataları zaten yeniden
+   * üretir); kategori "Konteyner Depolama"dan başka bir değere değiştiğinde
+   * gruplar gönderim anında `resolveStorageProductServicePayload`/
+   * `resolveStorageProductFields` tarafından temizlenir (diğer tüm
+   * hizmete-özel alan gruplarıyla AYNI ilke — bkz. handleServiceCategoryChange).
+   */
+  function handleServiceContainerGroupsChange(localId: string, nextGroups: StorageContainerGroupFieldValues[]) {
+    updateService(localId, { storageContainerGroups: nextGroups });
+    setServiceErrors((current) => {
+      const entry = current[localId];
+      if (!entry?.storageContainerGroupErrors) return current;
+      const nextEntry = { ...entry };
+      delete nextEntry.storageContainerGroupErrors;
+      const next = { ...current };
+      if (Object.keys(nextEntry).length === 0) delete next[localId];
+      else next[localId] = nextEntry;
+      return next;
+    });
   }
 
   /**
@@ -794,12 +1198,32 @@ export function JobRequestForm() {
       locationMode: pickupPayload ? pickupPayload.locationMode : isCustomLocation ? "custom" : "catalog",
       productQuantity: service.productQuantity,
       productTonnage: service.productTonnage,
+      productTonnageUnit: service.productTonnageUnit,
       productType: service.productType,
       productTypeCustomText: service.productTypeCustomText,
       customsTransactionType: service.customsTransactionType,
       customsRequestedServices: service.customsRequestedServices,
       customsProductType: service.customsProductType,
       customsProductTypeCustomText: service.customsProductTypeCustomText,
+      recyclingMaterialCategoryId: service.recyclingMaterialCategoryId,
+      recyclingMaterialSubtypeId: service.recyclingMaterialSubtypeId,
+      recyclingQuantity: service.recyclingQuantity,
+      recyclingUnit: service.recyclingUnit,
+      recyclingMaterialCondition: service.recyclingMaterialCondition,
+      recyclingMaterialConditionNote: service.recyclingMaterialConditionNote,
+      recyclingScopeOfWork: service.recyclingScopeOfWork,
+      recyclingRequestedOperation: service.recyclingRequestedOperation,
+      recyclingWasteCode: service.recyclingWasteCode,
+      recyclingWasteCodeUnknown: service.recyclingWasteCodeUnknown,
+      recyclingHazardProperties: service.recyclingHazardProperties,
+      storageProductType: service.storageProductType,
+      storageProductTypeCustomText: service.storageProductTypeCustomText,
+      storageProductQuantity: service.storageProductQuantity,
+      storageProductUnit: service.storageProductUnit,
+      storageProductTonnage: service.storageProductTonnage,
+      storageContainerGroups: service.storageContainerGroups,
+      storageHazardous: service.storageHazardous,
+      storageRiskGroups: service.storageRiskGroups,
       ...resolveDeliveryLocationPayload(service),
     };
   }
@@ -811,24 +1235,68 @@ export function JobRequestForm() {
     }
   }
 
-  /** Kart SIRASINA göre ilk hatalı karta (kategori > başlık > açıklama > konum > tarihler sırasıyla) kaydırır/odaklar. */
+  /**
+   * Kart SIRASINA göre ilk hatalı karta (kategori > başlık > açıklama >
+   * ürün bilgileri > [Gümrük Müşavirliği/Geri Dönüşüm'e özel alanlar, varsa]
+   * > konum > tarihler sırasıyla) kaydırır/odaklar.
+   *
+   * DÜZELTME (kök neden): `CustomsBrokerageFields`/`RecyclingFields`, tıpkı
+   * `NakliyeLocationFields` gibi, kendi DOM id'lerini `${idPrefix}-${alan}`
+   * kuralıyla (bkz. `prefixedFieldId`) üretir — `serviceFieldId`in ürettiği
+   * `service-${alan}-${localId}` kalıbıyla ASLA eşleşmez. Bu iki alan grubu
+   * daha önce (yanlışlıkla) tek, genel `fieldOrder` dizisinin içinde
+   * `serviceFieldId` ile aranıyordu; bu yüzden bu iki kategoride bir
+   * doğrulama hatası oluştuğunda hedef eleman hiçbir zaman bulunamıyor,
+   * kaydırma/odaklama sessizce hiçbir şey yapmıyordu (hata metninin kendisi
+   * yine de görünüyordu, yalnızca kaydırma/odak eksikti). Çözüm: bu iki
+   * grup, Nakliye'nin pickup/delivery'siyle AYNI idPrefix tabanlı arama
+   * deseniyle, kendi AYRI alan listeleriyle kontrol edilir — üçü de artık
+   * TEK ortak `prefixedFieldId` yardımcısını kullanır, hiçbir kategoriye
+   * özel ayrı bir arama mantığı İCAT EDİLMEDİ. Diğer (genel/prefix'siz)
+   * alanların `serviceFieldId` üzerinden aranması ve sırası DEĞİŞMEDİ.
+   */
   function focusFirstServiceError(currentServices: ServiceEntry[], errorsByLocalId: Record<string, ServiceItemErrors>) {
-    const fieldOrder: Exclude<ServiceFieldName, "customFacilityName">[] = [
+    const beforeCategoryFieldsFieldOrder: Exclude<ServiceFieldName, "customFacilityName">[] = [
       "category",
       "title",
       "description",
       "productQuantity",
       "productTonnage",
+      "productTonnageUnit",
       "productType",
       "productTypeCustomText",
-      "customsTransactionType",
-      "customsProductType",
-      "customsProductTypeCustomText",
+    ];
+    const afterCategoryFieldsFieldOrder: Exclude<ServiceFieldName, "customFacilityName">[] = [
       "district",
       "workLocationType",
       "addressText",
       "workDate",
       "workEndDate",
+    ];
+    // Bkz. CustomsBrokerageFields'a geçilen `idPrefix={`customs-${service.localId}`}` —
+    // bu iki değer BİREBİR aynı kalmalı (yalnızca burada tekrar üretilir).
+    const customsFieldOrder: (keyof CustomsBrokerageFieldValues)[] = [
+      "customsTransactionType",
+      "customsProductType",
+      "customsProductTypeCustomText",
+    ];
+    // Bkz. RecyclingFields'a geçilen `idPrefix={`recycling-${service.localId}`}`.
+    const recyclingFieldOrder: (keyof RecyclingFieldValues)[] = [
+      "recyclingMaterialCategoryId",
+      "recyclingMaterialSubtypeId",
+      "recyclingQuantity",
+      "recyclingUnit",
+      "recyclingMaterialCondition",
+      "recyclingMaterialConditionNote",
+      "recyclingScopeOfWork",
+    ];
+    // Bkz. StorageProductFields'a geçilen `idPrefix={`storage-${service.localId}`}`.
+    const storageFieldOrder: (keyof StorageProductFieldValues)[] = [
+      "storageProductType",
+      "storageProductTypeCustomText",
+      "storageProductQuantity",
+      "storageProductUnit",
+      "storageProductTonnage",
     ];
     const deliveryFieldOrder = [
       "deliveryProvince",
@@ -843,14 +1311,42 @@ export function JobRequestForm() {
       // anahtarları burada, tarih/başlık gibi diğer alanlarla AYNI kart
       // içinde, workLocationType'tan ÖNCE kontrol edilir.
       if (itemErrors.province) {
-        const target = document.getElementById(nakliyeSideFieldId(`service-pickup-${service.localId}`, "province"));
+        const target = document.getElementById(prefixedFieldId(`service-pickup-${service.localId}`, "province"));
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         target?.focus({ preventScroll: true });
         return;
       }
-      const field = fieldOrder.find((key) => itemErrors[key]);
-      if (field) {
-        const target = document.getElementById(serviceFieldId(service.localId, field));
+      const beforeField = beforeCategoryFieldsFieldOrder.find((key) => itemErrors[key]);
+      if (beforeField) {
+        const target = document.getElementById(serviceFieldId(service.localId, beforeField));
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+        return;
+      }
+      const customsField = customsFieldOrder.find((key) => itemErrors[key]);
+      if (customsField) {
+        const target = document.getElementById(prefixedFieldId(`customs-${service.localId}`, customsField));
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+        return;
+      }
+      const recyclingField = recyclingFieldOrder.find((key) => itemErrors[key]);
+      if (recyclingField) {
+        const target = document.getElementById(prefixedFieldId(`recycling-${service.localId}`, recyclingField));
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+        return;
+      }
+      const storageField = storageFieldOrder.find((key) => itemErrors[key]);
+      if (storageField) {
+        const target = document.getElementById(prefixedFieldId(`storage-${service.localId}`, storageField));
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+        return;
+      }
+      const afterField = afterCategoryFieldsFieldOrder.find((key) => itemErrors[key]);
+      if (afterField) {
+        const target = document.getElementById(serviceFieldId(service.localId, afterField));
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         target?.focus({ preventScroll: true });
         return;
@@ -867,7 +1363,7 @@ export function JobRequestForm() {
               : deliveryField === "deliveryAddressText"
                 ? "addressText"
                 : "locationType";
-        const target = document.getElementById(nakliyeSideFieldId(`service-delivery-${service.localId}`, suffix));
+        const target = document.getElementById(prefixedFieldId(`service-delivery-${service.localId}`, suffix));
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         target?.focus({ preventScroll: true });
         return;
@@ -900,10 +1396,16 @@ export function JobRequestForm() {
     event.preventDefault();
     if (photosProcessing || customsDocumentsProcessing) return;
 
-    const nextSharedErrors = validateSharedOperationFields({ operationDetails, photoCount: photos.length });
+    const nextSharedErrors = validateSharedOperationFields({
+      operationDetails,
+      photoCount: photos.length,
+      singleServiceCategory: getSingleServiceCategory(services),
+    });
 
     const duplicateCategoryIds = findDuplicateServiceCategoryIds(services.map((s) => s.category));
     const nextServiceErrors: Record<string, ServiceItemErrors> = {};
+    const nextNakliyeErrors: Record<string, NakliyeDetailsErrors> = {};
+    const nextCargoGroupErrors: Record<string, Record<string, NakliyeCargoGroupErrors>> = {};
     for (let index = 0; index < services.length; index++) {
       const service = services[index];
       const itemErrors = validateServiceItem(buildServiceValidationFields(services, index));
@@ -918,17 +1420,42 @@ export function JobRequestForm() {
         itemErrors.category = "Bu hizmet zaten seçildi.";
       }
       if (Object.keys(itemErrors).length > 0) nextServiceErrors[service.localId] = itemErrors;
+
+      if (isTransportationCategory(service.category)) {
+        const showVehiclePreference = service.nakliyeCargoGroups.some((group) => !isNakliyeContainerProductType(group.productType));
+        const detailErrors = validateNakliyeDetails({ ...service.nakliyeDetails, anyCargoGroupIsNormalMode: showVehiclePreference });
+        if (Object.keys(detailErrors).length > 0) nextNakliyeErrors[service.localId] = detailErrors;
+
+        const cargoGroupsResult = validateNakliyeCargoGroups(service.nakliyeCargoGroups);
+        if (cargoGroupsResult.hasErrors) nextCargoGroupErrors[service.localId] = cargoGroupsResult.groupErrors;
+      }
     }
 
     setSharedErrors(nextSharedErrors);
     setServiceErrors(nextServiceErrors);
+    setNakliyeErrors(nextNakliyeErrors);
+    setCargoGroupErrors(nextCargoGroupErrors);
     setSubmitError(null);
 
     const hasSharedErrors = Object.keys(nextSharedErrors).length > 0;
     const hasServiceErrors = Object.keys(nextServiceErrors).length > 0;
-    if (hasSharedErrors || hasServiceErrors) {
+    const hasNakliyeErrors = Object.keys(nextNakliyeErrors).length > 0 || Object.keys(nextCargoGroupErrors).length > 0;
+    if (hasSharedErrors || hasServiceErrors || hasNakliyeErrors) {
       if (hasServiceErrors) focusFirstServiceError(services, nextServiceErrors);
-      else focusFirstSharedError(nextSharedErrors);
+      else if (!hasSharedErrors) {
+        // Yük Grubu hataları — daha SPESİFİK/YENİ hedef (kart #2'nin kendisi)
+        // — job-üstü Taşıma Koşulları hatalarından (nakliye-details anchor'ı)
+        // ÖNCELİKLİDİR, çünkü artık çok daha sık karşılaşılan durum bu.
+        const cargoGroupIndex = services.findIndex((s) => nextCargoGroupErrors[s.localId]);
+        if (cargoGroupIndex >= 0) {
+          document.getElementById(`nakliye-cargo-groups-${services[cargoGroupIndex].localId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else {
+          const firstIndex = services.findIndex((s) => nextNakliyeErrors[s.localId]);
+          if (firstIndex >= 0) {
+            document.getElementById(`nakliye-details-${services[firstIndex].localId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        }
+      } else focusFirstSharedError(nextSharedErrors);
       return;
     }
 
@@ -976,6 +1503,10 @@ export function JobRequestForm() {
           workEndDate: service.workEndDate,
           ...resolveProductInfoPayload(service),
           ...resolveCustomsBrokerageServicePayload(service),
+          ...resolveRecyclingServicePayload(service),
+          ...resolveStorageProductServicePayload(service),
+          ...resolveStorageHazardServicePayload(service),
+          ...resolveNakliyeYukBilgileriPayload(service),
           ...deliveryPayload,
           operationDetails,
           photos,
@@ -1009,18 +1540,23 @@ export function JobRequestForm() {
           );
         }
 
-        // Supabase Geçişi Faz 2 — bayrak kapalıyken bu blok hiç çalışmaz,
-        // bugünkü davranış birebir aynı kalır. Açıkken localStorage yazımı
-        // BAŞARILI olduktan SONRA beklenir (senkron); başarısız olursa yerel
-        // ilan SİLİNMEZ/geri alınmaz, gezinme ENGELLENMEZ — yalnızca hedef
-        // sayfaya "senkronUyarisi=1" eklenir (bkz. job-detail-content.tsx) ve
-        // hata, gizli hiçbir Supabase bilgisi içermeden console'a yazılır.
+        // Kritik İlan Senkronizasyonu görevi — bayrak kapalıyken bu blok hiç
+        // çalışmaz, bugünkü davranış birebir aynı kalır. Açıkken localStorage
+        // yazımı BAŞARILI olduktan SONRA beklenir (senkron); başarısız olursa
+        // yerel ilan SİLİNMEZ/geri alınmaz, gezinme ENGELLENMEZ — ama artık
+        // yalnızca geçici bir URL bayrağı DEĞİL, ilanın KENDİSİNE KALICI
+        // olarak işlenir (bkz. types.ts#Job.supabaseSyncFailedAt) — sayfa
+        // yenilense/başka ekrana geçilse bile job-requests-panel.tsx artık
+        // "Admin Onayı Bekleniyor" YERİNE gerçek durumu ("Senkronizasyon
+        // Başarısız") gösterir. Hata, gizli hiçbir Supabase bilgisi
+        // içermeden console'a da yazılır.
         let syncWarning = false;
         if (isSupabaseJobSyncEnabled()) {
           const syncResult = await syncJobToSupabase(result.job);
           if (!syncResult.ok) {
             syncWarning = true;
             console.error(`Supabase ilan senkronizasyonu başarısız (job ${result.job.id}):`, syncResult.error);
+            markJobSupabaseSyncFailed(result.job.id, syncResult.error);
           }
         }
 
@@ -1089,6 +1625,10 @@ export function JobRequestForm() {
               locationMode: pickupPayload ? pickupPayload.locationMode : isCustomLocation ? "custom" : "catalog",
               ...resolveProductInfoPayload(service),
               ...resolveCustomsBrokerageServicePayload(service),
+              ...resolveRecyclingServicePayload(service),
+              ...resolveStorageProductServicePayload(service),
+              ...resolveStorageHazardServicePayload(service),
+              ...resolveNakliyeYukBilgileriPayload(service),
               ...deliveryPayload,
             };
           }),
@@ -1103,16 +1643,23 @@ export function JobRequestForm() {
           submitFacilityCandidateBestEffort(candidate.rawText, candidate.province, candidate.district, candidate.source);
         }
 
-        // Supabase Geçişi Faz 2 — tek hizmet dalıyla AYNI ilke (bkz. yukarıdaki
-        // yorum): bayrak kapalıyken çalışmaz, açıkken localStorage yazımından
-        // SONRA beklenir, başarısız olursa hiçbir yerel ilan silinmez/geri
-        // alınmaz, yalnızca hedef sayfaya "senkronUyarisi=1" eklenir.
+        // Kritik İlan Senkronizasyonu görevi — tek hizmet dalıyla AYNI ilke
+        // (bkz. yukarıdaki yorum): bayrak kapalıyken çalışmaz, açıkken
+        // localStorage yazımından SONRA beklenir, başarısız olursa hiçbir
+        // yerel ilan silinmez/geri alınmaz. `create_operation_with_jobs` TEK
+        // bir RPC olduğu için başarısızlık HEPSİNİ birden etkiler — bu yüzden
+        // operasyonun HER kardeş ilanı ayrı ayrı kalıcı olarak işaretlenir
+        // (bkz. types.ts#Job.supabaseSyncFailedAt), tek hizmet dalındaki AYNI
+        // mantık.
         let syncWarning = false;
         if (isSupabaseJobSyncEnabled()) {
           const syncResult = await syncOperationToSupabase(result.jobs, result.operationId, provinceName, operationDetails);
           if (!syncResult.ok) {
             syncWarning = true;
             console.error(`Supabase operasyon senkronizasyonu başarısız (operation ${result.operationId}):`, syncResult.error);
+            for (const siblingJob of result.jobs) {
+              markJobSupabaseSyncFailed(siblingJob.id, syncResult.error);
+            }
           }
         }
 
@@ -1134,7 +1681,35 @@ export function JobRequestForm() {
     }
   }
 
-  const publishLabel = services.length === 1 ? "İlanı Yayınla" : `${services.length} Hizmet İlanını Yayınla`;
+  // Depolama (Depo Hizmetleri grubunun TAMAMI) TEK hizmet olarak
+  // gönderildiğinde buton metni "İlanı Onaya Gönder" olur — bkz. görev
+  // tanımı. Diğer TÜM kategoriler (ve çok-hizmetli operasyonlar, Depolama
+  // içerseler bile) mevcut "İlanı Yayınla" metnini AYNEN korur; bu buton
+  // gerçek moderasyon durumunu (her yeni ilan zaten "pending_review" başlar,
+  // bkz. job-store.ts) DEĞİŞTİRMEZ, yalnızca Depolama'ya özel metni gösterir.
+  const isSingleStorageSubmission = services.length === 1 && isStorageOnlyLocationCategory(services[0].category);
+  // Nakliye Yeniden Tasarımı görevi (görsel düzeltme turu) — paylaşılan
+  // Fotoğraflar bölümü yalnızca operasyondaki HER hizmet Nakliye ise 7
+  // numaralı SectionCard görünümüne geçer; karışık/diğer kategori
+  // operasyonlarında (ör. Depolama + Nakliye) eski, sarmalanmamış görünüm
+  // AYNEN korunur — "diğer hizmetlere dokunma" kuralı bu şekilde tutulur.
+  const isNakliyeOnlyOperation = services.every((service) => isTransportationCategory(service.category));
+  // "Konteyner Taşımalarında Araç Tercihini Gizleme" görevi — paylaşılan
+  // Fotoğraflar kartı per-service map'in DIŞINDA olduğu için kendi numarasını
+  // ana (ilk) hizmetin Konteyner Taşıması durumuna göre hesaplar (bu formun
+  // "paylaşılan alanlar ana hizmeti izler" kuralıyla AYNI ilke — bkz.
+  // mainLocationLabel). Çok-Nakliye-servisli bir operasyonda servisler
+  // arasında Konteyner durumu farklı olabilir; bu, yalnızca bu TEK paylaşılan
+  // kartın numarası için bir yaklaşımdır, her servisin KENDİ Araç Tercihi
+  // görünürlüğü hâlâ bağımsız olarak `showVehiclePreference` ile yönetilir.
+  const nakliyeSharedShowsVehiclePreference =
+    services[0]?.nakliyeCargoGroups.some((group) => !isNakliyeContainerProductType(group.productType)) ?? true;
+  const nakliyePhotosCardNumber = nakliyeSharedShowsVehiclePreference ? 6 : 5;
+  const publishLabel = isSingleStorageSubmission
+    ? "İlanı Onaya Gönder"
+    : services.length === 1
+      ? "İlanı Yayınla"
+      : `${services.length} Hizmet İlanını Yayınla`;
   const summaryLabel = services.length === 1 ? "1 Hizmet İlanı Yayınlanacak" : `${services.length} Hizmet İlanı Yayınlanacak`;
 
   if (mode === "preview") {
@@ -1208,40 +1783,83 @@ export function JobRequestForm() {
                         <dd className="text-sm text-foreground">{locationLabel}</dd>
                       </div>
                     )}
-                    {requiresProductInfo(service.category) && (
-                      <>
-                        <div>
-                          <dt className="text-xs font-medium text-muted-foreground">Ürün Adedi</dt>
-                          <dd className="text-sm text-foreground">
-                            {(() => {
-                              const quantityResult = parseProductQuantity(service.productQuantity);
-                              return quantityResult.ok ? formatProductQuantity(quantityResult.value) : "-";
-                            })()}
-                          </dd>
-                        </div>
-                        {(() => {
-                          const tonnageResult = parseProductTonnage(service.productTonnage);
-                          if (!tonnageResult.ok) return null;
-                          return (
-                            <div>
-                              <dt className="text-xs font-medium text-muted-foreground">Tonaj</dt>
-                              <dd className="text-sm text-foreground">{formatProductTonnage(tonnageResult.value)}</dd>
-                            </div>
-                          );
-                        })()}
-                        <div>
-                          <dt className="text-xs font-medium text-muted-foreground">Ürün Cinsi</dt>
-                          <dd className="text-sm text-foreground">
-                            {/* DÜZELTME (Y1, veritabanı geçişi öncesi denetim): "Listede Yok,
-                                Kendim Gireceğim" seçilince ham sentinel değer (PRODUCT_TYPE_CUSTOM_VALUE)
-                                değil, kullanıcının girdiği özel metin gösterilir — Gümrük
-                                Müşavirliği bloğundaki (aşağıda) AYNI ternary deseni. */}
-                            {(service.productType === PRODUCT_TYPE_CUSTOM_VALUE
-                              ? service.productTypeCustomText
-                              : service.productType) || "-"}
-                          </dd>
-                        </div>
-                      </>
+                    {isTransportationCategory(service.category) ? (
+                      // "Nakliye Çoklu Yük Grubu" görevi — Nakliye'nin Ürün
+                      // Adedi/Ağırlık/Cinsi artık `service.productQuantity`/vb.
+                      // (Nakliye için hiç kullanılmayan, eski üst seviye
+                      // alanlar) DEĞİL, HER Yük Grubu'nun kendi kopyasında.
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs font-medium text-muted-foreground">Yük Bilgileri</dt>
+                        <dd className="text-sm text-foreground">
+                          <ul className="flex flex-col gap-1">
+                            {service.nakliyeCargoGroups.map((group, groupIndex) => {
+                              const isGroupContainerMode = isNakliyeContainerProductType(group.productType);
+                              const groupTonnageResult = parseProductTonnage(group.productTonnage);
+                              if (isGroupContainerMode) {
+                                return (
+                                  <li key={group.id}>
+                                    <span className="font-medium">Yük Grubu {groupIndex + 1}:</span> Konteyner Taşıması
+                                    {group.containerQuantity ? ` • ${group.containerQuantity} adet` : ""}
+                                    {group.containerLoadStatus === "dolu" ? " • Dolu" : group.containerLoadStatus === "bos" ? " • Boş" : ""}
+                                    {groupTonnageResult.ok
+                                      ? ` • ${formatProductTonnage(groupTonnageResult.value, isProductTonnageUnit(group.productTonnageUnit) ? group.productTonnageUnit : undefined)}`
+                                      : ""}
+                                  </li>
+                                );
+                              }
+                              const quantityResult = parseProductQuantity(group.productQuantity);
+                              const tonnageResult = groupTonnageResult;
+                              const productLabel =
+                                (group.productType === PRODUCT_TYPE_CUSTOM_VALUE ? group.productTypeCustomText : group.productType) || "-";
+                              return (
+                                <li key={group.id}>
+                                  <span className="font-medium">Yük Grubu {groupIndex + 1}:</span> {productLabel}
+                                  {quantityResult.ok ? ` • ${formatProductQuantity(quantityResult.value)}` : ""}
+                                  {tonnageResult.ok
+                                    ? ` • ${formatProductTonnage(tonnageResult.value, isProductTonnageUnit(group.productTonnageUnit) ? group.productTonnageUnit : undefined)}`
+                                    : ""}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </dd>
+                      </div>
+                    ) : (
+                      requiresProductInfo(service.category) && (
+                        <>
+                          <div>
+                            <dt className="text-xs font-medium text-muted-foreground">Ürün Adedi</dt>
+                            <dd className="text-sm text-foreground">
+                              {(() => {
+                                const quantityResult = parseProductQuantity(service.productQuantity);
+                                return quantityResult.ok ? formatProductQuantity(quantityResult.value) : "-";
+                              })()}
+                            </dd>
+                          </div>
+                          {(() => {
+                            const tonnageResult = parseProductTonnage(service.productTonnage);
+                            if (!tonnageResult.ok) return null;
+                            return (
+                              <div>
+                                <dt className="text-xs font-medium text-muted-foreground">Tonaj</dt>
+                                <dd className="text-sm text-foreground">{formatProductTonnage(tonnageResult.value)}</dd>
+                              </div>
+                            );
+                          })()}
+                          <div>
+                            <dt className="text-xs font-medium text-muted-foreground">Ürün Cinsi</dt>
+                            <dd className="text-sm text-foreground">
+                              {/* DÜZELTME (Y1, veritabanı geçişi öncesi denetim): "Listede Yok,
+                                  Kendim Gireceğim" seçilince ham sentinel değer (PRODUCT_TYPE_CUSTOM_VALUE)
+                                  değil, kullanıcının girdiği özel metin gösterilir — Gümrük
+                                  Müşavirliği bloğundaki (aşağıda) AYNI ternary deseni. */}
+                              {(service.productType === PRODUCT_TYPE_CUSTOM_VALUE
+                                ? service.productTypeCustomText
+                                : service.productType) || "-"}
+                            </dd>
+                          </div>
+                        </>
+                      )
                     )}
                     {isCustomsBrokerageCategory(service.category) && (
                       <>
@@ -1267,6 +1885,119 @@ export function JobRequestForm() {
                             </dd>
                           </div>
                         )}
+                      </>
+                    )}
+                    {isRecyclingCategory(service.category) && (
+                      <>
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">Talep Edilen İşlem</dt>
+                          <dd className="text-sm text-foreground">
+                            {getRecyclingRequestedOperationLabel(service.recyclingRequestedOperation) ?? "-"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">Atık Türü</dt>
+                          <dd className="text-sm text-foreground">
+                            {getRecyclingMaterialTypeLabel(service.recyclingMaterialCategoryId) ?? "-"}
+                            {(() => {
+                              const detail = getRecyclingMaterialTypeDetailLine(
+                                service.recyclingMaterialCategoryId,
+                                service.recyclingMaterialSubtypeId,
+                              );
+                              return detail ? ` — ${detail}` : "";
+                            })()}
+                          </dd>
+                        </div>
+                        {service.recyclingWasteCodeUnknown ? (
+                          <div>
+                            <dt className="text-xs font-medium text-muted-foreground">Atık Kodu</dt>
+                            <dd className="text-sm text-warning">Bilinmiyor — admin incelemesi bekleniyor</dd>
+                          </div>
+                        ) : service.recyclingWasteCode ? (
+                          <>
+                            <div>
+                              <dt className="text-xs font-medium text-muted-foreground">Atık Kodu</dt>
+                              <dd className="text-sm text-foreground">
+                                {formatWasteCodeForDisplay(service.recyclingWasteCode)}
+                                {getWasteCodeEntry(service.recyclingWasteCode)
+                                  ? ` — ${getWasteCodeEntry(service.recyclingWasteCode)!.description}`
+                                  : ""}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs font-medium text-muted-foreground">Tehlike Durumu</dt>
+                              <dd className="text-sm font-medium text-foreground">
+                                {deriveWasteCodeHazardous(service.recyclingWasteCode) ? "Tehlikeli" : "Tehlikesiz"}
+                              </dd>
+                            </div>
+                            {service.recyclingHazardProperties.length > 0 && (
+                              <div className="sm:col-span-2">
+                                <dt className="text-xs font-medium text-muted-foreground">Tehlike Özelliği</dt>
+                                <dd className="text-sm text-foreground">
+                                  {service.recyclingHazardProperties.map((id) => getWasteHazardPropertyLabel(id) ?? id).join(", ")}
+                                </dd>
+                              </div>
+                            )}
+                          </>
+                        ) : null}
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">Tahmini Miktar</dt>
+                          <dd className="text-sm text-foreground">
+                            {(() => {
+                              const quantityResult = parseRecyclingQuantity(service.recyclingQuantity);
+                              return quantityResult.ok && service.recyclingUnit
+                                ? formatRecyclingQuantity(quantityResult.value, service.recyclingUnit)
+                                : "-";
+                            })()}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">Malzeme Durumu</dt>
+                          <dd className="text-sm text-foreground">
+                            {getRecyclingMaterialConditionLabel(service.recyclingMaterialCondition) ?? "-"}
+                          </dd>
+                        </div>
+                        {service.recyclingScopeOfWork.length > 0 && (
+                          <div className="sm:col-span-2">
+                            <dt className="text-xs font-medium text-muted-foreground">Hizmet Kapsamı</dt>
+                            <dd className="text-sm text-foreground">
+                              {getRecyclingScopeOfWorkLabels(service.recyclingScopeOfWork).join(", ")}
+                            </dd>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {isStorageOnlyLocationCategory(service.category) && (
+                      <>
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">Ürün Cinsi</dt>
+                          <dd className="text-sm text-foreground">
+                            {(service.storageProductType === PRODUCT_TYPE_CUSTOM_VALUE
+                              ? service.storageProductTypeCustomText
+                              : service.storageProductType) || "-"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">Miktar</dt>
+                          <dd className="text-sm text-foreground">
+                            {(() => {
+                              const quantityResult = parseProductTonnage(service.storageProductQuantity);
+                              return quantityResult.ok && service.storageProductUnit
+                                ? formatRecyclingQuantity(quantityResult.value, service.storageProductUnit)
+                                : "-";
+                            })()}
+                          </dd>
+                        </div>
+                        {(() => {
+                          const tonnageResult = parseProductTonnage(service.storageProductTonnage);
+                          if (!tonnageResult.ok) return null;
+                          return (
+                            <div>
+                              <dt className="text-xs font-medium text-muted-foreground">Toplam Tonaj</dt>
+                              <dd className="text-sm text-foreground">{formatProductTonnage(tonnageResult.value)}</dd>
+                            </div>
+                          );
+                        })()}
                       </>
                     )}
                     {isNakliye && deliveryPayload ? (
@@ -1341,6 +2072,9 @@ export function JobRequestForm() {
               {submitting ? "İlan oluşturuluyor..." : publishLabel}
             </button>
           </div>
+          {isSingleStorageSubmission && (
+            <p className="text-right text-xs text-muted-foreground">İlanınız admin onayından sonra yayımlanacaktır.</p>
+          )}
         </div>
       </PageCardShell>
     );
@@ -1352,6 +2086,7 @@ export function JobRequestForm() {
       <div className="flex flex-col gap-4">
         {services.map((service, index) => {
           const itemErrors = serviceErrors[service.localId] ?? {};
+          const itemNakliyeErrors = nakliyeErrors[service.localId] ?? {};
           const disabledCategoryIds = otherSelectedCategoryIds(service.localId);
           const isMain = index === 0;
           const isStorageCard = isStorageOnlyLocationCategory(service.category);
@@ -1384,6 +2119,260 @@ export function JobRequestForm() {
           const productTypeCustomTextFieldId = serviceFieldId(service.localId, "productTypeCustomText");
           const showProductFields = requiresProductInfo(service.category);
           const tonnageRequiredForCard = isTonnageRequired(service.category);
+
+          if (isNakliyeCard) {
+            const nakliyeDetails = service.nakliyeDetails;
+            // "Nakliye Çoklu Yük Grubu" + "Konteyner Tetikleyicisi Ürün/Yük
+            // Cinsi'ne Taşındı" görevleri — job seviyesindeki nakliyeDetails
+            // artık YALNIZCA Araç Tercihi/Yükleme Yöntemi taşır
+            // (loadPreparationType/measurement/containerTransport/hazmat
+            // tamamen Yük Grubu'na taşındı), bu yüzden dal-değişimine bağlı
+            // BİDİRECTİONAL temizleme mantığına burada artık gerek YOK — o
+            // mantık artık nakliye-cargo-group-fields.tsx#NakliyeCargoGroupCard'ın
+            // KENDİ handleProductTypeChange'inde, grup başına uygulanır.
+            const patchNakliyeDetails = (patch: Partial<NakliyeDetailsFieldValues>) => {
+              updateService(service.localId, { nakliyeDetails: { ...nakliyeDetails, ...patch } });
+            };
+            const itemCargoGroupErrors = cargoGroupErrors[service.localId] ?? {};
+            // "Konteyner Taşımalarında Araç Tercihini Gizleme" görevi hâlâ
+            // geçerli — ama artık TÜM Yük Gruplarına bakar: en az bir grup
+            // hâlâ normal (Hayır) modundaysa Araç Tercihi gösterilir (bkz.
+            // job-form-validation.ts#NakliyeDetailsFieldsForValidation.
+            // anyCargoGroupIsNormalMode üstündeki AYNI gerekçe).
+            const showVehiclePreference = service.nakliyeCargoGroups.some((group) => !isNakliyeContainerProductType(group.productType));
+            // Bölüm numaraları hem Konteyner hem Araç Tercihi görünürlüğüne
+            // göre kesintisiz yeniden hesaplanır — görev talimatı: "Sonraki
+            // numaralı bölümleri ... ardışık biçimde yeniden numaralandır"
+            // ve "bölüm numarası boşluğu veya atlama oluşmasın." Eskiden
+            // ayrı bir "3 — Tehlikeli Madde / ADR" kartı vardı ("Konteyner
+            // Tetikleyicisi Ürün/Yük Cinsi'ne Taşındı" göreviyle TAMAMEN
+            // kaldırıldı, ADR artık her Yük Grubu'nun kendi kartının altında)
+            // — bu yüzden sonraki TÜM numaralar bir kayar.
+            const shipmentPlanCardNumber = 3;
+            const vehiclePreferenceCardNumber = 4;
+            const yuklemeTeslimatCardNumber = showVehiclePreference ? 5 : 4;
+            const removeButton = !isMain && (
+              <button
+                type="button"
+                onClick={() => handleRemoveService(service.localId)}
+                aria-label="Bu hizmeti kaldır"
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Kaldır
+              </button>
+            );
+            return (
+              <div key={service.localId} className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {isMain ? "Ana Hizmet" : "Ek Hizmet"}
+                  </span>
+                  {removeButton}
+                </div>
+
+                <NakliyeSectionCard number={1} title="Temel Bilgiler">
+                  <div className="grid gap-4 sm:grid-cols-10">
+                    <div className="sm:col-span-3">
+                      <label htmlFor={categoryFieldId} className="text-sm font-medium text-foreground">
+                        Hizmet Kategorisi
+                      </label>
+                      <select
+                        id={categoryFieldId}
+                        value={service.category}
+                        onChange={(event) => handleServiceCategoryChange(service.localId, event.target.value)}
+                        aria-invalid={itemErrors.category ? true : undefined}
+                        aria-describedby={itemErrors.category ? `${categoryFieldId}-error` : undefined}
+                        className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                          itemErrors.category ? "border-danger" : "border-border"
+                        }`}
+                      >
+                        <option value="">Kategori seçiniz</option>
+                        {SERVICE_CATEGORY_GROUPS.map((group) => (
+                          <optgroup key={group.id} label={group.label}>
+                            {group.categories.map((item) => (
+                              <option key={item.id} value={item.id} disabled={disabledCategoryIds.has(item.id)}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      {itemErrors.category && (
+                        <p id={`${categoryFieldId}-error`} className="mt-2 text-sm text-danger">
+                          {itemErrors.category}
+                        </p>
+                      )}
+                    </div>
+                    <div className="sm:col-span-7">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <label htmlFor={titleFieldId} className="text-sm font-medium text-foreground">
+                          İlan Başlığı
+                        </label>
+                        <span className="text-xs text-muted-foreground">{service.title.length} / 80</span>
+                      </div>
+                      <input
+                        id={titleFieldId}
+                        type="text"
+                        value={service.title}
+                        onChange={(event) => handleServiceTitleChange(service.localId, event.target.value)}
+                        maxLength={80}
+                        aria-invalid={itemErrors.title ? true : undefined}
+                        aria-describedby={itemErrors.title ? `${titleFieldId}-error` : undefined}
+                        placeholder="Örnek: Gebze'deki Sahadan Depoya Paletli Yük Nakliyesi"
+                        className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                          itemErrors.title ? "border-danger" : "border-border"
+                        }`}
+                      />
+                      {itemErrors.title && (
+                        <p id={`${titleFieldId}-error`} className="mt-2 text-sm text-danger">
+                          {itemErrors.title}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label htmlFor={descriptionFieldId} className="text-sm font-medium text-foreground">
+                      Hizmete Özel Açıklama
+                    </label>
+                    <textarea
+                      id={descriptionFieldId}
+                      value={service.description}
+                      onChange={(event) => handleServiceDescriptionChange(service.localId, event.target.value)}
+                      maxLength={1000}
+                      rows={3}
+                      aria-invalid={itemErrors.description ? true : undefined}
+                      aria-describedby={itemErrors.description ? `${descriptionFieldId}-error` : undefined}
+                      placeholder="Bu hizmete özel iş kapsamını ve beklentilerinizi açıklayın."
+                      className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                        itemErrors.description ? "border-danger" : "border-border"
+                      }`}
+                    />
+                    {itemErrors.description ? (
+                      <p id={`${descriptionFieldId}-error`} className="mt-2 text-sm text-danger">
+                        {itemErrors.description}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Başlık ve açıklamaya firma/tesis adı, açık adres, telefon veya e-posta yazmayın — bu bilgiler
+                        yalnızca teklif kabul edildikten sonra paylaşılabilir.
+                      </p>
+                    )}
+                  </div>
+                </NakliyeSectionCard>
+
+                <NakliyeSectionCard number={2} title="Yük Bilgileri">
+                  <div id={`nakliye-cargo-groups-${service.localId}`}>
+                    <NakliyeCargoGroupsFields
+                      idPrefix={`nakliye-cargo-${service.localId}`}
+                      groups={service.nakliyeCargoGroups}
+                      errors={itemCargoGroupErrors}
+                      onChange={(nextGroups) => updateService(service.localId, { nakliyeCargoGroups: nextGroups })}
+                    />
+                  </div>
+                </NakliyeSectionCard>
+
+                <NakliyeSectionCard number={shipmentPlanCardNumber} title="Taşıma Planı">
+                  <div id={`nakliye-details-${service.localId}`}>
+                    <ShipmentPlanFields
+                      idPrefix={`nakliye-plan-${service.localId}`}
+                      workDate={service.workDate}
+                      workEndDate={service.workEndDate}
+                      onWorkDateChange={(next) => handleServiceWorkDateChange(service.localId, next)}
+                      onWorkEndDateChange={(next) => handleServiceWorkEndDateChange(service.localId, next)}
+                      workDateError={itemErrors.workDate}
+                      workEndDateError={itemErrors.workEndDate}
+                      todayLocalDate={todayLocalDate}
+                    />
+                  </div>
+                </NakliyeSectionCard>
+
+                {showVehiclePreference && (
+                  <NakliyeSectionCard number={vehiclePreferenceCardNumber} title="Araç Tercihi">
+                    <VehiclePreferenceFields idPrefix={`nakliye-vehicle-${service.localId}`} values={nakliyeDetails} onChange={patchNakliyeDetails} />
+                    {itemNakliyeErrors.vehiclePreference && (
+                      <p className="mt-2 text-sm text-danger">{itemNakliyeErrors.vehiclePreference}</p>
+                    )}
+                  </NakliyeSectionCard>
+                )}
+
+                <NakliyeSectionCard number={yuklemeTeslimatCardNumber} title="Yükleme ve Teslimat">
+                  {!isMain && !isStorageCard && (
+                    <label className="mb-4 flex items-center gap-2 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={service.useMainLocation}
+                        onChange={(event) => handleServiceUseMainLocationChange(service.localId, event.target.checked)}
+                        className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      />
+                      Ana hizmetle aynı lokasyon
+                    </label>
+                  )}
+                  {usingMainLocation ? (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Bu hizmet, ana hizmetin lokasyonunu kullanacak: {services[0].district || "İlçe seçilmedi"}
+                      {mainLocationLabel ? ` / ${mainLocationLabel}` : ""}.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-md border border-border p-3">
+                          <p className="text-sm font-semibold text-foreground">Yükleme (Nereden)</p>
+                          <div className="mt-3">
+                            <NakliyeLocationFields
+                              idPrefix={`service-pickup-${service.localId}`}
+                              manualValue={PICKUP_MANUAL_LOCATION_VALUE}
+                              values={{
+                                provinceCode: service.provinceCode,
+                                district: service.district,
+                                facilityId: service.facilityId,
+                                customFacilityName: service.otherFacilityText,
+                                addressText: service.addressText,
+                              }}
+                              errors={{
+                                province: itemErrors.province,
+                                district: itemErrors.district,
+                                locationType: itemErrors.workLocationType,
+                                addressText: itemErrors.addressText,
+                              }}
+                              onChange={(patch) => handleServicePickupChange(service.localId, patch)}
+                            />
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-border p-3">
+                          <p className="text-sm font-semibold text-foreground">Teslimat (Nereye)</p>
+                          <div className="mt-3">
+                            <NakliyeLocationFields
+                              idPrefix={`service-delivery-${service.localId}`}
+                              manualValue={DELIVERY_MANUAL_LOCATION_VALUE}
+                              values={{
+                                provinceCode: service.deliveryProvinceCode,
+                                district: service.deliveryDistrict,
+                                facilityId: service.deliveryFacilityId,
+                                customFacilityName: service.deliveryOtherFacilityText,
+                                addressText: service.deliveryAddressText,
+                              }}
+                              errors={{
+                                province: itemErrors.deliveryProvince,
+                                district: itemErrors.deliveryDistrict,
+                                locationType: itemErrors.deliveryLocationType,
+                                addressText: itemErrors.deliveryAddressText,
+                              }}
+                              onChange={(patch) => handleServiceDeliveryChange(service.localId, patch)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                        <LoadingMethodField idPrefix={`nakliye-loading-${service.localId}`} values={nakliyeDetails} onChange={patchNakliyeDetails} customTextError={itemNakliyeErrors.loadingMethodCustomText} />
+                      </div>
+                    </>
+                  )}
+                </NakliyeSectionCard>
+              </div>
+            );
+          }
 
           return (
             <div key={service.localId} className="rounded-md border border-border bg-surface p-4">
@@ -1485,18 +2474,41 @@ export function JobRequestForm() {
               </div>
 
               <div className="mt-4">
-                <label htmlFor={titleFieldId} className="text-sm font-medium text-foreground">
-                  İlan Başlığı
-                </label>
+                {/*
+                  İlan detay sayfası masaüstü tek-ekran yoğunlaştırma
+                  görevi (3. tur) — yeni ilanlar için önerilen kısa başlık:
+                  input'un `maxLength`'i 150'den 80'e indirildi + sayaç
+                  eklendi (mevcut "Teklif Açıklaması"nın `0 / 1000`
+                  sayacıyla AYNI desen). BİLEREK yalnızca bu GİRİŞ
+                  kısıtlaması değişti — job-form-validation.ts'in paylaşılan
+                  150 karakterlik ÜST SINIRI (hem oluşturma hem düzenleme
+                  yolunda kullanılıyor) BİLEREK DOKUNULMADI: bunu da 80'e
+                  indirmek, 80 karakterden UZUN başlıkla oluşturulmuş eski
+                  bir ilanın (bu alana hiç dokunmadan) düzenlenip
+                  kaydedilmesini YENİ bir doğrulama hatasıyla engellerdi —
+                  "mevcut eski ve daha uzun ilan verilerini... değiştirme"
+                  görev kuralını ihlal ederdi. 80, yalnızca YENİ girişler
+                  için bir ÖNERİ/yumuşak sınır; sunucu tarafı kural hâlâ 150.
+                */}
+                <div className="flex items-baseline justify-between gap-3">
+                  <label htmlFor={titleFieldId} className="text-sm font-medium text-foreground">
+                    İlan Başlığı
+                  </label>
+                  <span className="text-xs text-muted-foreground">{service.title.length} / 80</span>
+                </div>
                 <input
                   id={titleFieldId}
                   type="text"
                   value={service.title}
                   onChange={(event) => handleServiceTitleChange(service.localId, event.target.value)}
-                  maxLength={150}
+                  maxLength={80}
                   aria-invalid={itemErrors.title ? true : undefined}
                   aria-describedby={itemErrors.title ? `${titleFieldId}-error` : undefined}
-                  placeholder="Örnek: Fabrika Sahasında Forklift Operatörü İhtiyacı"
+                  placeholder={
+                    isContainerStorageCategory(service.category)
+                      ? "Örnek: 100 Adet Karışık Ölçülü Konteyner İçin Depolama Talebi"
+                      : "Örnek: Gebze'deki Sahadan Depoya Paletli Yük Nakliyesi"
+                  }
                   className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     itemErrors.title ? "border-danger" : "border-border"
                   }`}
@@ -1525,9 +2537,14 @@ export function JobRequestForm() {
                     itemErrors.description ? "border-danger" : "border-border"
                   }`}
                 />
-                {itemErrors.description && (
+                {itemErrors.description ? (
                   <p id={`${descriptionFieldId}-error`} className="mt-2 text-sm text-danger">
                     {itemErrors.description}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Başlık ve açıklamaya firma/tesis adı, açık adres, telefon veya e-posta yazmayın — bu bilgiler
+                    yalnızca teklif kabul edildikten sonra paylaşılabilir.
                   </p>
                 )}
               </div>
@@ -1574,41 +2591,92 @@ export function JobRequestForm() {
 
                   <div>
                     <label htmlFor={productTonnageFieldId} className="text-sm font-medium text-foreground">
-                      Tonaj{" "}
+                      {isNakliyeCard ? "Toplam Ağırlık" : "Tonaj"}{" "}
                       {!tonnageRequiredForCard && (
                         <span className="font-normal text-muted-foreground">(isteğe bağlı)</span>
                       )}
                     </label>
-                    <div className="relative mt-2">
-                      <input
-                        id={productTonnageFieldId}
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={service.productTonnage}
-                        onChange={(event) =>
-                          handleServiceProductTonnageChange(
-                            service.localId,
-                            event.target.value.replace(/[^0-9.,]/g, ""),
-                          )
-                        }
-                        aria-invalid={itemErrors.productTonnage ? true : undefined}
-                        aria-describedby={itemErrors.productTonnage ? `${productTonnageFieldId}-error` : undefined}
-                        placeholder="Örn. 8,5"
-                        className={`w-full rounded-md border bg-surface px-4 py-3 pr-12 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                          itemErrors.productTonnage ? "border-danger" : "border-border"
-                        }`}
-                      />
-                      <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground"
-                      >
-                        ton
-                      </span>
-                    </div>
+                    {isNakliyeCard ? (
+                      // Nakliye: iki parçalı kontrol — sayısal giriş + birim
+                      // seçimi (bkz. görev tanımı). Sabit "ton" son eki
+                      // KALDIRILDI, yerine erişilebilir bir <select> geldi.
+                      // Birim değişince sayısal değere DOKUNULMAZ (otomatik
+                      // dönüşüm YOK).
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          id={productTonnageFieldId}
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={service.productTonnage}
+                          onChange={(event) =>
+                            handleServiceProductTonnageChange(
+                              service.localId,
+                              event.target.value.replace(/[^0-9.,]/g, ""),
+                            )
+                          }
+                          aria-invalid={itemErrors.productTonnage ? true : undefined}
+                          aria-describedby={itemErrors.productTonnage ? `${productTonnageFieldId}-error` : undefined}
+                          placeholder="Örn. 8,5"
+                          className={`w-full min-w-0 flex-1 rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                            itemErrors.productTonnage ? "border-danger" : "border-border"
+                          }`}
+                        />
+                        <select
+                          id={serviceFieldId(service.localId, "productTonnageUnit")}
+                          aria-label="Ağırlık birimi"
+                          value={service.productTonnageUnit}
+                          onChange={(event) => handleServiceProductTonnageUnitChange(service.localId, event.target.value)}
+                          aria-invalid={itemErrors.productTonnageUnit ? true : undefined}
+                          aria-describedby={itemErrors.productTonnageUnit ? `${productTonnageFieldId}-unit-error` : undefined}
+                          className={`w-24 shrink-0 rounded-md border bg-surface px-2 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                            itemErrors.productTonnageUnit ? "border-danger" : "border-border"
+                          }`}
+                        >
+                          {PRODUCT_TONNAGE_UNIT_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="relative mt-2">
+                        <input
+                          id={productTonnageFieldId}
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={service.productTonnage}
+                          onChange={(event) =>
+                            handleServiceProductTonnageChange(
+                              service.localId,
+                              event.target.value.replace(/[^0-9.,]/g, ""),
+                            )
+                          }
+                          aria-invalid={itemErrors.productTonnage ? true : undefined}
+                          aria-describedby={itemErrors.productTonnage ? `${productTonnageFieldId}-error` : undefined}
+                          placeholder="Örn. 8,5"
+                          className={`w-full rounded-md border bg-surface px-4 py-3 pr-12 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                            itemErrors.productTonnage ? "border-danger" : "border-border"
+                          }`}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground"
+                        >
+                          ton
+                        </span>
+                      </div>
+                    )}
                     {itemErrors.productTonnage && (
                       <p id={`${productTonnageFieldId}-error`} className="mt-2 text-sm text-danger">
                         {itemErrors.productTonnage}
+                      </p>
+                    )}
+                    {isNakliyeCard && itemErrors.productTonnageUnit && (
+                      <p id={`${productTonnageFieldId}-unit-error`} className="mt-2 text-sm text-danger">
+                        {itemErrors.productTonnageUnit}
                       </p>
                     )}
                   </div>
@@ -1667,6 +2735,51 @@ export function JobRequestForm() {
                 </div>
               )}
 
+              {isRecyclingCategory(service.category) && (
+                <div className="mt-4">
+                  <RecyclingFields
+                    idPrefix={`recycling-${service.localId}`}
+                    values={service}
+                    errors={itemErrors}
+                    onChange={(patch) => handleServiceRecyclingFieldsChange(service.localId, patch)}
+                  />
+                </div>
+              )}
+
+              {isStorageCard && !isContainerStorageCategory(service.category) && (
+                <div className="mt-4">
+                  <StorageProductFields
+                    idPrefix={`storage-${service.localId}`}
+                    values={service}
+                    errors={itemErrors}
+                    onChange={(patch) => handleServiceStorageFieldsChange(service.localId, patch)}
+                  />
+                </div>
+              )}
+
+              {isHazardousStorageCategory(service.category) && (
+                <div className="mt-4">
+                  <StorageHazardFields
+                    idPrefix={`storage-hazard-${service.localId}`}
+                    category={service.category}
+                    values={service}
+                    errors={{ storageRiskGroups: itemErrors.storageRiskGroups }}
+                    onChange={(patch) => handleServiceStorageHazardFieldsChange(service.localId, patch)}
+                  />
+                </div>
+              )}
+
+              {isContainerStorageCategory(service.category) && (
+                <div className="mt-4">
+                  <StorageContainerGroupsFields
+                    idPrefix={`storage-container-${service.localId}`}
+                    groups={service.storageContainerGroups}
+                    errors={itemErrors.storageContainerGroupErrors}
+                    onChange={(nextGroups) => handleServiceContainerGroupsChange(service.localId, nextGroups)}
+                  />
+                </div>
+              )}
+
               {!isMain && !isStorageCard && (
                 <label className="mt-4 flex items-center gap-2 text-sm text-foreground">
                   <input
@@ -1684,28 +2797,6 @@ export function JobRequestForm() {
                   Bu hizmet, ana hizmetin lokasyonunu kullanacak: {services[0].district || "İlçe seçilmedi"}
                   {mainLocationLabel ? ` / ${mainLocationLabel}` : ""}.
                 </p>
-              ) : isNakliyeCard ? (
-                <div className="mt-4 border-t border-dashed border-border pt-4">
-                  <p className="text-sm font-semibold text-foreground">Yük Alınacak Yer</p>
-                  <NakliyeLocationFields
-                    idPrefix={`service-pickup-${service.localId}`}
-                    manualValue={PICKUP_MANUAL_LOCATION_VALUE}
-                    values={{
-                      provinceCode: service.provinceCode,
-                      district: service.district,
-                      facilityId: service.facilityId,
-                      customFacilityName: service.otherFacilityText,
-                      addressText: service.addressText,
-                    }}
-                    errors={{
-                      province: itemErrors.province,
-                      district: itemErrors.district,
-                      locationType: itemErrors.workLocationType,
-                      addressText: itemErrors.addressText,
-                    }}
-                    onChange={(patch) => handleServicePickupChange(service.localId, patch)}
-                  />
-                </div>
               ) : isSimplifiedLocationCard ? (
                 // Depolama (Kapalı/Açık Saha) VE Gümrük Müşavirliği: lokasyon
                 // yalnızca İl/İlçe'dir (bkz. görev tanımı) — Liman/Sanayi/OSB
@@ -1810,13 +2901,13 @@ export function JobRequestForm() {
                       <label htmlFor={addressTextFieldId} className="text-sm font-medium text-foreground">
                         Açık Adres
                       </label>
-                      <span className="text-xs text-muted-foreground">{service.addressText.trim().length} / 500</span>
+                      <span className="text-xs text-muted-foreground">{service.addressText.trim().length} / {ADDRESS_MAX_LENGTH}</span>
                     </div>
                     <textarea
                       id={addressTextFieldId}
                       value={service.addressText}
                       onChange={(event) => handleServiceAddressChange(service.localId, event.target.value)}
-                      maxLength={500}
+                      maxLength={ADDRESS_MAX_LENGTH}
                       rows={2}
                       aria-invalid={itemErrors.addressText ? true : undefined}
                       aria-describedby={itemErrors.addressText ? `${addressTextFieldId}-error` : undefined}
@@ -1833,33 +2924,86 @@ export function JobRequestForm() {
                   </div>
                 </>
               )}
-
-              {isNakliyeCard && (
-                <div className="mt-6 border-t border-dashed border-border pt-4">
-                  <p className="text-sm font-semibold text-foreground">Teslim Edilecek Yer</p>
-                  <NakliyeLocationFields
-                    idPrefix={`service-delivery-${service.localId}`}
-                    manualValue={DELIVERY_MANUAL_LOCATION_VALUE}
-                    values={{
-                      provinceCode: service.deliveryProvinceCode,
-                      district: service.deliveryDistrict,
-                      facilityId: service.deliveryFacilityId,
-                      customFacilityName: service.deliveryOtherFacilityText,
-                      addressText: service.deliveryAddressText,
-                    }}
-                    errors={{
-                      province: itemErrors.deliveryProvince,
-                      district: itemErrors.deliveryDistrict,
-                      locationType: itemErrors.deliveryLocationType,
-                      addressText: itemErrors.deliveryAddressText,
-                    }}
-                    onChange={(patch) => handleServiceDeliveryChange(service.localId, patch)}
-                  />
-                </div>
-              )}
             </div>
           );
         })}
+
+        {/*
+          Taşıma–Nakliye mükerrerlik bilgilendirmesi (görev tanımı: "Geri
+          Dönüşüm Hizmet Kapsamı Sadeleştirmesi", bölüm 6) — BLOKLAMAZ,
+          yalnızca bilgilendirir; mevcut çoklu hizmet mimarisine (services
+          state'i, createJobsForOperation) ikinci bir kontrol katmanı
+          EKLEMEZ. Her iki koşul da AYNI ANDA true olduğunda görünür:
+          herhangi bir kart Geri Dönüşüm & Atık Tahliye kategorisinde VE
+          kendi "Hizmet Kapsamı"nda "Taşıma"yı seçmiş, VE ayrı bir kart
+          zaten Nakliye kategorisinde. Türetilmiş (derived) — ayrı bir
+          state TUTULMAZ, `services` her değiştiğinde otomatik yeniden
+          hesaplanır.
+        */}
+        {services.some((s) => isRecyclingCategory(s.category) && s.recyclingScopeOfWork.includes("tasima")) &&
+          services.some((s) => isTransportationCategory(s.category)) && (
+            <div role="status" className="rounded-md bg-accent-soft px-4 py-3 text-sm text-accent">
+              Taşıma işlemi bu hizmetin kapsamına zaten dahil. Ayrı bir Nakliye hizmeti yalnız farklı bir taşıma
+              operasyonu için eklenmelidir.
+            </div>
+          )}
+
+        {isNakliyeOnlyOperation ? (
+          <NakliyeSectionCard number={nakliyePhotosCardNumber} title="Fotoğraflar ve Belgeler">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Operasyonun yapılacağı alanı, yükü, ekipmanı veya mevcut saha koşullarını gösteren güncel fotoğraflar
+              yükleyin. Fotoğraflar, hizmet verenlerin işi doğru değerlendirmesine yardımcı olacaktır.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Kişisel bilgi, telefon numarası, plaka veya gizli belge içeren fotoğraflar yüklemeyin.
+            </p>
+            <div className="mt-3">
+              <JobPhotoUpload
+                role={session.role}
+                onPhotosChange={handlePhotosChange}
+                onBusyChange={setPhotosProcessing}
+                disabled={submitting || photosProcessing}
+                errorId={sharedErrors.photoCount ? `${photosId}-error` : undefined}
+                maxPhotos={getMaxPhotos(getSingleServiceCategory(services))}
+              />
+            </div>
+            {sharedErrors.photoCount && (
+              <p id={`${photosId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                {sharedErrors.photoCount}
+              </p>
+            )}
+          </NakliyeSectionCard>
+        ) : (
+          <div>
+            <p id={photosId} className="text-sm font-medium text-foreground">
+              {isSingleStorageSubmission ? "Yük / Ürün Fotoğrafları *" : "Operasyon Fotoğrafları *"}
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {isSingleStorageSubmission
+                ? "Depolanacak ürünün/yükün mevcut durumunu, ambalajını ve paketleme koşullarını net şekilde gösteren güncel fotoğraflar yükleyin. Fotoğraflar, hizmet verenlerin depolama koşullarını doğru değerlendirmesine yardımcı olacaktır."
+                : "Operasyonun yapılacağı alanı, yükü, ekipmanı veya mevcut saha koşullarını gösteren güncel fotoğraflar yükleyin. Fotoğraflar, hizmet verenlerin işi doğru değerlendirmesine yardımcı olacaktır."}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Kişisel bilgi, telefon numarası, plaka veya gizli belge içeren
+              fotoğraflar yüklemeyin.
+            </p>
+            <div className="mt-3">
+              <JobPhotoUpload
+                role={session.role}
+                onPhotosChange={handlePhotosChange}
+                onBusyChange={setPhotosProcessing}
+                disabled={submitting || photosProcessing}
+                errorId={sharedErrors.photoCount ? `${photosId}-error` : undefined}
+                maxPhotos={getMaxPhotos(getSingleServiceCategory(services))}
+              />
+            </div>
+            {sharedErrors.photoCount && (
+              <p id={`${photosId}-error`} role="alert" className="mt-2 text-sm text-danger">
+                {sharedErrors.photoCount}
+              </p>
+            )}
+          </div>
+        )}
 
         {services[0].category !== "" && (
           <div className="rounded-md border border-dashed border-border p-4">
@@ -1882,35 +3026,6 @@ export function JobRequestForm() {
         )}
       </div>
 
-      <div>
-        <p id={photosId} className="text-sm font-medium text-foreground">
-          Operasyon Fotoğrafları *
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Operasyonun yapılacağı alanı, yükü, ekipmanı veya mevcut saha
-          koşullarını gösteren güncel fotoğraflar yükleyin. Fotoğraflar,
-          hizmet verenlerin işi doğru değerlendirmesine yardımcı olacaktır.
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Kişisel bilgi, telefon numarası, plaka veya gizli belge içeren
-          fotoğraflar yüklemeyin.
-        </p>
-        <div className="mt-3">
-          <JobPhotoUpload
-            role={session.role}
-            onPhotosChange={handlePhotosChange}
-            onBusyChange={setPhotosProcessing}
-            disabled={submitting || photosProcessing}
-            errorId={sharedErrors.photoCount ? `${photosId}-error` : undefined}
-          />
-        </div>
-        {sharedErrors.photoCount && (
-          <p id={`${photosId}-error`} role="alert" className="mt-2 text-sm text-danger">
-            {sharedErrors.photoCount}
-          </p>
-        )}
-      </div>
-
       {(Object.keys(sharedErrors).length > 0 || Object.keys(serviceErrors).length > 0) && (
         <p role="alert" className="text-sm font-medium text-danger">
           Lütfen işaretlenen zorunlu alanları tamamlayın.
@@ -1930,8 +3045,13 @@ export function JobRequestForm() {
           ? "Fotoğraflar işleniyor..."
           : customsDocumentsProcessing
             ? "Belgeler işleniyor..."
-            : "İlanı Yayınla"}
+            : isSingleStorageSubmission
+              ? "İlanı Onaya Gönder"
+              : "İlanı Yayınla"}
       </button>
+      {isSingleStorageSubmission && (
+        <p className="-mt-4 text-xs text-muted-foreground">İlanınız admin onayından sonra yayımlanacaktır.</p>
+      )}
       </form>
     </PageCardShell>
   );

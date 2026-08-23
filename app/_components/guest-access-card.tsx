@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AuthGateNotice } from "./auth-gate-notice";
+import { PageContainer } from "./page-container";
 
 /**
  * "Hizmet Talebi Oluştur" ve "İş İlanlarını İncele" sayfalarının paylaştığı
@@ -19,7 +20,7 @@ export function PageCardShell({
 }) {
   return (
     <section className="bg-background">
-      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+      <PageContainer size="form" className="py-16 sm:py-20">
         <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
           {title}
         </h1>
@@ -29,7 +30,7 @@ export function PageCardShell({
         <div className="mt-8 rounded-card border border-border bg-surface p-6 sm:p-8">
           {children}
         </div>
-      </div>
+      </PageContainer>
     </section>
   );
 }

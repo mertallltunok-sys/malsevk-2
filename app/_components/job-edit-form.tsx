@@ -4,7 +4,16 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState } from "react";
 import { isCustomsBrokerageCategory } from "../_lib/customs-brokerage-catalog";
-import { clearJobFormErrors, validateJobForm, type JobFormErrors } from "../_lib/job-form-validation";
+import { ADDRESS_MAX_LENGTH, DESCRIPTION_MAX_LENGTH, TITLE_MAX_LENGTH } from "../_lib/field-limits";
+import {
+  clearJobFormErrors,
+  validateJobForm,
+  validateNakliyeCargoGroups,
+  validateNakliyeDetails,
+  type JobFormErrors,
+  type NakliyeCargoGroupErrors,
+  type NakliyeDetailsErrors,
+} from "../_lib/job-form-validation";
 import {
   FACILITY_FREE_TEXT_VALUE,
   isSimplifiedLocationCategory,
@@ -12,13 +21,21 @@ import {
   toFacilitySelectOptions,
 } from "../_lib/job-location";
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "../_lib/job-requests";
-import { updateJob } from "../_lib/job-store";
+import { markJobSupabaseSyncFailed, updateJob } from "../_lib/job-store";
 import { getTodayLocalDateString } from "../_lib/jobs";
+import { deriveLegacyMirrorFields, getJobCargoGroups } from "../_lib/nakliye-cargo-groups";
 import {
   DELIVERY_MANUAL_LOCATION_VALUE,
   isTransportationCategory,
   PICKUP_MANUAL_LOCATION_VALUE,
 } from "../_lib/nakliye-route";
+import {
+  fromCargoGroupsFields,
+  isNakliyeContainerProductType,
+  toCargoGroupsFields,
+  type NakliyeCargoGroupFieldValues,
+} from "../_lib/nakliye-transport-catalog";
+import { getMaxPhotos } from "../_lib/photo-validation";
 import {
   isTonnageRequired,
   parseProductQuantity,
@@ -27,8 +44,20 @@ import {
   PRODUCT_TYPE_SUGGESTIONS,
   requiresProductInfo,
 } from "../_lib/product-catalog";
-import { resolveLegacyJobCategoryToId, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import {
+  isRecyclingCategory,
+  isRecyclingMaterialCondition,
+  isRecyclingUnit,
+  isWasteQuantityUnit,
+  parseRecyclingQuantity,
+  resolveRecyclingScopeOfWorkIds,
+} from "../_lib/recycling-catalog";
+import { deriveWasteCodeHazardous } from "../_lib/recycling-waste-code-catalog";
+import { isStorageOnlyLocationCategory, resolveLegacyJobCategoryToId, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
+import { isContainerStorageCategory, normalizeStorageContainerGroupsForDisplay } from "../_lib/storage-container-catalog";
+import { isHazardousStorageCategory, isTehlikeliMaddeDepolamaCategory } from "../_lib/storage-hazard-catalog";
 import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
+import { isSupabaseJobSyncEnabled, retryJobSupabaseSync } from "../_lib/supabase-job-sync";
 import type { Job, Offer, Session } from "../_lib/types";
 import {
   getDistrictId,
@@ -47,12 +76,28 @@ import type { ReadyJobCustomsDocument } from "./job-customs-document-upload";
 import { JobPhotoEditor } from "./job-photo-editor";
 import type { ReadyJobPhoto } from "./job-photo-upload";
 import { ManualFacilityNameField } from "./manual-facility-name-field";
+import { NakliyeCargoGroupsFields } from "./nakliye-cargo-group-fields";
 import { NakliyeLocationFields, type NakliyeLocationFieldValues } from "./nakliye-location-fields";
+import { NakliyeSectionCard } from "./nakliye-section-card";
+import {
+  fromNakliyeDetailsFields,
+  LoadingMethodField,
+  ShipmentPlanFields,
+  toNakliyeDetailsFields,
+  VehiclePreferenceFields,
+  type NakliyeDetailsFieldValues,
+} from "./nakliye-transport-fields";
 import { ProductTypeCombobox } from "./product-type-combobox";
+import { RecyclingFields, type RecyclingFieldValues } from "./recycling-fields";
 import { SearchableSelect } from "./searchable-select";
-
-const DESCRIPTION_MAX_LENGTH = 1000;
-const ADDRESS_MAX_LENGTH = 500;
+import { StorageHazardFields, type StorageHazardFieldValues } from "./storage-hazard-fields";
+import { StorageProductFields, type StorageProductFieldValues } from "./storage-product-fields";
+import {
+  fromStorageContainerGroupsFields,
+  StorageContainerGroupsFields,
+  toStorageContainerGroupsFields,
+  type StorageContainerGroupFieldValues,
+} from "./storage-container-details-fields";
 
 export function JobEditForm({ jobId }: { jobId: string }) {
   const session = useSession();
@@ -145,6 +190,23 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
   const [productTonnage, setProductTonnage] = useState(
     () => (job.productTonnage !== undefined ? String(job.productTonnage) : ""),
   );
+  // Bkz. types.ts#Job.productTonnageUnit — yalnızca Nakliye'de anlamlı. "Nakliye
+  // Çoklu Yük Grubu" görevinden sonra bu üst seviye değer artık HİÇBİR
+  // formda düzenlenemez (Nakliye'nin kendi birimi her Yük Grubu'nun kendi
+  // kopyasındadır) — bu yüzden artık bir `useState` değil, `validateJobForm`'un
+  // (Liman Hizmetleri'nde hiçbir zaman anlamlı olmayan) tip sözleşmesini
+  // karşılamak için SALT OKUNUR bir sabit.
+  const productTonnageUnit: "ton" | "kg" = job.productTonnageUnit === "kg" ? "kg" : "ton";
+  // Bu state yalnızca Liman Hizmetleri için render edilir (aşağıdaki JSX
+  // `!showDeliveryFields && showProductFields` şartıyla sarılı) — Nakliye
+  // artık kendi Ürün/Yük Cinsi'ni HER Yük Grubu'nun kendi kopyasında taşır
+  // (bkz. nakliyeCargoGroups state'i), bu üst seviye alan Nakliye için hiç
+  // gösterilmez/gönderilmez (bkz. handleSubmit'in showDeliveryFields dalı).
+  // "Konteyner" burada (Liman/Depolama bağlamında) sıradan, geçerli bir
+  // seçenektir — eski bir "Nakliye'de artık geçersiz" uyarı kutusu ARTIK
+  // GEÇERSİZ bir öncüle dayandığı için (Nakliye'nin kendi "Ürün/Yük Cinsi"
+  // alanında "Konteyner" artık YENİDEN geçerli/asıl tetikleyici, bkz.
+  // nakliye-transport-catalog.ts#isNakliyeContainerProductType) kaldırıldı.
   const [productType, setProductType] = useState(job.productType ?? "");
   // "Listede Yok, Kendim Gireceğim" seçildiğinde gerçek metin burada tutulur
   // (bkz. product-type-combobox.tsx üstündeki doküman) — eski ilanlarda bu
@@ -164,6 +226,48 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
     customsProductType: job.customsProductType ?? "",
     customsProductTypeCustomText: "",
   }));
+  const [recyclingFields, setRecyclingFields] = useState<RecyclingFieldValues>(() => ({
+    recyclingMaterialCategoryId: job.recyclingMaterialCategoryId ?? "",
+    recyclingMaterialSubtypeId: job.recyclingMaterialSubtypeId ?? "",
+    recyclingQuantity: job.recyclingQuantity !== undefined ? String(job.recyclingQuantity) : "",
+    recyclingUnit: job.recyclingUnit ?? "",
+    recyclingMaterialCondition: job.recyclingMaterialCondition ?? "",
+    recyclingMaterialConditionNote: job.recyclingMaterialConditionNote ?? "",
+    recyclingScopeOfWork: resolveRecyclingScopeOfWorkIds(job.recyclingScopeOfWork ?? []),
+    recyclingRequestedOperation: job.recyclingRequestedOperation ?? "",
+    recyclingWasteCode: job.recyclingWasteCode ?? "",
+    recyclingWasteCodeUnknown: job.recyclingWasteCodeUnknown ?? false,
+    recyclingHazardProperties: job.recyclingHazardProperties ?? [],
+  }));
+  // storageProductType/productType İLE AYNI ilke (bkz. productType üstündeki
+  // doküman): eski ilanlarda bu alan hep boş başlar, mevcut storageProductType
+  // değeri (katalog önerisi olsun ya da olmasın) ProductTypeCombobox'ta
+  // serbest metin olarak değişmeden gösterilmeye devam eder.
+  const [storageFields, setStorageFields] = useState<StorageProductFieldValues>(() => ({
+    storageProductType: job.storageProductType ?? "",
+    storageProductTypeCustomText: "",
+    storageProductQuantity: job.storageProductQuantity !== undefined ? String(job.storageProductQuantity) : "",
+    storageProductUnit: job.storageProductUnit ?? "",
+    storageProductTonnage: job.storageProductTonnage !== undefined ? String(job.storageProductTonnage) : "",
+  }));
+  // "Kimyasal Depolama / Tehlikeli Madde Depolama" görevi — eski (bu
+  // görevden önce oluşturulmuş) bir ilanda storageHazardous hiç yoktur,
+  // "hayir" olarak yorumlanır (görev talimatı: "eski depolama ilanları
+  // bozulmadan açılmalı").
+  const [storageHazardFields, setStorageHazardFields] = useState<StorageHazardFieldValues>(() => ({
+    storageHazardous: job.storageHazardous === true ? "evet" : "hayir",
+    storageRiskGroups: job.storageRiskGroups ?? [],
+  }));
+  // "Konteyner Grupları" — bkz. storage-container-catalog.ts'in tetikleme
+  // kuralı dokümanı (yalnızca hizmet türü "Konteyner Depolama").
+  // `normalizeStorageContainerGroupsForDisplay` eski (storageContainerGroups'tan
+  // ÖNCE oluşturulmuş, DEPRECATED düz alanlı) bir ilanı TEK elemanlı bir
+  // gruba yükseltir — "eski tek gruplu ilanlar bozulmamalı" geriye dönük
+  // uyumluluk katmanı. Hiç grup yoksa (yeni bir Konteyner Depolama ilanı
+  // DEĞİLSE, ya da bu kategoriye SONRADAN geçilirse) TEK boş grupla başlar.
+  const [containerGroups, setContainerGroups] = useState<StorageContainerGroupFieldValues[]>(() =>
+    toStorageContainerGroupsFields(normalizeStorageContainerGroupsForDisplay(job)),
+  );
   // Nakliye Güzergâh Yönetimi — "Teslim Edilecek Yer": bu job'dan önceki
   // (deliveryLocationType hiç yoksa) ya da Nakliye dışı ilanlarda boş
   // başlar. `deliveryFacilityId`, DELIVERY_MANUAL_LOCATION_VALUE sentinel'ini
@@ -185,6 +289,30 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
     () => (job.deliveryFacilityId ? "" : job.deliveryFacilityName ?? ""),
   );
   const [deliveryAddressText, setDeliveryAddressText] = useState(job.deliveryAddressText ?? "");
+  // Bu görevden ÖNCE oluşturulmuş bir Nakliye ilanında job.nakliyeDetails
+  // hiç yoktur; toNakliyeDetailsFields bu durumda boş bir form state üretir
+  // ("eski ilanlar bozulmaz" kuralı). Bu obje artık YALNIZCA Araç Tercihi/
+  // Yükleme Yöntemi/Tehlikeli Madde-ADR taşır — bkz. "Nakliye Çoklu Yük
+  // Grubu" görevi, nakliye-transport-fields.tsx#NakliyeDetailsFieldValues
+  // üstündeki doküman.
+  const [nakliyeDetails, setNakliyeDetails] = useState<NakliyeDetailsFieldValues>(
+    () => toNakliyeDetailsFields(job.nakliyeDetails),
+  );
+  const [nakliyeErrors, setNakliyeErrors] = useState<NakliyeDetailsErrors>({});
+  // "Nakliye Çoklu Yük Grubu" görevi — "2 — Yük Bilgileri" artık TEK değil,
+  // bağımsız bir "Yük Grubu" dizisi (bkz. nakliye-transport-catalog.ts#
+  // NakliyeCargoGroupFieldValues). `getJobCargoGroups` eski (bu görevden
+  // önce kaydedilmiş) tek-gruplu bir ilanı SALT OKUNUR olarak "Yük Grubu 1"
+  // olarak sentezler — bu sentez ASLA job'u geriye yazmaz, yalnızca formun
+  // başlangıç değeridir (görev talimatı: "eski tek yüklü ilanlar... tek
+  // kayıt Yük Grubu 1 olarak okunsun").
+  const [nakliyeCargoGroups, setNakliyeCargoGroups] = useState<NakliyeCargoGroupFieldValues[]>(
+    () => toCargoGroupsFields(getJobCargoGroups(job)),
+  );
+  const [cargoGroupErrors, setCargoGroupErrors] = useState<Record<string, NakliyeCargoGroupErrors>>({});
+  function patchNakliyeDetails(patch: Partial<NakliyeDetailsFieldValues>) {
+    setNakliyeDetails((current) => ({ ...current, ...patch }));
+  }
   // "Operasyon Detayları" form alanı kaldırıldı (bkz. görev tanımı) — artık
   // kullanıcı tarafından hiç değiştirilemez, yalnızca eski ilanın mevcut
   // değerini değişmeden updateJob'a geri taşımak için okunur (bkz.
@@ -209,7 +337,17 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
   const showProductFields = requiresProductInfo(category);
   const tonnageRequired = isTonnageRequired(category);
   const showCustomsFields = isCustomsBrokerageCategory(category);
+  const showRecyclingFields = isRecyclingCategory(category);
+  const showStorageFields = isStorageOnlyLocationCategory(category);
+  const showContainerFields = isContainerStorageCategory(category);
+  const showHazardousStorageFields = isHazardousStorageCategory(category);
   const showDeliveryFields = isTransportationCategory(category);
+  // "Konteyner Taşımalarında Araç Tercihini Gizleme" görevi hâlâ geçerli —
+  // ama artık TÜM Yük Gruplarına bakar: en az bir grup hâlâ normal (Hayır)
+  // modundaysa Araç Tercihi gösterilir (bkz. job-form-validation.ts#
+  // NakliyeDetailsFieldsForValidation.anyCargoGroupIsNormalMode üstündeki
+  // AYNI gerekçe).
+  const showNakliyeVehiclePreference = nakliyeCargoGroups.some((group) => !isNakliyeContainerProductType(group.productType));
   // Depolama (Kapalı/Açık Saha) VE Gümrük Müşavirliği artık AYNI sade konum
   // modelini paylaşır — yalnızca İl/İlçe (bkz. job-location.ts#
   // isSimplifiedLocationCategory).
@@ -376,9 +514,18 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
       workEndDate,
       productQuantity,
       productTonnage,
+      productTonnageUnit,
       productType,
       productTypeCustomText,
       ...customsFields,
+      ...recyclingFields,
+      ...storageFields,
+      // `storageProductType`/vb. (yukarıdaki `...storageFields`) ile
+      // `storageContainerGroups` ARTIK ÇAKIŞMIYOR (Konteyner Depolama bu
+      // alanları hiç kullanmıyor) — "hangi kaynak kazanır" sorunu (eski bir
+      // sürümde vardı) burada YOKTUR, doğrudan atanabilir.
+      storageContainerGroups: containerGroups,
+      ...storageHazardFields,
       deliveryProvince: deliveryProvinceName,
       deliveryDistrict,
       deliveryLocationType: deliveryLocationTypeValue,
@@ -388,13 +535,40 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
       photoCount,
     });
     setErrors(fieldErrors);
+    const nakliyeDetailErrors = showDeliveryFields
+      ? validateNakliyeDetails({ ...nakliyeDetails, anyCargoGroupIsNormalMode: showNakliyeVehiclePreference })
+      : {};
+    setNakliyeErrors(nakliyeDetailErrors);
+    const cargoGroupsValidation = showDeliveryFields
+      ? validateNakliyeCargoGroups(nakliyeCargoGroups)
+      : { groupErrors: {}, hasErrors: false };
+    setCargoGroupErrors(cargoGroupsValidation.groupErrors);
     setSubmitError(null);
 
-    if (Object.keys(fieldErrors).length > 0) return;
+    if (Object.keys(fieldErrors).length > 0 || Object.keys(nakliyeDetailErrors).length > 0 || cargoGroupsValidation.hasErrors) {
+      return;
+    }
 
-    const quantityResult = showProductFields ? parseProductQuantity(productQuantity) : null;
+    // "Nakliye Çoklu Yük Grubu" görevi — Nakliye artık üst seviye
+    // productQuantity/productTonnage/productType state'ini hiç kullanmaz
+    // (kart hiç göstermez/toplamaz); gerçek Ürün Bilgisi HER Yük Grubu'nun
+    // kendi kopyasından, İLK grubun bir "aynası" olarak üretilir (bkz.
+    // nakliye-cargo-groups.ts#deriveLegacyMirrorFields üstündeki doküman —
+    // job-request-form.tsx#resolveNakliyeYukBilgileriPayload İLE AYNI ilke).
+    const nakliyeCargoGroupsPayload = showDeliveryFields ? fromCargoGroupsFields(nakliyeCargoGroups) : undefined;
+    const nakliyeMirror = nakliyeCargoGroupsPayload ? deriveLegacyMirrorFields(nakliyeCargoGroupsPayload) : undefined;
+    const quantityResult = showProductFields && !showDeliveryFields ? parseProductQuantity(productQuantity) : null;
     const tonnageRaw = productTonnage.trim();
-    const tonnageResult = showProductFields && tonnageRaw.length > 0 ? parseProductTonnage(productTonnage) : null;
+    const tonnageResult = showProductFields && !showDeliveryFields && tonnageRaw.length > 0 ? parseProductTonnage(productTonnage) : null;
+    const recyclingQuantityResult = showRecyclingFields ? parseRecyclingQuantity(recyclingFields.recyclingQuantity) : null;
+    // NOT: `parseProductQuantity` DEĞİL — bkz. job-request-form.tsx#
+    // resolveStorageProductServicePayload üstündeki AYNI gerekçe (Miktar
+    // birime bağlı olarak ondalıklı olabilir, doğrulayıcıyla AYNI parser
+    // kullanılmalı).
+    const storageQuantityResult = showStorageFields ? parseProductTonnage(storageFields.storageProductQuantity) : null;
+    const storageTonnageRaw = storageFields.storageProductTonnage.trim();
+    const storageTonnageResult =
+      showStorageFields && storageTonnageRaw.length > 0 ? parseProductTonnage(storageFields.storageProductTonnage) : null;
 
     setSubmitting(true);
     const result = await updateJob(
@@ -411,11 +585,14 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
         locationMode,
         workDate,
         workEndDate,
-        productQuantity: quantityResult?.ok ? quantityResult.value : undefined,
-        productTonnage: tonnageResult?.ok ? tonnageResult.value : undefined,
-        productType: showProductFields
-          ? (productType === PRODUCT_TYPE_CUSTOM_VALUE ? productTypeCustomText.trim() : productType.trim())
-          : undefined,
+        productQuantity: showDeliveryFields ? nakliyeMirror?.productQuantity : quantityResult?.ok ? quantityResult.value : undefined,
+        productTonnage: showDeliveryFields ? nakliyeMirror?.productTonnage : tonnageResult?.ok ? tonnageResult.value : undefined,
+        productTonnageUnit: showDeliveryFields ? nakliyeMirror?.productTonnageUnit : undefined,
+        productType: showDeliveryFields
+          ? nakliyeMirror?.productType
+          : showProductFields
+            ? (productType === PRODUCT_TYPE_CUSTOM_VALUE ? productTypeCustomText.trim() : productType.trim())
+            : undefined,
         customsTransactionType: showCustomsFields ? customsFields.customsTransactionType || undefined : undefined,
         customsRequestedServices:
           showCustomsFields && customsFields.customsRequestedServices.length > 0
@@ -426,6 +603,61 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
               ? customsFields.customsProductTypeCustomText.trim()
               : customsFields.customsProductType.trim()) || undefined
           : undefined,
+        recyclingMaterialCategoryId: showRecyclingFields ? recyclingFields.recyclingMaterialCategoryId || undefined : undefined,
+        recyclingMaterialSubtypeId: showRecyclingFields ? recyclingFields.recyclingMaterialSubtypeId || undefined : undefined,
+        recyclingQuantity: recyclingQuantityResult?.ok ? recyclingQuantityResult.value : undefined,
+        recyclingUnit:
+          showRecyclingFields && isWasteQuantityUnit(recyclingFields.recyclingUnit) ? recyclingFields.recyclingUnit : undefined,
+        recyclingMaterialCondition:
+          showRecyclingFields && isRecyclingMaterialCondition(recyclingFields.recyclingMaterialCondition)
+            ? recyclingFields.recyclingMaterialCondition
+            : undefined,
+        recyclingMaterialConditionNote:
+          showRecyclingFields && recyclingFields.recyclingMaterialCondition === "diger"
+            ? recyclingFields.recyclingMaterialConditionNote.trim() || undefined
+            : undefined,
+        recyclingScopeOfWork:
+          showRecyclingFields && recyclingFields.recyclingScopeOfWork.length > 0
+            ? recyclingFields.recyclingScopeOfWork
+            : undefined,
+        recyclingRequestedOperation: showRecyclingFields
+          ? recyclingFields.recyclingRequestedOperation || undefined
+          : undefined,
+        recyclingWasteCode:
+          showRecyclingFields && !recyclingFields.recyclingWasteCodeUnknown
+            ? recyclingFields.recyclingWasteCode || undefined
+            : undefined,
+        recyclingWasteCodeUnknown: showRecyclingFields ? recyclingFields.recyclingWasteCodeUnknown : undefined,
+        recyclingHazardous: showRecyclingFields
+          ? deriveWasteCodeHazardous(
+              recyclingFields.recyclingWasteCodeUnknown ? null : recyclingFields.recyclingWasteCode,
+            ) ?? undefined
+          : undefined,
+        recyclingHazardProperties:
+          showRecyclingFields && recyclingFields.recyclingHazardProperties.length > 0
+            ? recyclingFields.recyclingHazardProperties
+            : undefined,
+        storageProductType: showStorageFields && !showContainerFields
+          ? (storageFields.storageProductType === PRODUCT_TYPE_CUSTOM_VALUE
+              ? storageFields.storageProductTypeCustomText.trim()
+              : storageFields.storageProductType.trim()) || undefined
+          : undefined,
+        storageProductQuantity: !showContainerFields && storageQuantityResult?.ok ? storageQuantityResult.value : undefined,
+        storageProductUnit:
+          showStorageFields && !showContainerFields && isRecyclingUnit(storageFields.storageProductUnit)
+            ? storageFields.storageProductUnit
+            : undefined,
+        storageProductTonnage: !showContainerFields && storageTonnageResult?.ok ? storageTonnageResult.value : undefined,
+        storageContainerGroups: showContainerFields ? fromStorageContainerGroupsFields(containerGroups) : undefined,
+        storageHazardous: showHazardousStorageFields
+          ? isTehlikeliMaddeDepolamaCategory(category) || storageHazardFields.storageHazardous === "evet"
+          : undefined,
+        storageRiskGroups:
+          showHazardousStorageFields &&
+          (isTehlikeliMaddeDepolamaCategory(category) || storageHazardFields.storageHazardous === "evet") &&
+          storageHazardFields.storageRiskGroups.length > 0
+            ? storageHazardFields.storageRiskGroups
+            : undefined,
         deliveryProvince: showDeliveryFields ? deliveryProvinceName || undefined : undefined,
         deliveryDistrict: showDeliveryFields ? deliveryDistrict || undefined : undefined,
         deliveryLocationType: showDeliveryFields ? deliveryLocationTypeValue || undefined : undefined,
@@ -434,6 +666,18 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
           ? (isDeliveryManual ? deliveryOtherFacilityText.trim() : deliveryFacilityName) || undefined
           : undefined,
         deliveryAddressText: showDeliveryFields ? deliveryAddressText || undefined : undefined,
+        nakliyeDetails: showDeliveryFields
+          ? {
+              ...fromNakliyeDetailsFields(nakliyeDetails),
+              vehiclePreference: showNakliyeVehiclePreference ? fromNakliyeDetailsFields(nakliyeDetails).vehiclePreference : undefined,
+              loadPreparationType: nakliyeMirror?.nakliyeLoadPreparationType,
+              loadPreparationCustomText: nakliyeMirror?.nakliyeLoadPreparationCustomText,
+              measurementInfo: nakliyeMirror?.nakliyeMeasurementInfo,
+              containerTransport: nakliyeMirror?.nakliyeContainerTransport,
+              hazmat: nakliyeMirror?.nakliyeHazmat,
+            }
+          : undefined,
+        nakliyeCargoGroups: nakliyeCargoGroupsPayload,
         description,
         operationDetails,
         keptPhotoIds: photoState.keptPhotoIds,
@@ -448,6 +692,32 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
     if (!result.ok) {
       setSubmitError(result.error);
       return;
+    }
+
+    // "Kritik İlan Senkronizasyonu" görevi Bölüm 2 — admin henüz karar
+    // vermeden (bu düzenlemeden ÖNCE zaten "pending_review") yapılan bir
+    // düzenleme, YEREL yazım başarılı olduktan hemen SONRA Supabase'e de
+    // itilir. Kapsam BİLEREK dar: yalnızca düzenlemeden ÖNCE hâlâ
+    // pending_review olan ilanlar (bkz. update_job_as_requester RPC'sinin
+    // kendi moderation_status kontrolü — zaten onaylanmış/reddedilmiş bir
+    // ilanın yerel "yeniden incelemeye alma" dalı, job-store.ts#updateJob'un
+    // KENDİ, bu görevin kapsamı dışındaki, önceden var olan davranışıdır).
+    // Sunucu güncellemesi BAŞARISIZ olursa kullanıcıya asla başarı
+    // gösterilmez (görev gereksinimi) — "Onay Bekliyor" ekranına
+    // yönlendirmek yerine burada, formda kalınarak açık bir hata gösterilir;
+    // ilan `markJobSupabaseSyncFailed` ile işaretlenir, böylece
+    // job-requests-panel.tsx/job-detail-content.tsx'teki AYNI "Senkronizasyon
+    // Başarısız" + Yeniden Dene UI'ı (ayrı bir kod yolu İCAT EDİLMEDEN)
+    // devreye girer.
+    if (job.moderationStatus === "pending_review" && isSupabaseJobSyncEnabled()) {
+      const syncResult = await retryJobSupabaseSync(result.job);
+      if (!syncResult.ok) {
+        markJobSupabaseSyncFailed(result.job.id, syncResult.error);
+        setSubmitError(
+          `Değişiklikleriniz bu cihazda kaydedildi ancak sunucuya iletilemedi: ${syncResult.error} Lütfen "Hizmet Taleplerim" ekranından yeniden deneyin.`,
+        );
+        return;
+      }
     }
 
     // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — ana
@@ -466,6 +736,50 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+      {showDeliveryFields && (
+        <NakliyeEditCards
+          job={job}
+          category={category}
+          setCategory={setCategory}
+          title={title}
+          setTitle={setTitle}
+          description={description}
+          setDescription={setDescription}
+          errors={errors}
+          categoryId={categoryId}
+          titleId={titleId}
+          descriptionId={descriptionId}
+          nakliyeDetails={nakliyeDetails}
+          patchNakliyeDetails={patchNakliyeDetails}
+          nakliyeErrors={nakliyeErrors}
+          nakliyeCargoGroups={nakliyeCargoGroups}
+          setNakliyeCargoGroups={setNakliyeCargoGroups}
+          cargoGroupErrors={cargoGroupErrors}
+          workDate={workDate}
+          setWorkDate={setWorkDate}
+          workEndDate={workEndDate}
+          setWorkEndDate={setWorkEndDate}
+          todayLocalDate={todayLocalDate}
+          provinceCode={provinceCode}
+          district={district}
+          facilityId={facilityId}
+          otherFacilityText={otherFacilityText}
+          addressText={addressText}
+          handlePickupFieldsChange={handlePickupFieldsChange}
+          deliveryProvinceCode={deliveryProvinceCode}
+          deliveryDistrict={deliveryDistrict}
+          deliveryFacilityId={deliveryFacilityId}
+          deliveryOtherFacilityText={deliveryOtherFacilityText}
+          deliveryAddressText={deliveryAddressText}
+          handleDeliveryFieldsChange={handleDeliveryFieldsChange}
+          photosId={photosId}
+          setPhotoState={setPhotoState}
+          setPhotosProcessing={setPhotosProcessing}
+        />
+      )}
+
+      {!showDeliveryFields && (
+      <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <label htmlFor={categoryId} className="text-sm font-medium text-foreground">
@@ -549,7 +863,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
           type="text"
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          maxLength={150}
+          maxLength={TITLE_MAX_LENGTH}
           aria-invalid={errors.title ? true : undefined}
           aria-describedby={errors.title ? `${titleId}-error` : undefined}
           placeholder="Örnek: Fabrika Sahasında Forklift Operatörü İhtiyacı"
@@ -582,14 +896,21 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
           placeholder="Hizmet ihtiyacınızı, iş kapsamını ve beklentilerinizi açıklayın."
           className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
-        {errors.description && (
+        {errors.description ? (
           <p id={`${descriptionId}-error`} className="mt-2 text-sm text-danger">
             {errors.description}
           </p>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Başlık ve açıklamaya firma/tesis adı, açık adres, telefon veya e-posta yazmayın — bu bilgiler yalnızca
+            teklif kabul edildikten sonra paylaşılabilir.
+          </p>
         )}
       </div>
+      </>
+      )}
 
-      {showProductFields && (
+      {!showDeliveryFields && showProductFields && (
         <div className="grid gap-6 sm:grid-cols-3">
           <div>
             <label htmlFor={productQuantityId} className="text-sm font-medium text-foreground">
@@ -626,8 +947,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
 
           <div>
             <label htmlFor={productTonnageId} className="text-sm font-medium text-foreground">
-              Tonaj{" "}
-              {!tonnageRequired && <span className="font-normal text-muted-foreground">(isteğe bağlı)</span>}
+              Tonaj {!tonnageRequired && <span className="font-normal text-muted-foreground">(isteğe bağlı)</span>}
             </label>
             <div className="relative mt-2">
               <input
@@ -725,14 +1045,64 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
         </div>
       )}
 
+      {showRecyclingFields && (
+        <RecyclingFields
+          idPrefix="recycling-edit"
+          values={recyclingFields}
+          errors={errors}
+          onChange={(patch) => {
+            setRecyclingFields((current) => ({ ...current, ...patch }));
+            setErrors((current) => clearJobFormErrors(current, Object.keys(patch) as (keyof JobFormErrors)[]));
+          }}
+        />
+      )}
+
+      {showStorageFields && !showContainerFields && (
+        <StorageProductFields
+          idPrefix="storage-edit"
+          values={storageFields}
+          errors={errors}
+          onChange={(patch) => {
+            setStorageFields((current) => ({ ...current, ...patch }));
+            setErrors((current) => clearJobFormErrors(current, Object.keys(patch) as (keyof JobFormErrors)[]));
+          }}
+        />
+      )}
+
+      {showHazardousStorageFields && (
+        <StorageHazardFields
+          idPrefix="storage-hazard-edit"
+          category={category}
+          values={storageHazardFields}
+          errors={{ storageRiskGroups: errors.storageRiskGroups }}
+          onChange={(patch) => {
+            setStorageHazardFields((current) => ({ ...current, ...patch }));
+            setErrors((current) => clearJobFormErrors(current, Object.keys(patch) as (keyof JobFormErrors)[]));
+          }}
+        />
+      )}
+
+      {showContainerFields && (
+        <StorageContainerGroupsFields
+          idPrefix="storage-container-edit"
+          groups={containerGroups}
+          errors={errors.storageContainerGroupErrors}
+          onChange={(nextGroups) => {
+            setContainerGroups(nextGroups);
+            setErrors((current) => clearJobFormErrors(current, ["storageContainerGroupErrors"]));
+          }}
+        />
+      )}
+
+      {!showDeliveryFields && (
       <div>
         <p id={photosId} className="text-sm font-medium text-foreground">
-          Operasyon Fotoğrafları *
+          {showStorageFields ? "Yük / Ürün Fotoğrafları *" : "Operasyon Fotoğrafları *"}
         </p>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Operasyonun yapılacağı alanı, yükü, ekipmanı veya mevcut saha
-          koşullarını gösteren güncel fotoğraflar yükleyin. Fotoğraflar,
-          hizmet verenlerin işi doğru değerlendirmesine yardımcı olacaktır.
+          {showStorageFields
+            ? "Depolanacak ürünün/yükün mevcut durumunu, ambalajını ve paketleme koşullarını net şekilde gösteren güncel fotoğraflar yükleyin. Fotoğraflar, hizmet verenlerin depolama koşullarını doğru değerlendirmesine yardımcı olacaktır."
+            : "Operasyonun yapılacağı alanı, yükü, ekipmanı veya mevcut saha koşullarını gösteren güncel fotoğraflar yükleyin. Fotoğraflar, hizmet verenlerin işi doğru değerlendirmesine yardımcı olacaktır."}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           Kişisel bilgi, telefon numarası, plaka veya gizli belge içeren
@@ -744,6 +1114,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
             onChange={setPhotoState}
             onBusyChange={setPhotosProcessing}
             errorId={errors.photoCount ? `${photosId}-error` : undefined}
+            maxPhotos={getMaxPhotos(category)}
           />
         </div>
         {errors.photoCount && (
@@ -752,24 +1123,9 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
           </p>
         )}
       </div>
+      )}
 
-      {showDeliveryFields ? (
-        <div>
-          <p className="text-sm font-semibold text-foreground">Yük Alınacak Yer</p>
-          <NakliyeLocationFields
-            idPrefix="job-edit-pickup"
-            manualValue={PICKUP_MANUAL_LOCATION_VALUE}
-            values={{ provinceCode, district, facilityId, customFacilityName: otherFacilityText, addressText }}
-            errors={{
-              province: errors.province,
-              district: errors.district,
-              locationType: errors.workLocationType,
-              addressText: errors.addressText,
-            }}
-            onChange={handlePickupFieldsChange}
-          />
-        </div>
-      ) : showSimplifiedLocation ? (
+      {!showDeliveryFields && (showSimplifiedLocation ? (
         // Depolama (Kapalı/Açık Saha) VE Gümrük Müşavirliği: lokasyon
         // yalnızca İl/İlçe'dir (bkz. görev tanımı) — Liman/Sanayi/OSB ve
         // Açık Adres hiç render edilmez.
@@ -914,31 +1270,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
             )}
           </div>
         </>
-      )}
-
-      {showDeliveryFields && (
-        <div className="border-t border-dashed border-border pt-4">
-          <p className="text-sm font-semibold text-foreground">Teslim Edilecek Yer</p>
-          <NakliyeLocationFields
-            idPrefix="job-edit-delivery"
-            manualValue={DELIVERY_MANUAL_LOCATION_VALUE}
-            values={{
-              provinceCode: deliveryProvinceCode,
-              district: deliveryDistrict,
-              facilityId: deliveryFacilityId,
-              customFacilityName: deliveryOtherFacilityText,
-              addressText: deliveryAddressText,
-            }}
-            errors={{
-              province: errors.deliveryProvince,
-              district: errors.deliveryDistrict,
-              locationType: errors.deliveryLocationType,
-              addressText: errors.deliveryAddressText,
-            }}
-            onChange={handleDeliveryFieldsChange}
-          />
-        </div>
-      )}
+      ))}
 
       {submitError && (
         <p role="alert" className="text-sm text-danger">
@@ -964,5 +1296,310 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
               : "Kaydet"}
       </button>
     </form>
+  );
+}
+
+/**
+ * Nakliye ilan düzenleme — "Konteyner Taşıması ve ADR Bağımsız Bölümleri"
+ * görevi (kullanıcı seçimi: "Add numbered cards to edit form too, matching
+ * create"): job-request-form.tsx'in isNakliyeCard dalıyla AYNI `NakliyeSectionCard`
+ * sırası, ama TEK ilan (çoklu hizmet YOK) için. Diğer TÜM kategoriler
+ * `JobEditFormFields`in kendi DEĞİŞMEMİŞ düz JSX'ini kullanmaya devam eder
+ * (bkz. `!showDeliveryFields` dalları) — bu bileşen yalnızca Nakliye'de
+ * (showDeliveryFields true) render edilir. Tüm state/handler'lar
+ * `JobEditFormFields`e ait, prop olarak taşınır — ikinci bir state kopyası
+ * İCAT EDİLMEDİ.
+ *
+ * "Konteyner Taşımalarında Araç Tercihini Gizleme" görevi — bölüm sırası
+ * artık SABİT 1-8 değil: Konteyner Taşıması=Evet iken Araç Tercihi kartı
+ * hiç render edilmez ve toplam 7 kart kalır (job-request-form.tsx'teki AYNI
+ * dinamik numaralandırma ilkesi, bkz. `showVehiclePreference` aşağıda).
+ */
+function NakliyeEditCards({
+  job,
+  category,
+  setCategory,
+  title,
+  setTitle,
+  description,
+  setDescription,
+  errors,
+  categoryId,
+  titleId,
+  descriptionId,
+  nakliyeDetails,
+  patchNakliyeDetails,
+  nakliyeErrors,
+  nakliyeCargoGroups,
+  setNakliyeCargoGroups,
+  cargoGroupErrors,
+  workDate,
+  setWorkDate,
+  workEndDate,
+  setWorkEndDate,
+  todayLocalDate,
+  provinceCode,
+  district,
+  facilityId,
+  otherFacilityText,
+  addressText,
+  handlePickupFieldsChange,
+  deliveryProvinceCode,
+  deliveryDistrict,
+  deliveryFacilityId,
+  deliveryOtherFacilityText,
+  deliveryAddressText,
+  handleDeliveryFieldsChange,
+  photosId,
+  setPhotoState,
+  setPhotosProcessing,
+}: {
+  job: Job;
+  category: string;
+  setCategory: (value: string) => void;
+  title: string;
+  setTitle: (value: string) => void;
+  description: string;
+  setDescription: (value: string) => void;
+  errors: JobFormErrors;
+  categoryId: string;
+  titleId: string;
+  descriptionId: string;
+  nakliyeDetails: NakliyeDetailsFieldValues;
+  patchNakliyeDetails: (patch: Partial<NakliyeDetailsFieldValues>) => void;
+  nakliyeErrors: NakliyeDetailsErrors;
+  nakliyeCargoGroups: NakliyeCargoGroupFieldValues[];
+  setNakliyeCargoGroups: (value: NakliyeCargoGroupFieldValues[]) => void;
+  cargoGroupErrors: Record<string, NakliyeCargoGroupErrors>;
+  workDate: string;
+  setWorkDate: (value: string) => void;
+  workEndDate: string;
+  setWorkEndDate: (value: string) => void;
+  todayLocalDate: string;
+  provinceCode: string;
+  district: string;
+  facilityId: string;
+  otherFacilityText: string;
+  addressText: string;
+  handlePickupFieldsChange: (patch: Partial<NakliyeLocationFieldValues>) => void;
+  deliveryProvinceCode: string;
+  deliveryDistrict: string;
+  deliveryFacilityId: string;
+  deliveryOtherFacilityText: string;
+  deliveryAddressText: string;
+  handleDeliveryFieldsChange: (patch: Partial<NakliyeLocationFieldValues>) => void;
+  photosId: string;
+  setPhotoState: (value: { keptPhotoIds: string[]; newPhotos: ReadyJobPhoto[] }) => void;
+  setPhotosProcessing: (value: boolean) => void;
+}) {
+  // "Yük Bilgileri ve Konteyner Taşıması Birleştirmesi" + "Konteyner
+  // Taşımalarında Araç Tercihini Gizleme" + "Konteyner Tetikleyicisi
+  // Ürün/Yük Cinsi'ne Taşındı" görevleri — job-request-form.tsx İLE AYNI
+  // dinamik numaralandırma ilkesi: ayrı "3 — Konteyner Taşıması" kartı ve
+  // (bu görevle) ayrı "Tehlikeli Madde / ADR" kartı İKİSİ de KALDIRILDI
+  // (ADR artık her Yük Grubu'nun kendi kartının altında), Araç Tercihi
+  // gizlendiğinde de bölüm numaraları boşluk bırakmadan kesintisiz kayar.
+  // "Konteyner Taşımalarında Araç Tercihini Gizleme" görevi hâlâ geçerli —
+  // ama artık TÜM Yük Gruplarına bakar (bkz. showNakliyeVehiclePreference'ın
+  // JobEditFormFields'taki AYNI hesaplaması) — burası SADECE numaralandırma
+  // için kendi kopyasını hesaplar, prop olarak taşımaya gerek yok.
+  const showVehiclePreference = nakliyeCargoGroups.some((group) => !isNakliyeContainerProductType(group.productType));
+  const shipmentPlanCardNumber = 3;
+  const vehiclePreferenceCardNumber = 4;
+  const yuklemeTeslimatCardNumber = showVehiclePreference ? 5 : 4;
+  const photosCardNumber = showVehiclePreference ? 6 : 5;
+  return (
+    <div className="flex flex-col gap-4">
+      <NakliyeSectionCard number={1} title="Temel Bilgiler">
+        <div>
+          <label htmlFor={categoryId} className="text-sm font-medium text-foreground">
+            Hizmet Kategorisi
+          </label>
+          <select
+            id={categoryId}
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+            aria-invalid={errors.category ? true : undefined}
+            aria-describedby={errors.category ? `${categoryId}-error` : undefined}
+            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <option value="">Kategori seçiniz</option>
+            {SERVICE_CATEGORY_GROUPS.map((group) => (
+              <optgroup key={group.id} label={group.label}>
+                {group.categories.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {errors.category && (
+            <p id={`${categoryId}-error`} className="mt-2 text-sm text-danger">
+              {errors.category}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4">
+          <label htmlFor={titleId} className="text-sm font-medium text-foreground">
+            İlan Başlığı
+          </label>
+          <input
+            id={titleId}
+            type="text"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            maxLength={TITLE_MAX_LENGTH}
+            aria-invalid={errors.title ? true : undefined}
+            aria-describedby={errors.title ? `${titleId}-error` : undefined}
+            placeholder="Örnek: Gebze'deki Sahadan Depoya Paletli Yük Nakliyesi"
+            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          {errors.title && (
+            <p id={`${titleId}-error`} className="mt-2 text-sm text-danger">
+              {errors.title}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <label htmlFor={descriptionId} className="text-sm font-medium text-foreground">
+              İş Açıklaması
+            </label>
+            <span className="text-xs text-muted-foreground">
+              {description.trim().length} / {DESCRIPTION_MAX_LENGTH}
+            </span>
+          </div>
+          <textarea
+            id={descriptionId}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            maxLength={DESCRIPTION_MAX_LENGTH}
+            rows={4}
+            aria-invalid={errors.description ? true : undefined}
+            aria-describedby={errors.description ? `${descriptionId}-error` : undefined}
+            placeholder="Hizmet ihtiyacınızı, iş kapsamını ve beklentilerinizi açıklayın."
+            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          {errors.description ? (
+            <p id={`${descriptionId}-error`} className="mt-2 text-sm text-danger">
+              {errors.description}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Başlık ve açıklamaya firma/tesis adı, açık adres, telefon veya e-posta yazmayın — bu bilgiler yalnızca
+              teklif kabul edildikten sonra paylaşılabilir.
+            </p>
+          )}
+        </div>
+      </NakliyeSectionCard>
+
+      <NakliyeSectionCard number={2} title="Yük Bilgileri">
+        <div id="nakliye-edit-cargo-groups">
+          <NakliyeCargoGroupsFields
+            idPrefix="nakliye-edit-cargo"
+            groups={nakliyeCargoGroups}
+            errors={cargoGroupErrors}
+            onChange={setNakliyeCargoGroups}
+          />
+        </div>
+      </NakliyeSectionCard>
+
+      <NakliyeSectionCard number={shipmentPlanCardNumber} title="Taşıma Planı">
+        <ShipmentPlanFields
+          idPrefix="nakliye-edit-plan"
+          workDate={workDate}
+          workEndDate={workEndDate}
+          onWorkDateChange={setWorkDate}
+          onWorkEndDateChange={setWorkEndDate}
+          workDateError={errors.workDate}
+          workEndDateError={errors.workEndDate}
+          todayLocalDate={todayLocalDate}
+        />
+      </NakliyeSectionCard>
+
+      {showVehiclePreference && (
+        <NakliyeSectionCard number={vehiclePreferenceCardNumber} title="Araç Tercihi">
+          <VehiclePreferenceFields idPrefix="nakliye-edit-vehicle" values={nakliyeDetails} onChange={patchNakliyeDetails} />
+          {nakliyeErrors.vehiclePreference && (
+            <p className="mt-2 text-sm text-danger">{nakliyeErrors.vehiclePreference}</p>
+          )}
+        </NakliyeSectionCard>
+      )}
+
+      <NakliyeSectionCard number={yuklemeTeslimatCardNumber} title="Yükleme ve Teslimat">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-sm font-semibold text-foreground">Yükleme (Nereden)</p>
+            <div className="mt-3">
+              <NakliyeLocationFields
+                idPrefix="job-edit-pickup"
+                manualValue={PICKUP_MANUAL_LOCATION_VALUE}
+                values={{ provinceCode, district, facilityId, customFacilityName: otherFacilityText, addressText }}
+                errors={{
+                  province: errors.province,
+                  district: errors.district,
+                  locationType: errors.workLocationType,
+                  addressText: errors.addressText,
+                }}
+                onChange={handlePickupFieldsChange}
+              />
+            </div>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-sm font-semibold text-foreground">Teslimat (Nereye)</p>
+            <div className="mt-3">
+              <NakliyeLocationFields
+                idPrefix="job-edit-delivery"
+                manualValue={DELIVERY_MANUAL_LOCATION_VALUE}
+                values={{
+                  provinceCode: deliveryProvinceCode,
+                  district: deliveryDistrict,
+                  facilityId: deliveryFacilityId,
+                  customFacilityName: deliveryOtherFacilityText,
+                  addressText: deliveryAddressText,
+                }}
+                errors={{
+                  province: errors.deliveryProvince,
+                  district: errors.deliveryDistrict,
+                  locationType: errors.deliveryLocationType,
+                  addressText: errors.deliveryAddressText,
+                }}
+                onChange={handleDeliveryFieldsChange}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <LoadingMethodField idPrefix="nakliye-edit-loading-method" values={nakliyeDetails} onChange={patchNakliyeDetails} customTextError={nakliyeErrors.loadingMethodCustomText} />
+        </div>
+      </NakliyeSectionCard>
+
+      <NakliyeSectionCard number={photosCardNumber} title="Fotoğraflar ve Belgeler">
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Operasyonun yapılacağı alanı, yükü, ekipmanı veya mevcut saha koşullarını gösteren güncel fotoğraflar
+          yükleyin. Fotoğraflar, hizmet verenlerin işi doğru değerlendirmesine yardımcı olacaktır.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Kişisel bilgi, telefon numarası, plaka veya gizli belge içeren fotoğraflar yüklemeyin.
+        </p>
+        <div className="mt-3">
+          <JobPhotoEditor
+            job={job}
+            onChange={setPhotoState}
+            onBusyChange={setPhotosProcessing}
+            errorId={errors.photoCount ? `${photosId}-error` : undefined}
+            maxPhotos={getMaxPhotos(category)}
+          />
+        </div>
+        {errors.photoCount && (
+          <p id={`${photosId}-error`} role="alert" className="mt-2 text-sm text-danger">
+            {errors.photoCount}
+          </p>
+        )}
+      </NakliyeSectionCard>
+    </div>
   );
 }

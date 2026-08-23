@@ -70,7 +70,7 @@ function MainPhoto({
       storageKey={photo.storageKey}
       alt={alt}
       priority={priority}
-      sizes="(min-width: 1024px) 768px, 100vw"
+      sizes="(min-width: 1024px) 900px, 100vw"
       className="animate-photo-fade object-contain motion-reduce:animate-none"
     />
   );
@@ -99,7 +99,22 @@ export function JobPhotoGallery({ photos, jobTitle }: { photos: JobPhoto[]; jobT
 
   return (
     <div>
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-background">
+      {/* Masaüstünde (lg+) sabit yükseklik — ilan detay sayfası masaüstü
+          tek-ekran yoğunlaştırma görevi (3. tur): başlık artık AYRI bir
+          şeride taşındığı için (bkz. job-detail-content.tsx) bu kart,
+          fotoğraf+bilgi satırının EN UZUN elemanı hâline geldi — satırın
+          (dolayısıyla sayfanın) toplam yüksekliğini DOĞRUDAN belirliyor
+          (gerçek Playwright ölçümüyle doğrulandı: 240px azaltma, ölçülen
+          sayfa yüksekliğini BİREBİR aynı miktarda düşürdü). Bu yüzden
+          bilerek "yaklaşık 300-320px" hedefinin altında, 230-260px
+          aralığında tutuluyor — 1366×768'de sıfır kaydırma önceliği,
+          görsel referansın tam fotoğraf yüksekliğinden daha ağır basıyor
+          (bkz. proje raporu, çelişki çözümü). `aspect-video`in genişliğe
+          bağımlı, kontrolsüz büyüyen yüksekliği yerine geçer. `object-contain`
+          korunur (kırpma/bozulma yok) — dikey/geniş fotoğraflar bu sabit
+          kutu içinde mektup kutusu gibi (letterbox) görünür, hiçbir zaman
+          kırpılmaz. Mobil/tablette (`lg` altı) davranış DEĞİŞMEDİ. */}
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-background lg:aspect-auto lg:h-[230px] xl:h-[245px] 2xl:h-[260px]">
         <MainPhoto
           photo={activePhoto}
           alt={`${jobTitle} - fotoğraf ${activeIndex + 1}`}
@@ -118,7 +133,7 @@ export function JobPhotoGallery({ photos, jobTitle }: { photos: JobPhoto[]; jobT
                 onClick={() => setActiveIndex(index)}
                 aria-label={`${index + 1}. fotoğrafı göster`}
                 aria-current={isActive ? "true" : undefined}
-                className={`relative h-16 w-16 shrink-0 cursor-pointer overflow-hidden rounded-lg border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-20 sm:w-20 ${
+                className={`relative h-14 w-14 shrink-0 cursor-pointer overflow-hidden rounded-lg border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                   isActive ? "border-primary" : "border-border hover:border-primary/40"
                 }`}
               >

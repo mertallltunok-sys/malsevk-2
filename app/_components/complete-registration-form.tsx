@@ -5,21 +5,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { getCompanyTypeFieldLabel, getCompanyTypeOptions, isCompanyType, type CompanyType } from "../_lib/company-type";
 import { finishSupabaseRegistration, type CompleteRegistrationInput } from "../_lib/complete-registration";
-import { isCustomsOnlyRegistration, isCustomsBrokerProvider, isGeneralDocumentRequired } from "../_lib/customs-license";
 import { getLegalDocumentMeta, type LegalDocumentId } from "../_lib/legal-documents";
 import {
   clearPendingRegistrationDraft,
   readPendingRegistrationDraft,
 } from "../_lib/pending-registration-draft";
-import { CUSTOMS_LICENSE_DECLARATION_TEXT, PROVIDER_DOCUMENT_DECLARATION_TEXT } from "../_lib/provider-document-consents";
 import { isValidRegistrationMetadata, type RegistrationMetadataFields } from "../_lib/registration-metadata";
-import { GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import { createSupabaseBrowserClient } from "../_lib/supabase/browser-client";
 import type { UserRole } from "../_lib/types";
 import { getDistrictsByProvinceCode, getProvinces } from "../_lib/turkey-locations";
 import { LegalDocumentModal } from "./legal-document-modal";
-import { MultiSelectChips } from "./multi-select-chips";
-import { ProviderDocumentUpload, type ReadyProviderDocument } from "./provider-document-upload";
 import { SearchableSelect } from "./searchable-select";
 
 /**
@@ -90,9 +85,6 @@ export function CompleteRegistrationForm() {
   const provinceId = useId();
   const districtId = useId();
   const legalConsentId = useId();
-  const providerServicesId = useId();
-  const documentDeclarationId = useId();
-  const customsLicenseDeclarationId = useId();
 
   const [role, setRole] = useState<UserRole | "">("");
   const [firstName, setFirstName] = useState("");
@@ -103,13 +95,6 @@ export function CompleteRegistrationForm() {
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
-  const [providerServiceCategoryIds, setProviderServiceCategoryIds] = useState<string[]>([]);
-  const [providerDocuments, setProviderDocuments] = useState<ReadyProviderDocument[]>([]);
-  const [providerDocumentsBusy, setProviderDocumentsBusy] = useState(false);
-  const [documentDeclarationAccepted, setDocumentDeclarationAccepted] = useState(false);
-  const [customsLicenseDocument, setCustomsLicenseDocument] = useState<ReadyProviderDocument | null>(null);
-  const [customsLicenseDocumentBusy, setCustomsLicenseDocumentBusy] = useState(false);
-  const [customsLicenseDeclarationAccepted, setCustomsLicenseDeclarationAccepted] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [openLegalDocumentId, setOpenLegalDocumentId] = useState<LegalDocumentId | null>(null);
@@ -139,17 +124,13 @@ export function CompleteRegistrationForm() {
     setDistrict(fields.district);
     const matchedProvince = provinces.find((item) => item.name === fields.province);
     if (matchedProvince) setProvinceCode(matchedProvince.code);
-    setProviderServiceCategoryIds(fields.providerServiceCategoryIds);
     setLegalConsentAccepted(fields.legalConsentAccepted);
-    setDocumentDeclarationAccepted(fields.documentDeclarationAccepted);
-    setCustomsLicenseDeclarationAccepted(fields.customsLicenseDeclarationAccepted);
-    // NOT: providerDocuments/customsLicenseDocument (IndexedDB metadata'sı)
-    // hiçbir kaynaktan formda ön-doldurulmaz — sessionStorage taslağı
-    // durumunda otomatik tamamlama zaten draft'ın KENDİSİYLE (bu prefill'i
-    // hiç beklemeden) çalışır; user_metadata'da bu alanlar zaten hiç yoktur
-    // (bkz. registration-metadata.ts). Her iki durumda da belgeler
-    // gerekiyorsa kullanıcı yeniden yüklemelidir (bkz. bu bileşenin
-    // üstündeki dokümantasyon).
+    // NOT: providerServiceCategoryIds/documentDeclarationAccepted/
+    // customsLicenseDeclarationAccepted/providerDocuments/
+    // customsLicenseDocument artık BU formda hiç toplanmıyor/gösterilmiyor
+    // (bkz. HİZMET VEREN ONBOARDING SADELEŞTİRMESİ) — hizmet/belge yönetimi
+    // artık yalnızca hesap oluşturulduktan SONRA "Belge Yükleme" ekranından
+    // yapılır.
   }
 
   useEffect(() => {
@@ -237,23 +218,6 @@ export function CompleteRegistrationForm() {
 
   function handleRoleChange(nextRole: UserRole) {
     setRole(nextRole);
-    if (nextRole !== "hizmet-veren") {
-      setProviderDocuments([]);
-      setCustomsLicenseDocument(null);
-      setCustomsLicenseDeclarationAccepted(false);
-    }
-  }
-
-  function handleProviderServicesChange(next: string[]) {
-    setProviderServiceCategoryIds(next);
-    if (!next.includes(GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID)) {
-      setCustomsLicenseDocument(null);
-      setCustomsLicenseDeclarationAccepted(false);
-    }
-    if (isCustomsOnlyRegistration(next)) {
-      setProviderDocuments([]);
-      setDocumentDeclarationAccepted(false);
-    }
   }
 
   function handleProvinceChange(nextCode: string) {
@@ -292,32 +256,6 @@ export function CompleteRegistrationForm() {
       setFormError("İl ve ilçe zorunludur.");
       return;
     }
-    if (role === "hizmet-veren") {
-      if (providerServiceCategoryIds.length === 0) {
-        setFormError("En az bir hizmet seçmelisiniz.");
-        return;
-      }
-      if (isGeneralDocumentRequired(providerServiceCategoryIds)) {
-        if (providerDocuments.length === 0) {
-          setFormError("En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz.");
-          return;
-        }
-        if (!documentDeclarationAccepted) {
-          setFormError("Belge doğruluk beyanını kabul etmelisiniz.");
-          return;
-        }
-      }
-      if (isCustomsBrokerProvider(providerServiceCategoryIds)) {
-        if (!customsLicenseDocument) {
-          setFormError("Gümrük Müşaviri İzin Belgesi yüklemelisiniz.");
-          return;
-        }
-        if (!customsLicenseDeclarationAccepted) {
-          setFormError("Yüklediğiniz belgenin size ait ve güncel olduğunu onaylamalısınız.");
-          return;
-        }
-      }
-    }
     if (!legalConsentAccepted) {
       setFormError("Devam etmek için Gizlilik Politikası, Kullanım Koşulları ve KVKK Aydınlatma Metni'ni kabul etmelisiniz.");
       return;
@@ -333,25 +271,11 @@ export function CompleteRegistrationForm() {
       companyType,
       province: provinceName,
       district,
-      providerServiceCategoryIds,
-      providerDocuments: providerDocuments.map((doc) => ({
-        indexedDbStorageKey: doc.indexedDbStorageKey,
-        originalFileName: doc.originalFileName,
-        mimeType: doc.mimeType,
-        extension: doc.extension,
-        size: doc.size,
-      })),
-      documentDeclarationAccepted,
-      customsLicenseDocument: customsLicenseDocument
-        ? {
-            indexedDbStorageKey: customsLicenseDocument.indexedDbStorageKey,
-            originalFileName: customsLicenseDocument.originalFileName,
-            mimeType: customsLicenseDocument.mimeType,
-            extension: customsLicenseDocument.extension,
-            size: customsLicenseDocument.size,
-          }
-        : undefined,
-      customsLicenseDeclarationAccepted,
+      providerServiceCategoryIds: [],
+      providerDocuments: [],
+      documentDeclarationAccepted: false,
+      customsLicenseDocument: undefined,
+      customsLicenseDeclarationAccepted: false,
       legalConsentAccepted,
     });
     setSubmitting(false);
@@ -514,100 +438,9 @@ export function CompleteRegistrationForm() {
         />
       </div>
 
-      {role === "hizmet-veren" && (
-        <>
-          <fieldset>
-            <legend className="text-sm font-medium text-foreground">Verdiğiniz Hizmetler</legend>
-            <p className="mt-1 text-xs text-muted-foreground">Birden fazla hizmet seçebilirsiniz.</p>
-            <div id={providerServicesId} className="mt-3 flex flex-col gap-5">
-              {SERVICE_CATEGORY_GROUPS.map((group) => (
-                <MultiSelectChips
-                  key={group.id}
-                  id={`${providerServicesId}-${group.id}`}
-                  label={group.label}
-                  options={group.categories.map((category) => ({ value: category.id, label: category.label }))}
-                  selected={providerServiceCategoryIds}
-                  onChange={handleProviderServicesChange}
-                />
-              ))}
-            </div>
-          </fieldset>
-
-          {!isCustomsOnlyRegistration(providerServiceCategoryIds) && (
-            <>
-              <div>
-                <p className="text-sm font-medium text-foreground">Faaliyet Belgesi veya Faaliyet Raporu Yükle</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Şirketinizin faaliyetini gösteren en az bir belge yükleyin (PDF, Word, Excel, ODT veya görsel biçimde).
-                </p>
-                <div className="mt-3">
-                  <ProviderDocumentUpload
-                    onDocumentsChange={setProviderDocuments}
-                    onBusyChange={setProviderDocumentsBusy}
-                    disabled={submitting}
-                    errorId={undefined}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor={documentDeclarationId}
-                  className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-                >
-                  <input
-                    id={documentDeclarationId}
-                    type="checkbox"
-                    checked={documentDeclarationAccepted}
-                    onChange={(event) => setDocumentDeclarationAccepted(event.target.checked)}
-                    className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                  />
-                  <span className="text-sm leading-relaxed text-foreground">{PROVIDER_DOCUMENT_DECLARATION_TEXT}</span>
-                </label>
-              </div>
-            </>
-          )}
-
-          {providerServiceCategoryIds.includes(GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID) && (
-            <>
-              <div>
-                <p className="text-sm font-medium text-foreground">Gümrük Müşaviri İzin Belgesi</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Gümrük Müşavirliği hizmeti verebilmek için izin belgenizi yükleyin (PDF, JPG veya PNG).
-                </p>
-                <div className="mt-3">
-                  <ProviderDocumentUpload
-                    onDocumentsChange={(documents) => setCustomsLicenseDocument(documents[0] ?? null)}
-                    onBusyChange={setCustomsLicenseDocumentBusy}
-                    disabled={submitting}
-                    errorId={undefined}
-                    allowedExtensions={["pdf", "jpg", "jpeg", "png"]}
-                    maxFiles={1}
-                    dropHintText="Gümrük Müşaviri İzin Belgenizi buraya sürükleyin veya dosya seçin."
-                    formatsHintText="PDF, JPG, PNG"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor={customsLicenseDeclarationId}
-                  className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-                >
-                  <input
-                    id={customsLicenseDeclarationId}
-                    type="checkbox"
-                    checked={customsLicenseDeclarationAccepted}
-                    onChange={(event) => setCustomsLicenseDeclarationAccepted(event.target.checked)}
-                    className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                  />
-                  <span className="text-sm leading-relaxed text-foreground">{CUSTOMS_LICENSE_DECLARATION_TEXT}</span>
-                </label>
-              </div>
-            </>
-          )}
-        </>
-      )}
+      {/* HİZMET VEREN ONBOARDING SADELEŞTİRMESİ: "Verdiğiniz Hizmetler" +
+          belge yükleme bölümleri bu yedek formdan da KALDIRILDI — bkz.
+          login-form.tsx'teki AYNI değişiklik. */}
 
       <div>
         <label
@@ -636,21 +469,15 @@ export function CompleteRegistrationForm() {
         </p>
       )}
 
-      {(() => {
-        const providerBusy = role === "hizmet-veren" && (providerDocumentsBusy || customsLicenseDocumentBusy);
-        const isSubmitDisabled = submitting || providerBusy;
-        return (
-          <button
-            type="submit"
-            disabled={isSubmitDisabled}
-            aria-disabled={isSubmitDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {(submitting || providerBusy) && <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
-            {providerBusy ? "Belgeler doğrulanıyor..." : submitting ? "Tamamlanıyor..." : "Kaydı Tamamla"}
-          </button>
-        );
-      })()}
+      <button
+        type="submit"
+        disabled={submitting}
+        aria-disabled={submitting}
+        className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
+      >
+        {submitting && <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
+        {submitting ? "Tamamlanıyor..." : "Kaydı Tamamla"}
+      </button>
 
       {openLegalDocumentId && (
         <LegalDocumentModal documentId={openLegalDocumentId} mode="consent" onClose={() => setOpenLegalDocumentId(null)} />

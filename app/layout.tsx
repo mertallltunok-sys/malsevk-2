@@ -1,9 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { GlobalErrorListener } from "./_components/global-error-listener";
 import { NavigationHistoryTracker } from "./_components/navigation-history-tracker";
-import { SiteFooter } from "./_components/site-footer";
-import { SiteHeader } from "./_components/site-header";
-import { WhatsappSupportButton } from "./_components/whatsapp-support-button";
+import { SiteChrome } from "./_components/site-chrome";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -47,10 +46,8 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col font-sans">
         <NavigationHistoryTracker />
-        <SiteHeader />
-        <main className="flex-1">{children}</main>
-        <SiteFooter />
-        <WhatsappSupportButton />
+        <GlobalErrorListener />
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );

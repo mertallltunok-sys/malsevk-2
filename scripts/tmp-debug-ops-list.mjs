@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto("http://localhost:3000/giris-yap");
+await page.locator('input[type="email"]').fill("malsevk-test-opsadm-1786323297699@mailinator.com");
+await page.locator('input[type="password"]').fill("TestSifre2026!Dev");
+await page.getByRole("button", { name: "Giriş Yap" }).click();
+await page.waitForTimeout(2000);
+await page.goto("http://localhost:3000/admin/operasyonlar");
+await page.waitForTimeout(2000);
+console.log(await page.locator("body").innerText());
+await browser.close();

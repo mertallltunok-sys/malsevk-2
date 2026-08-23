@@ -11,17 +11,29 @@ import {
   isOfferPendingActionBlocked,
   isReofferCooldownStatus,
 } from "./job-requests";
+import { containsDirectContactInfo } from "./contact-leak-detection";
 import { isJobListingExpired } from "./job-publish-window";
 import { isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE, JOB_CLOSURE_BLOCKED_MESSAGE } from "./job-closure";
+import { isJobModerationApproved } from "./job-moderation";
 import { closeJob as closeJobRecord, deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
-import { isJobVisibleToSession } from "./job-visibility";
-import { canSubmitOffersAsCustomsBroker } from "./customs-license";
+import { isProviderAuthorizedToOfferOnJob } from "./job-visibility";
 import { findJobById } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { isValidCurrency, MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
 import { isTransportationCategory } from "./product-catalog";
 import { hasReachedActiveJobLimit } from "./provider-capacity";
+import { isRecyclingCategory, isRecyclingCommercialDirection } from "./recycling-catalog";
+import {
+  acceptOfferOnSupabase,
+  createOfferOnSupabase,
+  recordAgreementFailureOnSupabase,
+  recordCompletionDisputeCancelledOnSupabase,
+  rejectOfferOnSupabase,
+  requiresBackendOfferSync,
+  withdrawOfferOnSupabase,
+} from "./supabase-offer-sync";
+import { containsDangerousMarkup, normalizeFreeText } from "./text-sanitization";
 import type { Currency, DisagreementReason, Job, JobClosureReason, Offer, OfferStatus, Session } from "./types";
 
 const OFFERS_STORAGE_KEY = "malsevk.offers.v1";
@@ -152,6 +164,29 @@ export const offersStore = {
 
 export function getAllOffers(): Offer[] {
   return readAllOffersSnapshot();
+}
+
+/**
+ * GENEL GÜVENLİK/VERİ DOĞRULAMA görevi §14 — bkz. supabase-offer-reads.ts'in
+ * kendi başlık dokümanı: `fetchVisibleOffersFromSupabase()`ın döndürdüğü
+ * satırlardan, bu tarayıcının YEREL deposunda karşılığı (aynı
+ * `supabaseOfferId`) OLMAYANLARI depoya YAZAR — böylece bir SONRAKİ
+ * `updateOfferStatus`/`withdrawOffer`/vb. çağrısı bu teklifi sıradan bir
+ * yerel kayıt gibi bulur. Var olan bir yerel kaydın hiçbir alanına ASLA
+ * dokunmaz (yalnızca EKLER) — bu tarayıcının kendi, henüz senkronlanmamış bir
+ * yerel değişikliği hiçbir zaman sessizce ezilmez.
+ */
+export function hydrateMissingOffersFromRemote(remoteOffers: Offer[]): void {
+  if (remoteOffers.length === 0) return;
+  const local = readAllOffersSnapshot();
+  const localSupabaseIds = new Set(
+    local.map((offer) => offer.supabaseOfferId).filter((id): id is string => Boolean(id)),
+  );
+  const missing = remoteOffers.filter(
+    (offer) => offer.supabaseOfferId && !localSupabaseIds.has(offer.supabaseOfferId),
+  );
+  if (missing.length === 0) return;
+  writeAllOffers([...local, ...missing]);
 }
 
 /**
@@ -322,11 +357,23 @@ export function canProviderSubmitNewOffer(
   // yalnızca "Teklif Ver" butonunu gizlemekle kalmaz, veri katmanında da
   // (aşağıdaki createOffer'da tekrar) uygulanır — arayüz atlanabilir bir tek
   // nokta değildir.
-  if (!isJobVisibleToSession(session, job)) return false;
-  // Gümrük Müşavirliği'ne özel ek kapı (bkz. customs-license.ts) — Gümrük
-  // Müşavirliği seçili olmayan bir Hizmet Veren için her zaman `true` döner,
-  // diğer hiçbir hizmetin teklif verme davranışını etkilemez.
-  if (!canSubmitOffersAsCustomsBroker(session.id)) return false;
+  // HİZMET BAZLI PROVIDER YETKİLENDİRMESİ (bkz. job-visibility.ts, migration
+  // 0038): bu kontrol artık YALNIZCA Nakliye/Gümrük Müşavirliği için değil,
+  // HER hizmet kategorisi için admin-onaylı bir yetkilendirme arar — provider
+  // bu ilanın kategorisi için yetkili değilse (hiç seçmemiş, seçmiş ama
+  // belgesi onaylanmamış, ya da yetkisi sonradan kaldırılmış) `false` döner.
+  // ESKİDEN burada AYRICA `customs-license.ts#canSubmitOffersAsCustomsBroker`
+  // (yalnızca Gümrük Müşavirliği'ne özel, SİTE GENELİNDE teklif engelleyen
+  // bir kapı) çağrılırdı — 0038 ile RETİRE edildi: aynı kural artık genel
+  // hizmet yetkilendirmesinin doğal bir SONUCU (yalnızca yetkisiz olunan
+  // hizmetin teklifini engeller, DİĞER yetkili hizmetleri ETKİLEMEZ — "her
+  // hizmet bağımsız olmalı" ilkesiyle eski site-geneli davranıştan daha
+  // doğru), ayrı/ikinci bir kapı olarak TUTULMASI gerekmiyordu.
+  if (!isProviderAuthorizedToOfferOnJob(session, job)) return false;
+  // İlan Onayı (bkz. job-moderation.ts) — admin henüz onaylamamış (ya da
+  // reddetmiş) bir ilana kimse teklif veremez; job-visibility.ts'in hizmet
+  // yetkilendirmesiyle AYNI seviyede, ondan bağımsız ikinci bir kapı.
+  if (!isJobModerationApproved(job)) return false;
   if (!isJobOpenForOffers(job.status)) return false;
   if (isJobClosedToNewOffers(job.id, offers)) return false;
   // İlan Kapatma: Hizmet Alan bu ilanı manuel olarak kapattıysa (bkz.
@@ -557,6 +604,8 @@ export type CreateOfferInput = {
    * kaydında bu alan hiç olmaz (bkz. types.ts#Offer.estimatedDuration).
    */
   estimatedDuration?: number;
+  /** "Teklifin Ticari Yönü" — yalnızca Geri Dönüşüm & Atık Tahliye kategorisi için: `createOffer` doğrular ve zorunlu kılar. Diğer kategorilerde bu alan hiç gönderilmez (undefined) — types.ts#Offer.commercialDirection'ın kendi dokümanı, estimatedDuration İLE AYNI "yalnızca ilgili kategoride toplanır" ilkesi. */
+  commercialDirection?: "hizmet-bedeli" | "atik-satin-alma" | "ucretsiz-alim";
 };
 
 export type CreateOfferResult =
@@ -580,10 +629,10 @@ export type CreateOfferResult =
  * görür — kapasite mesajı yalnızca gerçekten YENİ bir teklif denemesinde
  * anlamlıdır.
  */
-export function createOffer(
+export async function createOffer(
   session: Session | null,
   input: CreateOfferInput,
-): CreateOfferResult {
+): Promise<CreateOfferResult> {
   if (!session) {
     return { ok: false, error: "Teklif vermek için giriş yapmalısınız." };
   }
@@ -600,20 +649,32 @@ export function createOffer(
   // Hizmet Veren'in görünürlük dışı bir ilana AYNI ("bulunamadı") mesajla
   // reddedilmesi bilerek gerçek bir "yok" durumundan AYIRT EDİLEMEZ hâle
   // getirilir — ilanın var olduğu ama erişilemediği bilgisi bile sızmaz.
-  if (!isJobVisibleToSession(session, job)) {
+  //
+  // "Ortak İlan Görünürlüğü" görevi — bulunan gerçek açık: bu, önceden
+  // isJobVisibleToSession'ı (artık İş Makinesi/Operatör GRUBUNU görünür
+  // kılan fonksiyon) çağırıyordu; bu TEKLİF kapısı olduğu için grup-farkında
+  // OLMAMALI — isProviderAuthorizedToOfferOnJob TAM kategori eşleşmesi arar
+  // (bkz. o fonksiyonun kendi dokümanı), SQL'deki değişmeyen
+  // provider_can_view_category (create_offer RPC'nin gerçek sınırı) İLE AYNI.
+  if (!isProviderAuthorizedToOfferOnJob(session, job)) {
     return { ok: false, error: "İlan bulunamadı veya artık yayında değil." };
   }
 
-  // Gümrük Müşavirliği'ne özel ek kapı (bkz. customs-license.ts) — Gümrük
-  // Müşaviri İzin Belgesi onaylanana kadar hiçbir teklif oluşturulamaz;
-  // Gümrük Müşavirliği seçili olmayan bir Hizmet Veren için bu kontrol her
-  // zaman geçer, davranışı hiç etkilemez.
-  if (!canSubmitOffersAsCustomsBroker(session.id)) {
-    return {
-      ok: false,
-      error: "Gümrük Müşaviri İzin Belgeniz onaylanana kadar teklif veremezsiniz.",
-    };
+  // İlan Onayı (bkz. job-moderation.ts) — arayüzden bağımsız, ASIL
+  // yetkilendirme noktası; canProviderSubmitNewOffer'daki görsel engel
+  // yalnızca bunun bir YANSIMASIDIR. Admin henüz onaylamamış (ya da
+  // reddetmiş) bir ilan, "bulunamadı" ile AYNI mesajla reddedilir —
+  // ilanın var olduğu ama henüz yayında olmadığı bilgisi bile sızmaz,
+  // isJobVisibleToSession'ın kendi "sızdırmama" ilkesiyle AYNI.
+  if (!isJobModerationApproved(job)) {
+    return { ok: false, error: "İlan bulunamadı veya artık yayında değil." };
   }
+
+  // NOT: `customs-license.ts#canSubmitOffersAsCustomsBroker`in eski, site-
+  // geneli Gümrük Müşavirliği kapısı burada da RETİRE edildi (bkz.
+  // canProviderSubmitNewOffer'daki AYNI notun gerekçesi) — yukarıdaki
+  // isJobVisibleToSession kontrolü artık Gümrük Müşavirliği dahil HER
+  // hizmet için aynı yetkilendirme kuralını uygular.
 
   // Teklif oluşturmanın tek yetkilendirme noktası burasıdır — arayüz bu
   // kontrolü tekrar yazmaz, yalnızca sonucu gösterir (bkz. CLAUDE.md "No
@@ -705,18 +766,42 @@ export function createOffer(
     return { ok: false, error: "Geçersiz para birimi." };
   }
 
+  // "Teklifin Ticari Yönü" — yalnızca Geri Dönüşüm & Atık Tahliye
+  // kategorisinde toplanır/zorunludur (bkz. types.ts#Offer.commercialDirection'ın
+  // kendi dokümanı). "Ücretsiz Alım" seçiliyse `amount` her zaman 0'dır —
+  // aşağıdaki "sıfırdan büyük olmalı" kontrolü BİLEREK bu tek durumda atlanır.
+  const requiresCommercialDirection = isRecyclingCategory(job.category);
+  if (requiresCommercialDirection && !isRecyclingCommercialDirection(input.commercialDirection)) {
+    return { ok: false, error: "Teklifin ticari yönünü seçiniz." };
+  }
+  const isFreePickup = requiresCommercialDirection && input.commercialDirection === "ucretsiz-alim";
+
   if (
     !Number.isFinite(input.amount) ||
-    input.amount <= 0 ||
+    (!isFreePickup && input.amount <= 0) ||
+    (isFreePickup && input.amount !== 0) ||
     input.amount > MAX_OFFER_AMOUNT ||
     !hasAtMostTwoDecimals(input.amount)
   ) {
     return { ok: false, error: "Geçerli bir teklif fiyatı giriniz." };
   }
 
-  const description = input.description.trim();
+  const description = normalizeFreeText(input.description);
   if (description.length < 20 || description.length > 1000) {
     return { ok: false, error: "Teklif açıklaması geçersiz." };
+  }
+  if (containsDangerousMarkup(description)) {
+    return { ok: false, error: "Açıklama izin verilmeyen içerik barındırıyor." };
+  }
+  // Genel Güvenlik görevi §8 — arayüzden bağımsız ASIL kontrol noktası
+  // (offer-form-validation.ts'in AYNI kontrolü yalnızca bir ön-uyarıdır);
+  // supabase/migrations/0073'ün offers.description trigger'ı bu kontrolün
+  // RPC'yi bypass eden bir isteğe karşı sunucu tarafı YEDEĞİdir.
+  if (containsDirectContactInfo(description)) {
+    return {
+      ok: false,
+      error: "Açıklamaya telefon numarası veya e-posta adresi yazmayın — bu bilgiler yalnızca teklif kabul edildikten sonra paylaşılabilir.",
+    };
   }
 
   // "Tamamlanması Taahhüt Edilen Gün" artık yalnızca Nakliye kategorisindeki
@@ -732,6 +817,22 @@ export function createOffer(
     return { ok: false, error: "Tamamlanması taahhüt edilen gün sayısı 1 ile 60 arasında olmalıdır." };
   }
 
+  // MALSEVK genel ilan gizlilik kuralı — "best-effort" YOK: sunucu senkronu
+  // (açıkken) yerel yazımdan ÖNCE, ve BLOKLAYAN olarak denenir. Başarısız
+  // olursa yerel teklif hiç yazılmaz, kullanıcıya açık bir hata döner (bkz.
+  // supabase-offer-sync.ts'in dosya başlığı) — konum/tesis/iletişim
+  // gizliliğinin gerçek kaynağı public.offers olduğu için, sunucuda hiç var
+  // olmayan bir teklif "gönderildi" gösterilirse teklif kabul edildiğinde
+  // dahi adres asla açılamazdı.
+  let supabaseOfferId: string | undefined;
+  if (requiresBackendOfferSync()) {
+    const syncResult = await createOfferOnSupabase(input.jobId, input);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
+    supabaseOfferId = syncResult.supabaseOfferId;
+  }
+
   const now = new Date().toISOString();
   const offer: Offer = {
     id: crypto.randomUUID(),
@@ -741,9 +842,11 @@ export function createOffer(
     currency: input.currency,
     description,
     estimatedDuration: requiresEstimatedDuration ? input.estimatedDuration : undefined,
+    commercialDirection: requiresCommercialDirection ? input.commercialDirection : undefined,
     status: "pending",
     createdAt: now,
     updatedAt: now,
+    supabaseOfferId,
   };
 
   if (!writeAllOffers([...all, offer])) {
@@ -769,7 +872,7 @@ export type WithdrawOfferResult = { ok: true; offer: Offer } | { ok: false; erro
  * yeniden teklif hakkı VERMEZ: createOffer, (providerId, jobId) çifti için
  * status'tan bağımsız tek kayıt kuralını uygular.
  */
-export function withdrawOffer(session: Session | null, offerId: string): WithdrawOfferResult {
+export async function withdrawOffer(session: Session | null, offerId: string): Promise<WithdrawOfferResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -787,6 +890,19 @@ export function withdrawOffer(session: Session | null, offerId: string): Withdra
   }
   if (offer.status !== "pending") {
     return { ok: false, error: "Bu işlem yalnızca beklemede olan bir teklif için yapılabilir." };
+  }
+
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await withdrawOfferOnSupabase(offer.supabaseOfferId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const updated: Offer = { ...offer, status: "withdrawn", updatedAt: new Date().toISOString() };
@@ -819,11 +935,11 @@ export type UpdateOfferStatusResult =
  * settled sayıldığından (bkz. getSettledOfferForJob), iş tamamen bittikten
  * sonra da kardeş teklifler kalıcı olarak askıda kalır.
  */
-export function updateOfferStatus(
+export async function updateOfferStatus(
   session: Session | null,
   offerId: string,
   nextStatus: "accepted" | "rejected",
-): UpdateOfferStatusResult {
+): Promise<UpdateOfferStatusResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -863,6 +979,34 @@ export function updateOfferStatus(
       ok: false,
       error: "Bu hizmet veren aktif iş kapasitesine ulaştığı için teklif şu anda kabul edilemiyor.",
     };
+  }
+
+  // MALSEVK genel ilan gizlilik kuralı — bloklayan sunucu senkronu, yerel
+  // yazımdan ÖNCE. Kabul için bu, adres/tesis görünürlüğünü AÇAN gerçek
+  // sunucu olayıdır — başarısız olursa iş hiçbir zaman "kabul edilmiş"
+  // gösterilmez. Ret için de senkron zorunludur (bkz. supabase-offer-sync.ts
+  // dosya başlığı — sunucuda süresiz "pending" kalan bir teklif, bekleme
+  // süresi sonrası meşru bir yeniden teklifi MLK63 ile spurious biçimde
+  // reddederdi).
+  if (requiresBackendOfferSync()) {
+    // `offer.supabaseOfferId` eksikse bu teklif sunucuya HİÇ senkronlanmamış
+    // (ör. senkron bayrağı teklif oluşturulurken kapalıydı, sonradan
+    // açıldı) — sessizce yerelde "kabul edilmiş" göstermek yerine (bu,
+    // adres/tesis görünürlüğünün gerçek kaynağı public.offers'ta hiç
+    // karşılığı olmayan bir durum yaratırdı) açık bir hata döndürülür.
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult =
+      nextStatus === "accepted"
+        ? await acceptOfferOnSupabase(offer.supabaseOfferId)
+        : await rejectOfferOnSupabase(offer.supabaseOfferId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const updated: Offer = { ...offer, status: nextStatus, updatedAt: new Date().toISOString() };
@@ -925,12 +1069,12 @@ export type RecordAgreementFailureResult = { ok: true; offer: Offer } | { ok: fa
  * aktif hale getirir. İlanın başlığı, fotoğrafı, açıklaması vb. hiçbir alanı
  * değişmez — zaten bunlara hiç dokunulmuyor.
  */
-export function recordAgreementFailure(
+export async function recordAgreementFailure(
   session: Session | null,
   offerId: string,
   reason: DisagreementReason,
   note: string | undefined,
-): RecordAgreementFailureResult {
+): Promise<RecordAgreementFailureResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -958,6 +1102,20 @@ export function recordAgreementFailure(
   }
 
   const trimmedNote = note?.trim();
+
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await recordAgreementFailureOnSupabase(offer.supabaseOfferId, reason, trimmedNote);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
+  }
+
   const updated: Offer = {
     ...offer,
     status: "agreement_failed",
@@ -1304,11 +1462,11 @@ export type ResolveCompletionDisputeResult = { ok: true; offer: Offer } | { ok: 
  * sonuç da ENGAGED_OFFER_STATUSES dışında kaldığı için Hizmet Veren'in
  * aktif iş kapasitesinden düşer.
  */
-export function resolveCompletionDispute(
+export async function resolveCompletionDispute(
   session: Session | null,
   offerId: string,
   resolution: "completed" | "cancelled",
-): ResolveCompletionDisputeResult {
+): Promise<ResolveCompletionDisputeResult> {
   if (!session) {
     return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
   }
@@ -1328,6 +1486,23 @@ export function resolveCompletionDispute(
   }
   if (offer.status !== "completion_disputed") {
     return { ok: false, error: "Bu işlem yalnızca itiraz edilmiş bir iş için yapılabilir." };
+  }
+
+  // Yalnızca "cancelled" çözümü görünürlüğü etkiler (offer'ı ENGAGED
+  // kümesinin dışına çıkarır) — "completed" senkronlanmaz (bkz.
+  // supabase-offer-sync.ts dosya başlığı, accepted zaten ENGAGED kümesinde
+  // kaldığı için görünürlük sonucu değişmez).
+  if (requiresBackendOfferSync() && resolution === "cancelled") {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için işlem güvenli şekilde tamamlanamıyor.",
+      };
+    }
+    const syncResult = await recordCompletionDisputeCancelledOnSupabase(offer.supabaseOfferId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const updated: Offer = { ...offer, status: resolution, updatedAt: new Date().toISOString() };

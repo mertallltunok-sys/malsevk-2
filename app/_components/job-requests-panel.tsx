@@ -30,9 +30,16 @@ import {
   isJobManuallyClosed,
   JOB_CLOSURE_REASON_OPTIONS,
 } from "../_lib/job-closure";
-import { republishJob } from "../_lib/job-store";
+import {
+  getJobModerationStatus,
+  getJobModerationStatusLabel,
+  getJobModerationStatusTone,
+} from "../_lib/job-moderation";
+import { clearJobSupabaseSyncFailure, republishJob } from "../_lib/job-store";
+import { isSafeHttpUrl } from "../_lib/text-sanitization";
 import { closeJobListing, deleteJobWithOffers } from "../_lib/offers";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
+import { reconcileLocalPendingJobsWithSupabase, retryJobSupabaseSync } from "../_lib/supabase-job-sync";
 import { AUTO_DISMISS_FADE_MS, useAutoDismissBanner } from "../_lib/use-auto-dismiss-banner";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
@@ -327,6 +334,26 @@ function JobRequestCard({
   onCompleted: (offer: Offer) => void;
 }) {
   const cardRef = useRef<HTMLLIElement>(null);
+  const moderationStatus = getJobModerationStatus(job);
+  // Kritik İlan Senkronizasyonu görevi — bkz. types.ts#Job.supabaseSyncFailedAt.
+  // Bu, moderationStatus'tan TAMAMEN AYRI bir durumdur ve HER ZAMAN önceliklidir:
+  // ilan sunucuda hiç var olmadığı için "Admin Onayı Bekleniyor" (sahte bir
+  // başarı mesajı) burada asla gösterilmemelidir.
+  const syncFailed = Boolean(job.supabaseSyncFailedAt);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  async function handleRetrySync() {
+    setRetrying(true);
+    setRetryError(null);
+    const result = await retryJobSupabaseSync(job);
+    if (result.ok) {
+      clearJobSupabaseSyncFailure(job.id);
+    } else {
+      setRetryError(result.error);
+    }
+    setRetrying(false);
+  }
 
   useEffect(() => {
     if (!highlighted || !cardRef.current) return;
@@ -354,10 +381,65 @@ function JobRequestCard({
           </h3>
         </div>
         <StatusBadge
-          label={filter ? getJobRequestFilterLabel(filter) : getJobStatusLabel(job.status)}
-          tone={filter ? getJobRequestFilterTone(filter) : getJobStatusTone(job.status)}
+          label={
+            syncFailed
+              ? "Senkronizasyon Başarısız"
+              : moderationStatus !== "approved"
+                ? getJobModerationStatusLabel(moderationStatus)
+                : filter
+                  ? getJobRequestFilterLabel(filter)
+                  : getJobStatusLabel(job.status)
+          }
+          tone={
+            syncFailed
+              ? "danger"
+              : moderationStatus !== "approved"
+                ? getJobModerationStatusTone(moderationStatus)
+                : filter
+                  ? getJobRequestFilterTone(filter)
+                  : getJobStatusTone(job.status)
+          }
         />
       </div>
+
+      {/* Kritik İlan Senkronizasyonu — sunucuya hiç ulaşmamış bir ilan için
+          "admin inceliyor" YANILTICI mesajı yerine gerçek durum + yeniden
+          deneme. moderationStatus'un ("pending_review" dahil) bloklarından
+          ÖNCE kontrol edilir (bkz. yukarıdaki syncFailed tanımı). */}
+      {syncFailed && (
+        <div className="mt-2 rounded-lg border border-danger/30 bg-danger/5 p-3">
+          <p className="text-xs text-danger">
+            Bu ilan sunucuya kaydedilemedi, admin incelemesine hiç gönderilmedi. Yalnızca bu tarayıcıda yerel taslak olarak duruyor.
+            {job.supabaseSyncError && <span className="block mt-1 text-muted-foreground">Hata: {job.supabaseSyncError}</span>}
+          </p>
+          <button
+            type="button"
+            onClick={handleRetrySync}
+            disabled={retrying}
+            aria-disabled={retrying}
+            className="mt-2 inline-flex items-center justify-center rounded-full border border-danger px-4 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {retrying ? "Yeniden deneniyor..." : "Yeniden Dene"}
+          </button>
+          {retryError && <p className="mt-1 text-xs text-danger">Yeniden deneme başarısız: {retryError}</p>}
+        </div>
+      )}
+
+      {/* İlan Onayı (bkz. job-moderation.ts): ilan sahibi kendi hesabında bu
+          durumu her zaman görebilmeli — bkz. görev bölüm 4. Reddedilme
+          nedeni, "Açık adres" bilgi bloğuyla AYNI konumsal/görsel desende
+          gösterilir. syncFailed iken bu bloklar hiç render edilmez (yukarıdaki
+          durum zaten daha kesin/öncelikli bir açıklamadır). */}
+      {!syncFailed && moderationStatus === "pending_review" && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          İlanınız admin incelemesindedir. Onaylandığında hizmet verenlere görünür hale gelecek.
+        </p>
+      )}
+      {!syncFailed && moderationStatus === "rejected" && (
+        <p className="mt-2 text-xs text-danger">
+          Reddedilme nedeni: {job.moderationRejectionReason || "Belirtilmemiş."}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
         <span className="flex items-center gap-2">
@@ -379,7 +461,7 @@ function JobRequestCard({
           Açık adres: {job.neighborhood && <>{job.neighborhood}, </>}
           {job.addressText}
           {job.directionsNote && <span className="block text-xs">{job.directionsNote}</span>}
-          {job.locationUrl && (
+          {job.locationUrl && isSafeHttpUrl(job.locationUrl) && (
             <a
               href={job.locationUrl}
               target="_blank"
@@ -834,6 +916,28 @@ export function JobRequestsPanel() {
 function JobRequestsList({ session }: { session: Session }) {
   const jobs = useAllJobs();
   const offers = useAllOffers();
+
+  // "Kritik İlan Senkronizasyonu" görevi Bölüm 1 takip düzeltmesi — bu
+  // düzeltmeden ÖNCE oluşturulmuş, `supabaseSyncFailedAt` alanı hiç olmayan
+  // eski takılı ilanları yakalamak için "Hizmet Taleplerim" HER yüklendiğinde
+  // bir kerelik uzlaştırma (bkz. supabase-job-sync.ts#reconcileLocalPendingJobsWithSupabase'in
+  // kendi dokümanı). `markJobSupabaseSyncFailed` çağrısı userJobsStore'u
+  // (localStorage + notify()) günceller — bu, `useAllJobs()`in zaten abone
+  // olduğu AYNI `useSyncExternalStore` mağazası olduğu için, buradaki
+  // effect'in KENDİSİ hiçbir yerel state/setState tutmaz (bu projenin
+  // `react-hooks/set-state-in-effect` kuralına göre effect gövdesinde
+  // senkron setState YASAKTIR) — sonuç zaten mağaza aboneliği üzerinden
+  // otomatik olarak yeniden render'a yansır.
+  useEffect(() => {
+    const ownJobs = jobs.filter((job) => job.requesterId === session.id);
+    void reconcileLocalPendingJobsWithSupabase(ownJobs);
+    // Yalnızca panel mount olduğunda (ve oturum değiştiğinde) bir kez
+    // çalışır — `jobs` bağımlılığa BİLEREK eklenmez, aksi halde
+    // `markJobSupabaseSyncFailed`in kendi `jobs`ı güncellemesi sonsuz bir
+    // yeniden-tetikleme döngüsü oluştururdu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
+
   const searchParams = useSearchParams();
   const rawDurum = searchParams.get("durum");
   const activeTab: TabKey =

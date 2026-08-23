@@ -25,13 +25,16 @@ import {
 } from "../_lib/job-listing-filters";
 import { isTransportationCategory } from "../_lib/nakliye-route";
 import { isJobFullyCompletedForListing } from "../_lib/job-completion";
+import { filterModerationVisibleJobs } from "../_lib/job-moderation";
 import { buildJobListingRows, groupJobListingRowsByOperation } from "../_lib/job-listing-row";
 import { isJobListingExpired } from "../_lib/job-publish-window";
 import { isJobManuallyClosed } from "../_lib/job-closure";
 import { useFilterVisibleJobs } from "../_lib/job-visibility";
 import { useMediaQuery } from "../_lib/use-media-query";
+import { useMyServiceAuthorizations } from "../_lib/use-my-service-authorizations";
 import { recordJobViewed } from "../_lib/recently-viewed-jobs";
 import {
+  getServiceCategoryLabel,
   getStorageGroupCategoryIds,
   isServiceCategoryId,
   resolveLegacyJobCategoryToId,
@@ -44,6 +47,7 @@ import { useProviderServiceCategoryIds } from "../_lib/use-provider-services";
 import { JobListingCards } from "./job-listing-cards";
 import { JobListingFilterBar } from "./job-listing-filter-bar";
 import { JobListingTable } from "./job-listing-table";
+import { ProviderListingAccessBanner } from "./provider-listing-access-banner";
 
 const PAGE_SIZE = 24;
 
@@ -83,6 +87,13 @@ export function ProviderJobListing({ session }: { session: Session }) {
   // Müşavirliği de seçmiş bir Nakliyeci'nin Gümrük satırlarını ETKİLEMEZ.
   const viewerServiceCategoryIds = useProviderServiceCategoryIds(session.id);
   const viewerIsNakliyeci = session.role === "hizmet-veren" && viewerServiceCategoryIds.some(isTransportationCategory);
+
+  // §12-19/§46: "erişiminiz aktif değil"/"onay bekliyor"/"onaylanmadı" — bkz.
+  // provider-listing-access-banner.tsx'in kendi dokümantasyonu. Bu, yukarıdaki
+  // `viewerServiceCategoryIds` (yalnızca SEÇİLEN hizmetler, Nakliyeci rota
+  // gösterimi için) ile KASITLI OLARAK AYRI bir veri kaynağıdır — bu, admin
+  // ONAYLI durumu da içeren TAM per-service tablo.
+  const { loading: authRowsLoading, rows: authRows } = useMyServiceAuthorizations(session.id);
 
   // Ana sayfadaki rol bazlı hizmet bölümü (services-section.tsx) bir
   // Hizmet Veren kartına tıklandığında buraya `?kategori=<serviceId>` ile
@@ -127,7 +138,14 @@ export function ProviderJobListing({ session }: { session: Session }) {
   // `useFilterVisibleJobs` (reaktif hook, bkz. o dosyanın dokümantasyonu)
   // kullanılır — provider-services.ts değiştiğinde bu ekran sayfa
   // yenilenmeden otomatik güncellenir.
-  const visibleJobs = useFilterVisibleJobs(session, jobs);
+  const nakliyeVisibleJobs = useFilterVisibleJobs(session, jobs);
+  // İlan Onayı (bkz. job-moderation.ts): Nakliye izolasyonuyla AYNI seviyede,
+  // ondan bağımsız ikinci bir erken filtre — admin henüz onaylamamış (ya da
+  // reddetmiş) bir ilan bu Hizmet Veren'e (ilanın sahibi ya da admin OLMADIĞI
+  // için) hiç görünmez. Ayrı bir reaktif hook GEREKMEZ — moderasyon durumu
+  // provider-services.ts gibi ayrı bir store'a değil, doğrudan Job nesnesinin
+  // kendisine bağlıdır (zaten useAllJobs() aracılığıyla reaktif).
+  const visibleJobs = filterModerationVisibleJobs(session, nakliyeVisibleJobs);
 
   // İlan Yayın Süresi Yönetimi: 14 günlük yayın süresi dolmuş bir ilan
   // (bkz. job-publish-window.ts, tek doğruluk kaynağı) Hizmet Veren'in
@@ -248,6 +266,18 @@ export function ProviderJobListing({ session }: { session: Session }) {
   const pagedItems = useMemo(() => displayItems.slice(0, page * PAGE_SIZE), [displayItems, page]);
   const hasMore = pagedItems.length < displayItems.length;
 
+  // `ProviderListingAccessBanner`ın KENDİ karar mantığıyla BİREBİR aynı
+  // koşul (bkz. o dosya) — yalnızca boş-durumda genel "Filtre kriterlerinize
+  // uyan ilan bulunamadı." metnini bannerla YER DEĞİŞTİRİP değiştirmeyeceğini
+  // belirlemek için burada AYRICA hesaplanır (bannerın kendisi `null` render
+  // edip etmediğini dışarıya bildirmez, JSX içinde iki kez okumaktansa TEK
+  // bir yerde hesaplanır).
+  const showsAccessBanner = !authRowsLoading
+    ? filters.category
+      ? authRows.find((row) => row.serviceCategoryId === filters.category)?.status !== "authorized"
+      : !authRows.some((row) => row.status === "authorized")
+    : false;
+
   function handleFiltersChange(next: JobListingFilterState) {
     setFilters(next);
     setPage(1);
@@ -288,9 +318,17 @@ export function ProviderJobListing({ session }: { session: Session }) {
       </p>
 
       {pagedItems.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">
-          Filtre kriterlerinize uyan ilan bulunamadı.
-        </p>
+        <>
+          <ProviderListingAccessBanner
+            loading={authRowsLoading}
+            rows={authRows}
+            selectedCategoryId={filters.category}
+            selectedCategoryLabel={filters.category ? (getServiceCategoryLabel(filters.category) ?? filters.category) : ""}
+          />
+          {!showsAccessBanner && (
+            <p className="mt-4 text-sm text-muted-foreground">Filtre kriterlerinize uyan ilan bulunamadı.</p>
+          )}
+        </>
       ) : isDesktop ? (
         <div className="mt-3 overflow-x-auto rounded-card border border-border bg-surface shadow-sm">
           <JobListingTable items={pagedItems} onJobClick={handleJobClick} showNakliyeRoute={viewerIsNakliyeci} />

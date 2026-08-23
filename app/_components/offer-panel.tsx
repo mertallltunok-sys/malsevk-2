@@ -3,13 +3,14 @@
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { canSubmitOffersAsCustomsBroker } from "../_lib/customs-license";
 import { isJobClosedToNewOffers, isReofferCooldownStatus } from "../_lib/job-requests";
+import { isProviderAuthorizedToOfferOnJob } from "../_lib/job-visibility";
 import { isJobListingExpired } from "../_lib/job-publish-window";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { formatCommittedDays, getOfferForJob, getOfferStatusLabel } from "../_lib/offers";
 import { isTransportationCategory } from "../_lib/product-catalog";
+import { formatRecyclingCommercialDirectionLabel } from "../_lib/recycling-catalog";
 import { MAX_ACTIVE_JOBS, hasReachedActiveJobLimit } from "../_lib/provider-capacity";
 import { computeRemainingTime, getReofferEligibleAtIso } from "../_lib/time-remaining";
 import type { Job, Offer } from "../_lib/types";
@@ -17,6 +18,12 @@ import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { CompletionCountdown } from "./completion-countdown";
 import { OfferForm } from "./offer-form";
+
+// NOT: "✓ Bu İlana Uygun" uygunluk kartı BURADA YOKTUR — düzeltme görevi
+// (bkz. incoming-offer-card.tsx#StorageEligibilityBadge): bir Hizmet Veren
+// zaten yalnızca uygun olduğu ilana teklif verebildiği için kendi Teklif Ver
+// ekranında bu kartı görmesine gerek yoktur; kart Hizmet Alan'ın Gelen
+// Teklifler ekranına, her gelen teklif kartına taşındı.
 
 const REOFFER_BLOCKED_MESSAGES: Record<"withdrawn" | "rejected" | "agreement_failed", string> = {
   withdrawn: "Bu ilana daha önce verdiğiniz teklifi geri çektiniz.",
@@ -29,7 +36,9 @@ function OfferSummaryCard({ offer, job }: { offer: Offer; job: Job }) {
   return (
     <div className="rounded-card border border-border bg-background p-6">
       <p className="text-sm font-bold tracking-heading leading-tight text-foreground">
-        {formatMoney(offer.amount, offer.currency)}
+        {offer.commercialDirection
+          ? formatRecyclingCommercialDirectionLabel(offer.commercialDirection, formatMoney(offer.amount, offer.currency))
+          : formatMoney(offer.amount, offer.currency)}
       </p>
       <dl className="mt-4 flex flex-col gap-2 text-sm text-muted-foreground">
         {isTransportationCategory(job.category) && (
@@ -70,6 +79,7 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
   if (!session) {
     return (
       <AuthGateNotice
+        bare
         message="Bu ilana teklif verebilmek için giriş yapmalısınız."
         loginRedirect={`/ilanlar/${job.id}`}
       />
@@ -80,6 +90,7 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
     if (job.requesterId === session.id) {
       return (
         <AuthGateNotice
+          bare
           message="Bu ilan size ait. Gelen teklifleri profil menüsündeki Gelen Teklifler bölümünden inceleyebilirsiniz."
           action={{
             label: "Gelen Teklifleri Gör",
@@ -89,7 +100,7 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
       );
     }
     return (
-      <AuthGateNotice message="Yalnızca Hizmet Veren kullanıcılar teklif verebilir." />
+      <AuthGateNotice bare message="Yalnızca Hizmet Veren kullanıcılar teklif verebilir." />
     );
   }
 
@@ -206,19 +217,27 @@ export function OfferPanel({ job, offers }: { job: Job; offers: Offer[] }) {
     );
   }
 
-  // Gümrük Müşavirliği'ne özel ek kapı (bkz. customs-license.ts) — bu
-  // Hizmet Veren Gümrük Müşavirliği seçili DEĞİLSE her zaman `true` döner,
-  // bu blok hiç render edilmez (diğer hiçbir hizmetin teklif formu bundan
-  // etkilenmez). Kapasite/süre dolumu/kapanma kontrolleriyle AYNI görsel
-  // engel deseni — asıl yetkilendirme her zaman olduğu gibi
-  // offers.ts#createOffer'da (arayüzden bağımsız) uygulanır, bu yalnızca
-  // onun bir YANSIMASIDIR.
-  if (!canSubmitOffersAsCustomsBroker(session.id)) {
+  // NOT: `customs-license.ts#canSubmitOffersAsCustomsBroker`in eski, yalnız
+  // Gümrük Müşavirliği'ne özel görsel engeli 0038 ile KALDIRILDI.
+  //
+  // "Ortak İlan Görünürlüğü" görevi — bu bloğun ESKİ varsayımı ("bu sayfaya
+  // ulaşabilen bir Hizmet Veren tanım gereği ilanın hizmeti için zaten
+  // yetkilidir, burada ayrıca kontrol ölü koddur") artık YANLIŞ: ebeveyn
+  // (job-detail-content.tsx) hâlâ `useIsJobVisibleToSession`i kullanıyor,
+  // ama o fonksiyon artık İş Makinesi/Operatör GRUBUNU görünür kılıyor —
+  // yalnızca forklift'te yetkili bir provider artık vinç operatörü ilanının
+  // sayfasına ULAŞABİLİR (görünürlük), ama o hizmete teklif VEREMEMELİDİR
+  // (yetki). Bu yüzden burada GERÇEK, ayrı bir kontrol gerekli —
+  // `isProviderAuthorizedToOfferOnJob` (TAM kategori eşleşmesi,
+  // isJobVisibleToSession'ın grup-genişletmesini uygulamaz) offers.ts#
+  // createOffer'ın gerçek RPC-seviyesi sınırıyla (değişmeyen
+  // provider_can_view_category) birebir aynı sonucu üretir.
+  if (!isProviderAuthorizedToOfferOnJob(session, job)) {
     return (
       <div className="rounded-card border border-border bg-background p-6">
-        <p className="text-sm font-medium text-foreground">Gümrük Müşaviri İzin Belgeniz henüz onaylanmadı.</p>
+        <p className="text-sm font-medium text-foreground">Bu hizmet için teklif verme yetkiniz bulunmuyor.</p>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          Belgeniz yönetici tarafından onaylandıktan sonra bu ilana teklif verebilirsiniz.
+          Bu ilanı görüntüleyebilirsiniz, ancak teklif verebilmek için admin tarafından bu hizmet kategorisinde onaylı bir yetkinizin olması gerekir.
         </p>
       </div>
     );

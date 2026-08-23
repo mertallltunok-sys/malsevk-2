@@ -1,3 +1,4 @@
+import { getAccountStatusErrorMessage } from "./supabase-mutation-errors";
 import { createSupabaseBrowserClient } from "./supabase/browser-client";
 
 /**
@@ -198,6 +199,8 @@ export async function getFacilityCandidateDetail(candidateId: string): Promise<A
 export type FacilityCandidateActionResult = { ok: true } | { ok: false; error: string };
 
 function mapFacilityCandidateError(error: { code?: string; message: string }): string {
+  const accountStatusMessage = getAccountStatusErrorMessage(error.code);
+  if (accountStatusMessage) return accountStatusMessage;
   switch (error.code) {
     case "ML110":
       return "Bu işlem için yönetici girişi gereklidir.";

@@ -1,0 +1,7 @@
+-- MALSEVK — `supabase/config.toml`'ün `[db.seed] sql_paths` alanı bu dosyayı
+-- bekler; dosya yoksa `supabase db reset`/`start` sessizce (yalnızca bir WARN
+-- ile) devam eder — ama bu, "yalnızca migration'larla sıfırdan kurulum"
+-- iddiasıyla çelişen, açıklanmamış bir uyarı bırakır. Gerçek referans/seed
+-- verisi (hizmet kategorileri vb.) zaten migration 0020_seed_reference_data.sql
+-- içinde — bu dosya bilerek neredeyse boş bırakılmıştır, ikinci bir veri
+-- kaynağı icat etmemek için.

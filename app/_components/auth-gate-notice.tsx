@@ -7,6 +7,7 @@ export function AuthGateNotice({
   loginRedirect,
   registerRedirect,
   action,
+  bare = false,
 }: {
   message: string;
   /** İsteğe bağlı, `message`'ın altında gösterilen kısa ek açıklama. */
@@ -19,9 +20,19 @@ export function AuthGateNotice({
    */
   registerRedirect?: string;
   action?: { label: string; href: string };
+  /**
+   * `true` iken kendi `rounded-card border ... p-6` kabuğunu HİÇ render
+   * etmez — yalnızca ikon/mesaj/buton içeriği döner. Çağıran taraf ZATEN
+   * kendi kartının içine yerleştiriyorsa (bkz. offer-panel.tsx, ilan detay
+   * sayfasının "Teklif Ver" kartı) iç içe/çift kart görünümünü önlemek
+   * için — masaüstü ilan detay yoğunlaştırma görevi. Varsayılan `false`:
+   * bu bileşenin diğer ~25 çağrı yerinin (kendi bağımsız kartını
+   * gerektiren) görünümü BİREBİR AYNI kalır.
+   */
+  bare?: boolean;
 }) {
-  return (
-    <div className="rounded-card border border-border bg-surface p-6 text-center sm:p-8">
+  const content = (
+    <>
       <Lock className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden="true" />
       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{message}</p>
       {description && (
@@ -49,6 +60,12 @@ export function AuthGateNotice({
           {action.label}
         </ButtonLink>
       )}
-    </div>
+    </>
   );
+
+  if (bare) {
+    return <div className="text-center">{content}</div>;
+  }
+
+  return <div className="rounded-card border border-border bg-surface p-6 text-center sm:p-8">{content}</div>;
 }

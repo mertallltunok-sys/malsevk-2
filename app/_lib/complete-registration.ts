@@ -11,7 +11,7 @@ import {
   PROVIDER_DOCUMENT_DECLARATION_VERSION,
   CUSTOMS_LICENSE_DECLARATION_VERSION,
 } from "./provider-document-consents";
-import { addProviderDocuments, getProviderDocumentsForUser, CUSTOMS_LICENSE_DOCUMENT_TYPE } from "./provider-documents";
+import { addProviderDocuments, getProviderDocumentsForUser, CUSTOMS_LICENSE_DOCUMENT_TYPE, type ProviderDocumentType } from "./provider-documents";
 import { getPhotoBlob } from "./photo-blob-store";
 import { normalizePhoneNumber } from "./phone";
 import type { ProviderRegistrationDocumentInput } from "./provider-registration";
@@ -118,7 +118,7 @@ async function recordProviderDocumentConsentRemote(
 async function registerProviderDocumentsRemote(
   supabase: ReturnType<typeof createSupabaseBrowserClient>,
   userId: string,
-  documents: { doc: ProviderRegistrationDocumentInput; documentType: "genel" | "gumruk-musaviri-izin-belgesi" }[],
+  documents: { doc: ProviderRegistrationDocumentInput; documentType: ProviderDocumentType }[],
 ): Promise<void> {
   const { data: existingRemoteDocs } = await supabase
     .from("provider_documents")
@@ -235,26 +235,37 @@ export async function finishSupabaseRegistration(
   }
 
   if (effectiveRole === "hizmet-veren") {
+    // HİZMET VEREN ONBOARDING SADELEŞTİRMESİ: kayıt sırasında hizmet seçimi/
+    // belge yükleme artık ZORUNLU DEĞİL (bkz. proje raporu) — bunlar hesap
+    // oluşturulduktan SONRA "Belge Yükleme" ekranından (provider-document-
+    // upload-page.tsx) yapılır. `validServiceIds` bu yüzden BİLEREK boş
+    // olabilir; aşağıdaki TÜM belge/beyan zorunluluğu kontrolleri yalnızca
+    // gerçekten en az bir hizmet SEÇİLMİŞSE uygulanır (ör. gelecekte bu
+    // fonksiyon başka bir çağıran tarafından hizmetlerle birlikte
+    // çağrılırsa eski davranış korunur) — kayıt formunun kendisi artık HİÇ
+    // hizmet/belge göndermediği için bu dallar normal kayıtta hiç tetiklenmez.
     const validServiceIds = input.providerServiceCategoryIds.filter(isServiceCategoryId);
-    if (validServiceIds.length === 0) {
-      return { ok: false, error: "En az bir hizmet seçmelisiniz." };
-    }
-
-    const generalDocumentRequired = isGeneralDocumentRequired(validServiceIds);
-    if (generalDocumentRequired && input.providerDocuments.length === 0) {
-      return { ok: false, error: "En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz." };
-    }
-    if (generalDocumentRequired && !input.documentDeclarationAccepted) {
-      return { ok: false, error: "Belge doğruluk beyanını kabul etmelisiniz." };
-    }
-
+    // `isCustomsBrokerProvider([])` doğal olarak `false` döner — aşağıdaki
+    // (satır ~323) consent-kaydı dalı bu yüzden validServiceIds boşken
+    // güvenle atlanır, ayrı bir guard GEREKMEZ.
     const isCustomsBrokerRegistration = isCustomsBrokerProvider(validServiceIds);
-    if (isCustomsBrokerRegistration) {
-      if (!input.customsLicenseDocument) {
-        return { ok: false, error: "Gümrük Müşaviri İzin Belgesi yüklemelisiniz." };
+
+    if (validServiceIds.length > 0) {
+      const generalDocumentRequired = isGeneralDocumentRequired(validServiceIds);
+      if (generalDocumentRequired && input.providerDocuments.length === 0) {
+        return { ok: false, error: "En az bir faaliyet belgesi veya faaliyet raporu yüklemelisiniz." };
       }
-      if (!input.customsLicenseDeclarationAccepted) {
-        return { ok: false, error: "Yüklediğiniz belgenin size ait ve güncel olduğunu onaylamalısınız." };
+      if (generalDocumentRequired && !input.documentDeclarationAccepted) {
+        return { ok: false, error: "Belge doğruluk beyanını kabul etmelisiniz." };
+      }
+
+      if (isCustomsBrokerRegistration) {
+        if (!input.customsLicenseDocument) {
+          return { ok: false, error: "Gümrük Müşaviri İzin Belgesi yüklemelisiniz." };
+        }
+        if (!input.customsLicenseDeclarationAccepted) {
+          return { ok: false, error: "Yüklediğiniz belgenin size ait ve güncel olduğunu onaylamalısınız." };
+        }
       }
     }
 

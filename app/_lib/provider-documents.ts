@@ -1,3 +1,4 @@
+import { getProviderAuthorizationGroupByDocumentType } from "./service-catalog";
 import { readJson, writeJson } from "./local-storage";
 import type { ProviderDocumentReviewStatus } from "./types";
 
@@ -5,20 +6,47 @@ const PROVIDER_DOCUMENTS_STORAGE_KEY = "malsevk.provider_documents.v1";
 
 /**
  * Bir belgenin HANGİ amaçla yüklendiği — "genel" (Faaliyet Belgesi/Raporu,
- * her Hizmet Veren kaydında zorunlu, mevcut/eski davranış) ile "gumruk-musaviri-izin-belgesi"
+ * her Hizmet Veren kaydında zorunlu, mevcut/eski davranış), "gumruk-musaviri-izin-belgesi"
  * (yalnızca Gümrük Müşavirliği seçildiğinde EK olarak zorunlu, bkz.
- * customs-license.ts) arasında ayrım yapar. Bu alan eklenmeden ÖNCE yazılmış
- * TÜM kayıtlarda (Nakliyeci demo hesabı dahil) yoktur — `readAll` bunu her
- * zaman "genel" olarak normalize eder (aynı `locationMode` eksikse "catalog"
- * varsayılan deseni, bkz. job-store.ts#normalizeStoredJob), bu yüzden geriye
- * dönük hiçbir kayıt bozulmaz/yanlış sınıflandırılmaz.
+ * customs-license.ts), ve BELGE/YETKİ SADELEŞTİRMESİ'nin (migration 0044,
+ * bkz. service-catalog.ts#PROVIDER_AUTHORIZATION_GROUPS) iki YENİ grup
+ * belgesi — "depo-hizmetleri-belgesi"/"operator-is-makinesi-belgesi" —
+ * arasında ayrım yapar. Bu alan eklenmeden ÖNCE yazılmış TÜM kayıtlarda
+ * (Nakliyeci demo hesabı dahil) yoktur — `readAll` bunu her zaman "genel"
+ * olarak normalize eder (aynı `locationMode` eksikse "catalog" varsayılan
+ * deseni, bkz. job-store.ts#normalizeStoredJob), bu yüzden geriye dönük
+ * hiçbir kayıt bozulmaz/yanlış sınıflandırılmaz.
  */
-export type ProviderDocumentType = "genel" | "gumruk-musaviri-izin-belgesi";
+export type ProviderDocumentType = "genel" | "gumruk-musaviri-izin-belgesi" | "depo-hizmetleri-belgesi" | "operator-is-makinesi-belgesi";
 export const GENERAL_DOCUMENT_TYPE: ProviderDocumentType = "genel";
 export const CUSTOMS_LICENSE_DOCUMENT_TYPE: ProviderDocumentType = "gumruk-musaviri-izin-belgesi";
+export const STORAGE_SERVICES_DOCUMENT_TYPE: ProviderDocumentType = "depo-hizmetleri-belgesi";
+export const EQUIPMENT_OPERATOR_DOCUMENT_TYPE: ProviderDocumentType = "operator-is-makinesi-belgesi";
 
 function isProviderDocumentType(value: unknown): value is ProviderDocumentType {
-  return value === GENERAL_DOCUMENT_TYPE || value === CUSTOMS_LICENSE_DOCUMENT_TYPE;
+  return (
+    value === GENERAL_DOCUMENT_TYPE ||
+    value === CUSTOMS_LICENSE_DOCUMENT_TYPE ||
+    value === STORAGE_SERVICES_DOCUMENT_TYPE ||
+    value === EQUIPMENT_OPERATOR_DOCUMENT_TYPE
+  );
+}
+
+/**
+ * Admin "Firma Belgeleri" ekranlarının (admin-document-review-detail.tsx,
+ * admin-company-documents-panel.tsx) TEK ortak etiket kaynağı — ikisi de
+ * artık kendi ternary'lerini KOPYALAMAK yerine BURAYA delege eder.
+ */
+export function getProviderDocumentTypeLabel(documentType: string): string {
+  if (documentType === CUSTOMS_LICENSE_DOCUMENT_TYPE) return "Gümrük Müşaviri İzin Belgesi";
+  const group = getProviderAuthorizationGroupByDocumentType(documentType);
+  if (group) return group.label;
+  return "Faaliyet Belgesi/Raporu";
+}
+
+/** Yalnızca grup belgeleri için admin'e "onay ne açar" açıklaması döner — genel/gümrük belgeleri için `null` (zaten tek, apaçık bir kategoriye bağlılar). */
+export function getProviderDocumentTypeAdminDescription(documentType: string): string | null {
+  return getProviderAuthorizationGroupByDocumentType(documentType)?.adminApprovalDescription ?? null;
 }
 
 /**

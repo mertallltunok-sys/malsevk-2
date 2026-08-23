@@ -8,19 +8,17 @@ import { finishSupabaseRegistration } from "../_lib/complete-registration";
 import { getLegalDocumentMeta, type LegalDocumentId } from "../_lib/legal-documents";
 import { validateLoginFields } from "../_lib/login-form-validation";
 import { evaluatePasswordRules } from "../_lib/password-rules";
-import { isCustomsOnlyRegistration } from "../_lib/customs-license";
 import { savePendingRegistrationDraft } from "../_lib/pending-registration-draft";
-import { CUSTOMS_LICENSE_DECLARATION_TEXT, PROVIDER_DOCUMENT_DECLARATION_TEXT } from "../_lib/provider-document-consents";
 import { validateRegisterFormFields, type RegisterFormErrors } from "../_lib/register-form-validation";
 import { type RegistrationMetadataFields } from "../_lib/registration-metadata";
-import { GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID, SERVICE_CATEGORY_GROUPS } from "../_lib/service-catalog";
 import { createSupabaseBrowserClient } from "../_lib/supabase/browser-client";
 import { mapSupabaseAuthError } from "../_lib/supabase-auth-errors";
 import type { UserRole } from "../_lib/types";
 import { getDistrictsByProvinceCode, getProvinces } from "../_lib/turkey-locations";
+import { useSession } from "../_lib/use-session";
+import { DemoAccountsPanel } from "./demo-accounts-panel";
 import { LegalDocumentModal } from "./legal-document-modal";
-import { MultiSelectChips } from "./multi-select-chips";
-import { ProviderDocumentUpload, type ReadyProviderDocument } from "./provider-document-upload";
+import { handleLogout } from "./profile-menu";
 import { SearchableSelect } from "./searchable-select";
 
 type Mode = "giris" | "kayit";
@@ -99,6 +97,19 @@ export function LoginForm({
   passwordUpdated?: boolean;
 }) {
   const router = useRouter();
+  // "Kritik Oturum/Kimlik Karışması" görevi — kanıtlanmış kök neden: bu form
+  // hâlâ aktif bir Supabase oturumu varken "Kayıt Ol" sekmesini engelsiz
+  // çalıştırıyordu. `signUp()` girilen e-posta zaten kayıtlıysa (ör.
+  // kullanıcının KENDİ mevcut hesabının e-postası) 422/`user_already_exists`
+  // ile doğru şekilde reddediliyor, ama BU başarısız deneme eski oturuma
+  // HİÇ dokunmuyordu — kullanıcı hata mesajını fark etmeden/okumadan başka
+  // bir sayfaya (ör. ana sayfa) geçtiğinde, hâlâ tamamen geçerli olan ESKİ
+  // oturumuyla karşılaşıyor, bu da "kayıt farklı biriymiş gibi tamamlandı ama
+  // eski hesap görünüyor" izlenimi veriyordu — session/profile eşleşmesinin
+  // KENDİSİ hiçbir zaman bozulmuyor, yalnızca aktif-oturum-varken-kayıt
+  // akışı hiç engellenmiyordu. Aşağıdaki `session` bu engeli kurar.
+  const session = useSession();
+  const [signingOutForRegistration, setSigningOutForRegistration] = useState(false);
   const firstNameId = useId();
   const lastNameId = useId();
   const emailId = useId();
@@ -110,11 +121,6 @@ export function LoginForm({
   const provinceId = useId();
   const districtId = useId();
   const legalConsentId = useId();
-  const providerServicesId = useId();
-  const providerDocumentsId = useId();
-  const documentDeclarationId = useId();
-  const customsLicenseDocumentId = useId();
-  const customsLicenseDeclarationId = useId();
 
   const [mode, setMode] = useState<Mode>(initialMode);
   const [firstName, setFirstName] = useState("");
@@ -130,13 +136,6 @@ export function LoginForm({
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
-  const [providerServiceCategoryIds, setProviderServiceCategoryIds] = useState<string[]>([]);
-  const [providerDocuments, setProviderDocuments] = useState<ReadyProviderDocument[]>([]);
-  const [providerDocumentsBusy, setProviderDocumentsBusy] = useState(false);
-  const [documentDeclarationAccepted, setDocumentDeclarationAccepted] = useState(false);
-  const [customsLicenseDocument, setCustomsLicenseDocument] = useState<ReadyProviderDocument | null>(null);
-  const [customsLicenseDocumentBusy, setCustomsLicenseDocumentBusy] = useState(false);
-  const [customsLicenseDeclarationAccepted, setCustomsLicenseDeclarationAccepted] = useState(false);
   const [errors, setErrors] = useState<RegisterFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -189,56 +188,6 @@ export function LoginForm({
   function handleRoleChange(nextRole: UserRole) {
     setRole(nextRole);
     clearFieldError("role");
-
-    // Hesap türü Hizmet Veren'den uzaklaştırılırsa o role özel doğrulama
-    // hataları temizlenir (görev gereksinimi) ve yüklenmiş-ama-henüz-hiçbir
-    // kullanıcıya bağlanmamış belge listesi sıfırlanır — ProviderDocumentUpload
-    // bu değişiklikle birlikte unmount olacağı için kendi IndexedDB blob'larını
-    // zaten temizler (bkz. o bileşenin unmount efekti), burada yalnızca bu
-    // formun artık geçersiz olan referansları bırakılır.
-    if (nextRole !== "hizmet-veren") {
-      clearFieldError("providerServices");
-      clearFieldError("providerDocuments");
-      clearFieldError("documentDeclaration");
-      setProviderDocuments([]);
-      clearFieldError("customsLicenseDocument");
-      clearFieldError("customsLicenseDeclaration");
-      setCustomsLicenseDocument(null);
-      setCustomsLicenseDeclarationAccepted(false);
-    }
-  }
-
-  // Gümrük Müşavirliği seçimi kaldırıldığında, o hizmete özel belge/beyan
-  // durumu da sıfırlanır (görev gereksinimi: bu alanlar yalnızca hizmet
-  // seçiliyken anlamlıdır) — IndexedDB blob'unun kendisi zaten
-  // ProviderDocumentUpload'ın unmount efektiyle (bu bileşen koşullu render
-  // edildiği için) silinir, burada yalnızca bu formun artık geçersiz olan
-  // referansı bırakılır (handleRoleChange'in providerDocuments için yaptığı
-  // AYNI desen).
-  //
-  // Seçim TAMAMEN Gümrük Müşavirliği'ne dönüştüğünde (bkz.
-  // customs-license.ts#isCustomsOnlyRegistration, TEK doğruluk kaynağı) genel
-  // Faaliyet Belgesi bölümü de aşağıda koşullu olarak GİZLENİR — bu yüzden
-  // aynı AYNI desenle (unmount -> kendi blob'unu siler, burada yalnızca
-  // formun referansı bırakılır) genel belge/beyan durumu da sıfırlanır.
-  // Tersi yönde (Gümrük'e ek bir kategori daha seçilince) bölüm yeniden
-  // MOUNT olur ve zaten boş (`providerDocuments` hâlâ `[]`) başlar — ayrı bir
-  // sıfırlama gerekmez.
-  function handleProviderServicesChange(next: string[]) {
-    setProviderServiceCategoryIds(next);
-    clearFieldError("providerServices");
-    if (!next.includes(GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID)) {
-      clearFieldError("customsLicenseDocument");
-      clearFieldError("customsLicenseDeclaration");
-      setCustomsLicenseDocument(null);
-      setCustomsLicenseDeclarationAccepted(false);
-    }
-    if (isCustomsOnlyRegistration(next)) {
-      clearFieldError("providerDocuments");
-      clearFieldError("documentDeclaration");
-      setProviderDocuments([]);
-      setDocumentDeclarationAccepted(false);
-    }
   }
 
   // İl değiştiğinde ilçe seçimi temizlenir — eski ilçe artık yeni ile ait
@@ -306,7 +255,27 @@ export function LoginForm({
         return;
       }
 
+      // ADMİN OTOMATİK YÖNLENDİRME (Yönetim Paneli yeniden tasarımı): admin
+      // giriş yaptığında elle "/admin" yazmak zorunda kalmasın. `redirectTo`
+      // yalnızca hâlâ varsayılan ana sayfa ("/") İSE ezilir — proxy.ts bir
+      // korumalı rotadan (ör. doğrudan /admin/firmalar'a girmeye çalışırken)
+      // buraya `?redirect=` ile bounce ettiyse o GERÇEK hedef korunur.
+      if (profile.role === "admin" && redirectTo === "/") {
+        router.push("/admin");
+        return;
+      }
+
       router.push(redirectTo);
+      return;
+    }
+
+    // İkinci, veri-katmanı güvencesi (görev gereksinimi madde 4) — aşağıdaki
+    // JSX guard'ı (bkz. `session` üstündeki doküman) normal koşulda bu satıra
+    // hiç ulaşılmasını zaten engeller; bu yalnızca bir savunma hattıdır (ör.
+    // form açıkken arka planda bir oturum başlarsa) — `signUp()` aktif bir
+    // oturum varken ASLA çağrılmaz.
+    if (session) {
+      setFormError("Yeni bir hesap oluşturmak için önce mevcut hesabınızdan çıkış yapmalısınız.");
       return;
     }
 
@@ -332,11 +301,6 @@ export function LoginForm({
         province: provinceName,
         district,
         legalConsentAccepted,
-        providerServiceCategoryIds,
-        providerDocumentCount: providerDocuments.length,
-        documentDeclarationAccepted,
-        hasCustomsLicenseDocument: customsLicenseDocument !== null,
-        customsLicenseDeclarationAccepted,
       });
       setErrors(fieldErrors);
       if (Object.keys(fieldErrors).length > 0) return;
@@ -370,6 +334,15 @@ export function LoginForm({
       // hâlâ HER ZAMAN `complete_registration`in kendi `p_role` parametresi
       // (kullanıcının /kayit-tamamla'da gördüğü/onayladığı form state'i),
       // hiçbir kod yolu `user_metadata`daki `role`'ü doğrudan RPC'ye taşımaz.
+      // NOT: providerServiceCategoryIds/documentDeclarationAccepted/
+      // customsLicenseDeclarationAccepted artık BU formda hiç toplanmıyor
+      // (bkz. HİZMET VEREN ONBOARDING SADELEŞTİRMESİ) — paylaşılan
+      // RegistrationMetadataFields/PendingRegistrationDraft tip sözleşmesi
+      // (registration-metadata.ts, complete-registration-form.tsx'in de
+      // kullandığı) DEĞİŞTİRİLMEDİ, bu yüzden burada sabit/boş varsayılan
+      // değerler gönderilir — complete-registration.ts (yukarıda güncellendi)
+      // zaten providerServiceCategoryIds boşken tüm belge zorunluluğu
+      // kontrollerini ATLAR.
       const registrationMetadata: RegistrationMetadataFields = {
         role: role as UserRole,
         firstName,
@@ -379,9 +352,9 @@ export function LoginForm({
         companyType,
         province: provinceName,
         district,
-        providerServiceCategoryIds,
-        documentDeclarationAccepted,
-        customsLicenseDeclarationAccepted,
+        providerServiceCategoryIds: [],
+        documentDeclarationAccepted: false,
+        customsLicenseDeclarationAccepted: false,
         legalConsentAccepted,
       };
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -417,6 +390,8 @@ export function LoginForm({
         return;
       }
 
+      // NOT: aynı sadeleştirme burada da geçerli — kayıt anında hiç hizmet/
+      // belge toplanmadığı için bunların tümü boş/varsayılan gönderilir.
       const completionInput = {
         role: role as UserRole,
         firstName,
@@ -426,25 +401,11 @@ export function LoginForm({
         companyType,
         province: provinceName,
         district,
-        providerServiceCategoryIds,
-        providerDocuments: providerDocuments.map((doc) => ({
-          indexedDbStorageKey: doc.indexedDbStorageKey,
-          originalFileName: doc.originalFileName,
-          mimeType: doc.mimeType,
-          extension: doc.extension,
-          size: doc.size,
-        })),
-        documentDeclarationAccepted,
-        customsLicenseDocument: customsLicenseDocument
-          ? {
-              indexedDbStorageKey: customsLicenseDocument.indexedDbStorageKey,
-              originalFileName: customsLicenseDocument.originalFileName,
-              mimeType: customsLicenseDocument.mimeType,
-              extension: customsLicenseDocument.extension,
-              size: customsLicenseDocument.size,
-            }
-          : undefined,
-        customsLicenseDeclarationAccepted,
+        providerServiceCategoryIds: [] as string[],
+        providerDocuments: [] as { indexedDbStorageKey: string; originalFileName: string; mimeType: string; extension: string; size: number }[],
+        documentDeclarationAccepted: false,
+        customsLicenseDocument: undefined,
+        customsLicenseDeclarationAccepted: false,
         legalConsentAccepted,
       };
 
@@ -504,6 +465,42 @@ export function LoginForm({
         >
           Giriş ekranına dön
         </button>
+      </div>
+    );
+  }
+
+  // "Kritik Oturum/Kimlik Karışması" görevi Faz 2 — kanıtlanmış kök nedenin
+  // düzeltmesi: aktif bir Supabase oturumu varken "Kayıt Ol" sekmesi (tab
+  // bar dahil) hiç render EDİLMEZ, `awaitingEmailConfirmation` bloğuyla AYNI
+  // "formu tamamen değiştir" deseni. `signUp()` bu noktaya hiç ulaşamaz.
+  if (mode === "kayit" && session) {
+    return (
+      <div className="rounded-card border border-warning/30 bg-warning-soft p-6 text-center sm:p-8">
+        <p className="text-base font-semibold text-foreground">Zaten Bir Hesapla Giriş Yaptınız</p>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          <strong className="text-foreground">{session.name}</strong> hesabıyla giriş yapmış durumdasınız. Yeni bir
+          hesap oluşturmak için mevcut hesabınızdan çıkış yapmanız gerekiyor.
+        </p>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          <button
+            type="button"
+            onClick={() => router.push(redirectTo)}
+            className="rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Mevcut Hesaba Dön
+          </button>
+          <button
+            type="button"
+            disabled={signingOutForRegistration}
+            onClick={() => {
+              setSigningOutForRegistration(true);
+              void handleLogout("/giris-yap?mode=kayit");
+            }}
+            className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+          >
+            {signingOutForRegistration ? "Çıkış yapılıyor..." : "Çıkış Yapıp Kayıt Ol"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -904,162 +901,14 @@ export function LoginForm({
               </div>
             </div>
 
-            {role === "hizmet-veren" && (
-              <>
-                <fieldset>
-                  <legend className="text-sm font-medium text-foreground">Verdiğiniz Hizmetler</legend>
-                  <p className="mt-1 text-xs text-muted-foreground">Birden fazla hizmet seçebilirsiniz.</p>
-                  <div
-                    id={providerServicesId}
-                    aria-describedby={errors.providerServices ? `${providerServicesId}-error` : undefined}
-                    className="mt-3 flex flex-col gap-5"
-                  >
-                    {SERVICE_CATEGORY_GROUPS.map((group) => (
-                      <MultiSelectChips
-                        key={group.id}
-                        id={`${providerServicesId}-${group.id}`}
-                        label={group.label}
-                        options={group.categories.map((category) => ({ value: category.id, label: category.label }))}
-                        selected={providerServiceCategoryIds}
-                        onChange={handleProviderServicesChange}
-                      />
-                    ))}
-                  </div>
-                  {errors.providerServices && (
-                    <p id={`${providerServicesId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                      {errors.providerServices}
-                    </p>
-                  )}
-                </fieldset>
-
-                {/* Genel Faaliyet Belgesi/Raporu bölümü — yalnızca seçilen hizmet
-                    kümesi TAMAMEN Gümrük Müşavirliği'nden ibaret DEĞİLSE
-                    gösterilir (bkz. customs-license.ts#isGeneralDocumentRequired,
-                    TEK doğruluk kaynağı, provider-registration.ts'in veri
-                    katmanı kuralıyla AYNI). Yalnızca Gümrük Müşavirliği
-                    seçiliyken bu bölüm tamamen gizlenir — kullanıcıya aynı
-                    anda iki ayrı zorunlu belge alanı gösterilmez, kendi özel
-                    "Gümrük Müşaviri İzin Belgesi" (aşağıda) tek başına yeterlidir. */}
-                {!isCustomsOnlyRegistration(providerServiceCategoryIds) && (
-                  <>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Faaliyet Belgesi veya Faaliyet Raporu Yükle</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Şirketinizin faaliyetini gösteren en az bir belge yükleyin (PDF, Word, Excel, ODT veya görsel
-                        biçimde).
-                      </p>
-                      <div className="mt-3">
-                        <ProviderDocumentUpload
-                          onDocumentsChange={(documents) => {
-                            setProviderDocuments(documents);
-                            clearFieldError("providerDocuments");
-                          }}
-                          onBusyChange={setProviderDocumentsBusy}
-                          disabled={submitting}
-                          errorId={errors.providerDocuments ? `${providerDocumentsId}-error` : undefined}
-                        />
-                      </div>
-                      {errors.providerDocuments && (
-                        <p id={`${providerDocumentsId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                          {errors.providerDocuments}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor={documentDeclarationId}
-                        className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-                      >
-                        <input
-                          id={documentDeclarationId}
-                          type="checkbox"
-                          checked={documentDeclarationAccepted}
-                          onChange={(event) => {
-                            setDocumentDeclarationAccepted(event.target.checked);
-                            clearFieldError("documentDeclaration");
-                          }}
-                          aria-invalid={errors.documentDeclaration ? true : undefined}
-                          aria-describedby={errors.documentDeclaration ? `${documentDeclarationId}-error` : undefined}
-                          className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                        />
-                        <span className="text-sm leading-relaxed text-foreground">{PROVIDER_DOCUMENT_DECLARATION_TEXT}</span>
-                      </label>
-                      {errors.documentDeclaration && (
-                        <p id={`${documentDeclarationId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                          {errors.documentDeclaration}
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {providerServiceCategoryIds.includes(GUMRUK_MUSAVIRLIGI_SERVICE_CATEGORY_ID) && (
-                  <>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Gümrük Müşaviri İzin Belgesi</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Gümrük Müşavirliği hizmeti verebilmek için izin belgenizi yükleyin (PDF, JPG veya PNG).
-                      </p>
-                      <div className="mt-3">
-                        <ProviderDocumentUpload
-                          onDocumentsChange={(documents) => {
-                            setCustomsLicenseDocument(documents[0] ?? null);
-                            clearFieldError("customsLicenseDocument");
-                          }}
-                          onBusyChange={setCustomsLicenseDocumentBusy}
-                          disabled={submitting}
-                          errorId={errors.customsLicenseDocument ? `${customsLicenseDocumentId}-error` : undefined}
-                          allowedExtensions={["pdf", "jpg", "jpeg", "png"]}
-                          maxFiles={1}
-                          dropHintText="Gümrük Müşaviri İzin Belgenizi buraya sürükleyin veya dosya seçin."
-                          formatsHintText="PDF, JPG, PNG"
-                        />
-                      </div>
-                      {errors.customsLicenseDocument && (
-                        <p id={`${customsLicenseDocumentId}-error`} role="alert" className="mt-2 text-sm text-danger">
-                          {errors.customsLicenseDocument}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor={customsLicenseDeclarationId}
-                        className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background p-4"
-                      >
-                        <input
-                          id={customsLicenseDeclarationId}
-                          type="checkbox"
-                          checked={customsLicenseDeclarationAccepted}
-                          onChange={(event) => {
-                            setCustomsLicenseDeclarationAccepted(event.target.checked);
-                            clearFieldError("customsLicenseDeclaration");
-                          }}
-                          aria-invalid={errors.customsLicenseDeclaration ? true : undefined}
-                          aria-describedby={
-                            errors.customsLicenseDeclaration ? `${customsLicenseDeclarationId}-error` : undefined
-                          }
-                          className="mt-0.5 h-5 w-5 shrink-0 accent-primary focus-visible:outline-none"
-                        />
-                        <span className="text-sm leading-relaxed text-foreground">
-                          {CUSTOMS_LICENSE_DECLARATION_TEXT}
-                        </span>
-                      </label>
-                      {errors.customsLicenseDeclaration && (
-                        <p
-                          id={`${customsLicenseDeclarationId}-error`}
-                          role="alert"
-                          className="mt-2 text-sm text-danger"
-                        >
-                          {errors.customsLicenseDeclaration}
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
+            {/* HİZMET VEREN ONBOARDING SADELEŞTİRMESİ (bkz. proje raporu):
+                "Verdiğiniz Hizmetler" seçimi + Faaliyet Belgesi/Gümrük
+                Müşaviri İzin Belgesi yükleme bölümleri kayıt formundan
+                TAMAMEN KALDIRILDI — hesap oluşturulduktan SONRA Hesap
+                Ayarları > "Belge Yükleme" ekranından (provider-document-
+                upload-page.tsx) yapılır. Kayıt artık yalnızca temel firma/
+                profil bilgilerini toplar; hizmet/belge state'i (aşağıdaki
+                useState'ler kaldırıldı) hiç TUTULMAZ. */}
           </>
         )}
 
@@ -1102,37 +951,31 @@ export function LoginForm({
           </p>
         )}
 
-        {(() => {
-          // Belge yükleme/doğrulama sürüyorken (istemci -> sunucu -> IndexedDB
-          // zinciri henüz tamamlanmadıysa) gönderim kilitlenir — aksi halde
-          // henüz "ready" olmamış bir belge sessizce listeden düşmüş gibi
-          // kaydedilebilirdi.
-          const providerBusy =
-            mode === "kayit" && role === "hizmet-veren" && (providerDocumentsBusy || customsLicenseDocumentBusy);
-          const isSubmitDisabled = submitting || providerBusy;
-          return (
-            <button
-              type="submit"
-              disabled={isSubmitDisabled}
-              aria-disabled={isSubmitDisabled}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {(submitting || providerBusy) && (
-                <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
-              )}
-              {mode === "giris"
-                ? submitting
-                  ? "Giriş yapılıyor..."
-                  : "Giriş Yap"
-                : providerBusy
-                  ? "Belgeler doğrulanıyor..."
-                  : submitting
-                    ? "Hesap oluşturuluyor..."
-                    : "Hesap Oluştur"}
-            </button>
-          );
-        })()}
+        <button
+          type="submit"
+          disabled={submitting}
+          aria-disabled={submitting}
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {submitting && <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
+          {mode === "giris"
+            ? submitting
+              ? "Giriş yapılıyor..."
+              : "Giriş Yap"
+            : submitting
+              ? "Hesap oluşturuluyor..."
+              : "Hesap Oluştur"}
+        </button>
       </form>
+
+      {mode === "giris" && process.env.NODE_ENV === "development" && (
+        <DemoAccountsPanel
+          onSelectAccount={(accountEmail, accountPassword) => {
+            setEmail(accountEmail);
+            setPassword(accountPassword);
+          }}
+        />
+      )}
 
       {openLegalDocumentId && (
         <LegalDocumentModal

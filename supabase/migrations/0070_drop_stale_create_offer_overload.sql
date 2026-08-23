@@ -1,0 +1,35 @@
+-- =============================================================================
+-- MALSEVK — migration 0070: eski create_offer overload'ını kaldırır (0069'un
+-- gerçek çalıştırma-zamanı hatası)
+-- =============================================================================
+-- STATUS: "Geri Dönüşüm & Atık Tahliye Uçtan Uca Geliştirme" görevinin
+-- devamı — 0069 hosted dev'e uygulandıktan SONRA, doğrudan pg_proc
+-- introspection ile tespit edilen çalıştırma-zamanı hatası (0069'un kendi
+-- statik SQL incelemesiyle YAKALANAMADI — yalnızca gerçek fonksiyon
+-- çözümlemesi kontrolüyle ortaya çıktı). 0069 KENDİSİ düzenlenmedi
+-- (yerleşik ilke: uygulanmış bir migration asla geriye dönük düzenlenmez —
+-- bkz. 0032/0033/0034'ün 0028/0031'i AYNI şekilde bir SONRAKİ migration'la
+-- düzelttiği emsal, bu migration da AYNI deseni izler).
+--
+-- KÖK NEDEN: `create or replace function` yalnızca AYNI parametre imzasıyla
+-- (tip+sırayla) bir fonksiyonu GERÇEKTEN değiştirir. 0069, `create_offer`'ı
+-- 0015'in 5 parametreli imzasına (p_job_id, p_amount, p_currency,
+-- p_description, p_estimated_duration) 1 YENİ parametre (p_commercial_
+-- direction) EKLEYEREK tanımladı — bu Postgres için FARKLI bir imza,
+-- dolayısıyla "replace" değil, İKİNCİ bir overload'un CREATE edilmesiydi
+-- (0032/0033/0034'ün create_job/create_operation_with_jobs'ta bulduğu AYNI
+-- kök neden, burada create_offer için). Sonuç: `supabase-offer-sync.ts`
+-- HARİÇ (o zaten p_commercial_direction'ı gönderiyor, tek adaya düşüyor) —
+-- yalnızca 5 parametreyle (Nakliye dışı her kategorinin teklif akışı gibi)
+-- çağıran HERHANGİ bir istemci PostgREST'in PGRST203 "Could not choose the
+-- best candidate function" hatasıyla karşılaşırdı.
+--
+-- DÜZELTME: eski 5 parametreli imza `drop function` ile açıkça kaldırılır.
+-- `supabase-offer-sync.ts` zaten her zaman 6 parametreyi (p_commercial_
+-- direction dahil, `default null` ile opsiyonel) gönderiyor — bu yüzden
+-- kalan 6 parametreli `create_offer` hiçbir gerçek çağıranı KIRMAZ.
+--
+-- Hata kodu değişikliği yok.
+-- =============================================================================
+
+drop function if exists public.create_offer(uuid, numeric, text, text, integer);

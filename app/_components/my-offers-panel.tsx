@@ -15,6 +15,7 @@ import { useFilterVisibleJobs } from "../_lib/job-visibility";
 import { formatJobDate } from "../_lib/jobs";
 import { formatMoney } from "../_lib/money";
 import { isTransportationCategory } from "../_lib/product-catalog";
+import { formatRecyclingCommercialDirectionLabel } from "../_lib/recycling-catalog";
 import { getCategoryDisplayLabel } from "../_lib/service-catalog";
 import {
   formatCommittedDays,
@@ -305,11 +306,11 @@ export function MyOffersPanel() {
     setWithdrawError(null);
   }
 
-  function handleConfirmWithdraw() {
+  async function handleConfirmWithdraw() {
     if (!withdrawTarget || withdrawSubmitting) return;
     setWithdrawSubmitting(true);
     setWithdrawError(null);
-    const result = withdrawOffer(session, withdrawTarget.id);
+    const result = await withdrawOffer(session, withdrawTarget.id);
     setWithdrawSubmitting(false);
     if (!result.ok) {
       setWithdrawError(result.error);
@@ -421,7 +422,9 @@ export function MyOffersPanel() {
                   </div>
 
                   <p className="mt-3 text-lg font-semibold text-foreground">
-                    {formatMoney(offer.amount, offer.currency)}
+                    {offer.commercialDirection
+                      ? formatRecyclingCommercialDirectionLabel(offer.commercialDirection, formatMoney(offer.amount, offer.currency))
+                      : formatMoney(offer.amount, offer.currency)}
                   </p>
 
                   <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">

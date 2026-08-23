@@ -1,6 +1,7 @@
 import { getJobsByOperationId } from "./job-store";
 import { getJobLocationSummary, type JobLocationSummary } from "./job-location";
 import {
+  ENGAGED_OFFER_STATUSES,
   getJobAvailabilityForProvider,
   getOperationStatusBucket,
   getOperationStatusSummary,
@@ -9,6 +10,7 @@ import {
 } from "./job-requests";
 import { getNakliyeShortRoute, type NakliyeShortRouteSide } from "./nakliye-route";
 import { formatJobProductInfoLine } from "./product-catalog";
+import { formatRecyclingSummaryLine } from "./recycling-catalog";
 import { getCategoryDisplayLabel, getServiceCategoryOrderIndex } from "./service-catalog";
 import type { Job, JobPhoto, Offer } from "./types";
 
@@ -26,6 +28,8 @@ export type JobListingRow = {
   location: JobLocationSummary;
   /** product-catalog.ts#formatJobProductInfoLine'ın AYNEN kullanımı — ürün bilgisi yoksa null (bkz. types.ts#Job.productQuantity/productTonnage/productType). */
   productInfoLine: string | null;
+  /** recycling-catalog.ts#formatRecyclingSummaryLine'ın AYNEN kullanımı — Geri Dönüşüm & Atık Tahliye dışı bir ilanda ya da malzeme bilgisi eksikse null. */
+  recyclingSummaryLine: string | null;
   /**
    * Nakliye Güzergâh Yönetimi — nakliye-route.ts#getNakliyeShortRoute'un
    * AYNEN kullanımı: Nakliye dışı bir ilanda ya da teslimat bilgisi eksikse
@@ -35,6 +39,17 @@ export type JobListingRow = {
    * bunu gösterir.
    */
   nakliyeRoute: { pickup: NakliyeShortRouteSide; delivery: NakliyeShortRouteSide } | null;
+  /**
+   * MALSEVK genel ilan gizlilik kuralı — job-requests.ts#canViewJobAddress'in
+   * bu ekrandaki (Aktif İlanlar, her zaman bir Hizmet Veren izleyici — ilan
+   * sahibi/admin dalı hiç geçerli değil) karşılığı: bu sağlayıcının bu ilanda
+   * ENGAGED_OFFER_STATUSES kümesinde bir teklifi var mı. `false` iken
+   * `location.facilityDisplayName`/`nakliyeRoute.*.nameLabel` (tesis/firma
+   * adı) render EDİLMEMELİDİR — job-listing-table.tsx/job-listing-cards.tsx
+   * bu alanı bu amaçla kontrol eder; açık adres bu satırda zaten hiç yoktur
+   * (bkz. `location` dokümanı), bu yüzden yalnızca tesis adı gizlenir.
+   */
+  isLocationRevealed: boolean;
 };
 
 /**
@@ -56,6 +71,10 @@ export function buildJobListingRows(jobs: Job[], offers: Offer[], providerId: st
     const visibleOfferCount = jobOffers.filter(isOfferVisibleInNormalLists).length;
     const sortedPhotos = [...job.photos].sort((a, b) => a.order - b.order);
 
+    const isLocationRevealed = jobOffers.some(
+      (offer) => offer.providerId === providerId && ENGAGED_OFFER_STATUSES.includes(offer.status),
+    );
+
     return {
       job,
       categoryLabel: getCategoryDisplayLabel(job.category),
@@ -65,7 +84,9 @@ export function buildJobListingRows(jobs: Job[], offers: Offer[], providerId: st
       availability: getJobAvailabilityForProvider(job, offers, providerId),
       location: getJobLocationSummary(job),
       productInfoLine: formatJobProductInfoLine(job),
+      recyclingSummaryLine: formatRecyclingSummaryLine(job),
       nakliyeRoute: getNakliyeShortRoute(job),
+      isLocationRevealed,
     };
   });
 }

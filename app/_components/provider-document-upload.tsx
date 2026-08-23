@@ -39,6 +39,7 @@ type DocumentItem = {
   };
 };
 
+/** job-photo-upload.tsx#uploadAndProcess ile AYNI düzeltme — "bağlantı hiç kurulamadı" ile "sunucu anlaşılmaz bir yanıt döndü"yü ayrı, doğru mesajlara ayırır (bkz. o dosyanın dokümantasyonu). */
 async function validateOnServer(
   file: File,
 ): Promise<{ ok: true; sanitizedFileName: string; mimeType: string; extension: string } | { ok: false; error: string }> {
@@ -49,21 +50,33 @@ async function validateOnServer(
   try {
     response = await fetch("/api/provider-documents/validate", { method: "POST", body: formData });
   } catch {
-    return { ok: false, error: "Belge doğrulanırken bir sorun oluştu. Lütfen tekrar deneyin." };
+    return { ok: false, error: "Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin." };
   }
 
   let data: unknown;
+  let parseFailed = false;
   try {
     data = await response.json();
   } catch {
-    return { ok: false, error: "Belge doğrulanırken bir sorun oluştu. Lütfen tekrar deneyin." };
+    parseFailed = true;
   }
 
-  if (!response.ok || typeof data !== "object" || data === null || (data as { ok?: unknown }).ok !== true) {
-    const error =
-      typeof data === "object" && data !== null && typeof (data as { error?: unknown }).error === "string"
+  if (!response.ok || parseFailed || typeof data !== "object" || data === null || (data as { ok?: unknown }).ok !== true) {
+    let error =
+      !parseFailed && typeof data === "object" && data !== null && typeof (data as { error?: unknown }).error === "string"
         ? (data as { error: string }).error
-        : "Belge doğrulanırken bir sorun oluştu. Lütfen tekrar deneyin.";
+        : null;
+    if (!error) {
+      if (response.status === 401 || response.status === 403) {
+        error = "Oturum veya yetki hatası. Lütfen tekrar giriş yapıp deneyin.";
+      } else if (response.status === 413) {
+        error = "Belge boyutu izin verilen sınırı geçiyor.";
+      } else if (response.status >= 500) {
+        error = "Sunucuda beklenmeyen bir hata oluştu. Lütfen birkaç saniye sonra tekrar deneyin.";
+      } else {
+        error = "Belge doğrulanamadı. Lütfen tekrar deneyin.";
+      }
+    }
     return { ok: false, error };
   }
 

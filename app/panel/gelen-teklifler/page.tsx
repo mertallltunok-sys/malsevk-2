@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { IncomingOffersPanel } from "../../_components/incoming-offers-panel";
+import { PageContainer } from "../../_components/page-container";
 
 export const metadata: Metadata = {
   title: "Gelen Teklifler | MALSEVK.COM",
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 export default function GelenTekliflerPage() {
   return (
     <section className="bg-background">
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <PageContainer className="py-16">
         <h1 className="text-3xl font-bold tracking-heading leading-tight text-foreground sm:text-4xl">
           Gelen Teklifler
         </h1>
@@ -30,7 +31,7 @@ export default function GelenTekliflerPage() {
             <IncomingOffersPanel />
           </Suspense>
         </div>
-      </div>
+      </PageContainer>
     </section>
   );
 }

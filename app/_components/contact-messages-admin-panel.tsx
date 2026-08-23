@@ -1,18 +1,20 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import {
   CONTACT_MESSAGE_STATUS_OPTIONS,
   CONTACT_MESSAGE_SUBJECT_OPTIONS,
   getContactMessageSubjectLabel,
-  reviewContactMessage,
   type ContactMessageStatus,
   type ContactMessageSubject,
-  type StoredContactMessage,
 } from "../_lib/contact-messages";
+import {
+  listAllContactMessagesForAdminRemote,
+  reviewContactMessageRemote,
+  type RemoteContactMessage,
+} from "../_lib/supabase-contact-messages";
 import type { UserRole } from "../_lib/types";
-import { useAllContactMessages } from "../_lib/use-contact-messages";
 import { useSession } from "../_lib/use-session";
 import { AdminNav } from "./admin-nav";
 import { AuthGateNotice } from "./auth-gate-notice";
@@ -45,8 +47,7 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
 }
 
-function ContactMessageCard({ contactMessage }: { contactMessage: StoredContactMessage }) {
-  const session = useSession();
+function ContactMessageCard({ contactMessage, onSaved }: { contactMessage: RemoteContactMessage; onSaved: () => void }) {
   const statusId = useId();
   const noteId = useId();
   const [status, setStatus] = useState<ContactMessageStatus>(contactMessage.status);
@@ -54,33 +55,34 @@ function ContactMessageCard({ contactMessage }: { contactMessage: StoredContactM
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // `useAllContactMessages` reaktiftir — bir kaydetme başarılı olur olmaz
-  // bu bileşen `contactMessage` prop'unun TAZE hâliyle yeniden render olur
-  // (bkz. contact-messages.ts#contactMessagesStore.notify), bu yüzden
-  // admin-provider-document-review-panel.tsx'in elle `refreshKey` deseni
-  // burada gerekmez — `dirty`, kaydetme sonrası kendiliğinden `false`'a döner.
+  // Supabase artık gerçek kaynak — kaydetme sonrası `onSaved` (üst bileşenin
+  // `refresh()`'i, admin-jobs-list.tsx ile AYNI refreshKey deseni) listeyi
+  // yeniden çeker; `dirty` o taze veriyle otomatik `false`'a döner.
   const dirty = status !== contactMessage.status || note !== (contactMessage.adminNote ?? "");
 
-  function handleSave() {
+  async function handleSave() {
     setSubmitting(true);
     setActionError(null);
-    const result = reviewContactMessage(session, { id: contactMessage.id, status, adminNote: note });
+    const result = await reviewContactMessageRemote(contactMessage.id, status, note);
     setSubmitting(false);
     if (!result.ok) {
       setActionError(result.error);
+      return;
     }
+    onSaved();
   }
 
-  function handleArchive() {
+  async function handleArchive() {
     setSubmitting(true);
     setActionError(null);
-    const result = reviewContactMessage(session, { id: contactMessage.id, status: "arsivlendi" });
+    const result = await reviewContactMessageRemote(contactMessage.id, "arsivlendi");
     setSubmitting(false);
     if (!result.ok) {
       setActionError(result.error);
       return;
     }
     setStatus("arsivlendi");
+    onSaved();
   }
 
   return (
@@ -219,7 +221,25 @@ function ContactMessageCard({ contactMessage }: { contactMessage: StoredContactM
 
 export function ContactMessagesAdminPanel() {
   const session = useSession();
-  const allMessages = useAllContactMessages();
+  const isAdmin = session?.role === "admin";
+
+  const [loading, setLoading] = useState(true);
+  const [allMessages, setAllMessages] = useState<RemoteContactMessage[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    void listAllContactMessagesForAdminRemote().then((result) => {
+      if (cancelled) return;
+      setAllMessages(result);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, refreshKey]);
 
   const searchFilterId = useId();
   const statusFilterId = useId();
@@ -263,6 +283,14 @@ export function ContactMessagesAdminPanel() {
   }
   if (session.role !== "admin") {
     return <AuthGateNotice message="Bu sayfa yalnızca yöneticiler içindir." />;
+  }
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Yükleniyor...
+      </div>
+    );
   }
 
   return (
@@ -367,7 +395,7 @@ export function ContactMessagesAdminPanel() {
       ) : (
         <div className="mt-6 flex flex-col gap-6">
           {filteredMessages.map((message) => (
-            <ContactMessageCard key={message.id} contactMessage={message} />
+            <ContactMessageCard key={message.id} contactMessage={message} onSaved={refresh} />
           ))}
         </div>
       )}

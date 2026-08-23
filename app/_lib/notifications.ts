@@ -31,7 +31,21 @@ export type NotificationType =
   | "ilan_yayin_suresi_doldu"
   | "belge_onaylandi"
   | "belge_reddedildi"
-  | "belge_revizyon_istendi";
+  | "belge_revizyon_istendi"
+  // HİZMET BAZLI PROVIDER YETKİLENDİRMESİ (migration 0038/0039) — yukarıdaki
+  // "belge_*" üçlüsünden KASITLI OLARAK AYRI: o üçü bir belgenin İNCELEME
+  // DURUMUNU (review_provider_document RPC'si) anlatır, bunlar ise bir
+  // HİZMETİN GERÇEK YETKİ durumunu (authorize_provider_service/revoke_
+  // provider_service_authorization/request_provider_document RPC'leri) —
+  // bir belge onaylanması admin'in o hizmeti AYRICA yetkilendirmesini
+  // GEREKTİRİR (görev bölüm 27), bu yüzden ikisi asla aynı bildirimle temsil
+  // edilemez. Bu üçü, projedeki DİĞER her NotificationType'ın aksine
+  // (bkz. bu dosyanın kendi "yalnızca gerçek sistem verisinden türetilir"
+  // notu, aşağıda) localStorage'dan DEĞİL GERÇEK Supabase `notifications`
+  // tablosundan okunur — bkz. supabase-service-authorization-notifications.ts.
+  | "service_document_required"
+  | "service_authorized"
+  | "service_authorization_revoked";
 
 /**
  * "yeni_teklif" bildiriminin id şeması — TEK doğruluk kaynağı. Bu dosyanın

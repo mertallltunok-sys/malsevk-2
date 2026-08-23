@@ -61,22 +61,6 @@ const jobs: Job[] = [
     photos: [],
   },
   {
-    id: "ilan-004",
-    title: "Konteyner Dolum ve Gözetim Hizmeti",
-    category: "Konteyner Dolum",
-    province: "Mersin",
-    district: "Akdeniz",
-    workLocationType: "Gümrüklü Saha",
-    workDate: "2026-07-28",
-    description:
-      "İhraç ürünlerinin konteynere düzenli yerleştirilmesi ve dolum sürecinin gözetimi tamamlanmıştır.",
-    operationDetails:
-      "Operasyon tamamlanmış olup ilan arşivlenmiştir. Yeni teklif kabul edilmemektedir.",
-    status: "tamamlandi",
-    requesterId: null,
-    photos: [],
-  },
-  {
     id: "ilan-005",
     title: "Rulo Sac Depolama Hizmeti Talebi",
     category: "Depolama",
@@ -178,13 +162,12 @@ function startOfDayTime(dateStr: string): number {
  * hesaplar (ör. 03.08.2026 - 11.08.2026 = 9 gün) — job-listing-filters.ts'in
  * "saat bilgisini sıfırla, sabit bir gün-milisaniyesine böl, Math.round ile
  * yuvarla" idiomuyla AYNI temel (bkz. o dosyadaki startOfDay), yalnızca +1
- * ile bir tarih FARKI değil, uçların ikisini de sayan bir SÜRE üretir —
- * Depolama Süresi ("kaç gün depolanacak") için kullanılır (bkz.
- * job-detail-content.tsx), ama tarihe bağlı genel bir yardımcı olduğu için
- * depolamaya özel bir isim taşımaz. Geçersiz/eksik bir tarih varsa (ör.
- * `workEndDate` hiç yoksa, parse edilemiyorsa, ya da bitiş başlangıçtan
- * önceyse) yanlış bir sayı UYDURMAK yerine `null` döner — çağıran taraf bu
- * durumda süreyi hiç göstermemelidir.
+ * ile bir tarih FARKI değil, uçların ikisini de sayan bir SÜRE üretir.
+ * Geçersiz/eksik bir tarih varsa (ör. `workEndDate` hiç yoksa, parse
+ * edilemiyorsa, ya da bitiş başlangıçtan önceyse) yanlış bir sayı UYDURMAK
+ * yerine `null` döner. NOT: Depolama Süresi ("kaç gün depolanacak", bkz.
+ * job-detail-content.tsx) BU fonksiyonu KULLANMAZ — bkz. getExclusiveDayCount
+ * altındaki not.
  */
 export function getInclusiveDayCount(startDate: string, endDate: string): number | null {
   if (!startDate || !endDate) return null;
@@ -192,6 +175,25 @@ export function getInclusiveDayCount(startDate: string, endDate: string): number
   const endTime = startOfDayTime(endDate);
   if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return null;
   return Math.round((endTime - startTime) / ONE_DAY_MS) + 1;
+}
+
+/**
+ * İki "YYYY-MM-DD" tarihi arasındaki DÜZ takvim günü farkı (ör. 16.08.2026 -
+ * 24.08.2026 = 8 gün) — `getInclusiveDayCount`in AKSİNE uçları AYRICA
+ * saymaz (+1 yok). Depolama Süresi'nin TEK doğruluk kaynağıdır (bkz.
+ * job-detail-content.tsx'in üst özet paneli VE "Depolama Talebi" kartı —
+ * ikisi de AYNI bu fonksiyonu çağırır, asla iki farklı hesap sayfada aynı
+ * anda görünmez); kullanıcı onayıyla `getInclusiveDayCount`in kapsayıcı
+ * hesabından BİLEREK ayrıştırıldı (proje raporuna bkz.). Aynı null-güvenlik
+ * kuralları geçerlidir: geçersiz/eksik tarihte `null` döner, yanlış bir
+ * sayı asla üretilmez.
+ */
+export function getExclusiveDayCount(startDate: string, endDate: string): number | null {
+  if (!startDate || !endDate) return null;
+  const startTime = startOfDayTime(startDate);
+  const endTime = startOfDayTime(endDate);
+  if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return null;
+  return Math.round((endTime - startTime) / ONE_DAY_MS);
 }
 
 /**

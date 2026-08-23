@@ -29,6 +29,20 @@ type PhotoItem = {
   processed?: { blob: Blob; mimeType: string; previewUrl: string };
 };
 
+/**
+ * DÜZELTME (proje raporu, "Fotoğraf Yükleme Hata Mesajı Netleştirmesi"):
+ * eskiden hem `fetch()` bizzat fırlarsa (gerçek ağ/bağlantı hatası — ör. dev
+ * sunucusu yeniden başlatılırken ya da geçici bir Turbopack durum bozulması
+ * sırasında) HEM DE sunucu yanıtı JSON OLARAK ayrıştırılamazsa (ör. 404/500
+ * HTML sayfası) TEK VE AYNI jenerik "Fotoğraf işlenirken bir sorun oluştu"
+ * metni gösteriliyordu — kullanıcı "ağa hiç ulaşamadım" ile "sunucu
+ * anlaşılmaz bir şey döndü"yü ayırt edemiyordu. Sunucunun KENDİSİ GERÇEK bir
+ * işleme hatası (ör. "Dosya bozuk veya geçerli bir resim değil.") döndüğünde
+ * bu HİÇ DEĞİŞMEDİ — o mesaj olduğu gibi gösterilir (aşağıdaki `if (typeof
+ * data...)` dalı). Yalnızca "sunucudan hiç anlamlı bir yanıt alınamadı" iki
+ * alt-durumu (bağlantı hiç kurulamadı / yanıt JSON değil) artık ayrı, daha
+ * doğru mesajlara ayrıştırılır.
+ */
 async function uploadAndProcess(
   file: File,
   role: string,
@@ -41,18 +55,29 @@ async function uploadAndProcess(
   try {
     response = await fetch("/api/job-photos/process", { method: "POST", body: formData });
   } catch {
-    return { ok: false, error: "Fotoğraf işlenirken bir sorun oluştu. Lütfen tekrar deneyin." };
+    return { ok: false, error: "Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin." };
   }
 
   if (!response.ok) {
-    let error = "Fotoğraf işlenirken bir sorun oluştu. Lütfen tekrar deneyin.";
+    let error: string | null = null;
     try {
       const data: unknown = await response.json();
       if (typeof data === "object" && data !== null && typeof (data as { error?: unknown }).error === "string") {
         error = (data as { error: string }).error;
       }
     } catch {
-      // yanıt gövdesi ayrıştırılamadı, genel mesaj kullanılır
+      // yanıt gövdesi ayrıştırılamadı (ör. JSON olmayan bir hata sayfası) — aşağıdaki durum koduna göre yedek mesaj kullanılır.
+    }
+    if (!error) {
+      if (response.status === 401 || response.status === 403) {
+        error = "Oturum veya yetki hatası. Lütfen tekrar giriş yapıp deneyin.";
+      } else if (response.status === 413) {
+        error = "Fotoğraf boyutu 10 MB'ı geçemez.";
+      } else if (response.status >= 500) {
+        error = "Sunucuda beklenmeyen bir hata oluştu. Lütfen birkaç saniye sonra tekrar deneyin.";
+      } else {
+        error = "Fotoğraf işlenemedi. Lütfen tekrar deneyin.";
+      }
     }
     return { ok: false, error };
   }
@@ -69,14 +94,23 @@ export function JobPhotoUpload({
   disabled = false,
   errorId,
   existingCount = 0,
+  maxPhotos = MAX_PHOTOS,
 }: {
   role: string;
   onPhotosChange: (photos: ReadyJobPhoto[]) => void;
   onBusyChange?: (busy: boolean) => void;
   disabled?: boolean;
   errorId?: string;
-  /** Bu bileşenin bilmediği, dışarıda zaten sayılan (ör. düzenleme ekranında korunan mevcut) fotoğraf sayısı — MAX_PHOTOS sınırına ve kapak fotoğrafı hesabına dahil edilir. */
+  /** Bu bileşenin bilmediği, dışarıda zaten sayılan (ör. düzenleme ekranında korunan mevcut) fotoğraf sayısı — maxPhotos sınırına ve kapak fotoğrafı hesabına dahil edilir. */
   existingCount?: number;
+  /**
+   * "Depolama İlan Oluşturma" görevi: Depo Hizmetleri grubu 15'e kadar
+   * fotoğraf kabul eder (bkz. photo-validation.ts#getMaxPhotos) — genel
+   * MAX_PHOTOS (10) burada ARTIK hardcode DEĞİL, çağıran tarafın kategoriye
+   * göre geçtiği bu prop kullanılır. Verilmezse davranış BİREBİR eskisiyle
+   * (MAX_PHOTOS) aynıdır.
+   */
+  maxPhotos?: number;
 }) {
   const [items, setItems] = useState<PhotoItem[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -144,8 +178,8 @@ export function JobPhotoUpload({
       const knownHashes = new Set(itemsRef.current.map((item) => item.contentHash));
 
       for (const file of incoming) {
-        if (existingCount + currentCount + toQueue.length >= MAX_PHOTOS) {
-          errors.push(`En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.`);
+        if (existingCount + currentCount + toQueue.length >= maxPhotos) {
+          errors.push(`En fazla ${maxPhotos} fotoğraf yükleyebilirsiniz.`);
           break;
         }
 
@@ -184,7 +218,7 @@ export function JobPhotoUpload({
         void processOne(newItems[i].clientId, toQueue[i].file);
       }
     },
-    [disabled, processOne, existingCount],
+    [disabled, processOne, existingCount, maxPhotos],
   );
 
   function handleDelete(clientId: string) {
@@ -258,8 +292,12 @@ export function JobPhotoUpload({
           className="sr-only"
         />
         <p className="text-xs text-muted-foreground">
-          {existingCount + readyOrProcessingCount} / {MAX_PHOTOS} fotoğraf yüklendi · JPG, PNG, WEBP, HEIC/HEIF ·
+          {existingCount + readyOrProcessingCount} / {maxPhotos} fotoğraf yüklendi · JPG, PNG, WEBP, HEIC/HEIF ·
           en fazla {Math.round(MAX_PHOTO_SIZE_BYTES / (1024 * 1024))} MB
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Firma tabelası, telefon numarası, e-posta veya açık adres gösteren fotoğraf yüklemeyin — bu bilgiler
+          yalnızca teklif kabul edildikten sonra paylaşılabilir.
         </p>
       </div>
 
