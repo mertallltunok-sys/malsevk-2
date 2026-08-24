@@ -82,6 +82,7 @@ export function CompleteRegistrationForm() {
   const phoneId = useId();
   const companyNameId = useId();
   const companyTypeId = useId();
+  const mersisNoId = useId();
   const provinceId = useId();
   const districtId = useId();
   const legalConsentId = useId();
@@ -92,6 +93,7 @@ export function CompleteRegistrationForm() {
   const [phone, setPhone] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [companyType, setCompanyType] = useState<CompanyType | "">("");
+  const [mersisNo, setMersisNo] = useState("");
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
@@ -121,6 +123,7 @@ export function CompleteRegistrationForm() {
     setPhone(fields.phone);
     setCompanyName(fields.companyName);
     setCompanyType(fields.companyType);
+    setMersisNo(fields.mersisNo ?? "");
     setDistrict(fields.district);
     const matchedProvince = provinces.find((item) => item.name === fields.province);
     if (matchedProvince) setProvinceCode(matchedProvince.code);
@@ -182,6 +185,7 @@ export function CompleteRegistrationForm() {
         companyType: draft.companyType,
         province: draft.province,
         district: draft.district,
+        mersisNo: draft.mersisNo,
         providerServiceCategoryIds: draft.providerServiceCategoryIds,
         providerDocuments: draft.providerDocuments,
         documentDeclarationAccepted: draft.documentDeclarationAccepted,
@@ -256,6 +260,14 @@ export function CompleteRegistrationForm() {
       setFormError("İl ve ilçe zorunludur.");
       return;
     }
+    // MERSİS / İşletme Tekilliği görevi — login-form.tsx'in register-form-
+    // validation.ts üzerinden yaptığı AYNI biçim kontrolü (bu form kendi
+    // doğrulamasını inline yapıyor, o paylaşılan fonksiyonu kullanmıyor) —
+    // yalnızca "bireysel" DIŞINDA VE doluysa, 16 haneye normalize olmalı.
+    if (companyType !== "bireysel" && mersisNo.replace(/\D/g, "").length > 0 && mersisNo.replace(/\D/g, "").length !== 16) {
+      setFormError("MERSİS numarası 16 haneli bir sayı olmalıdır.");
+      return;
+    }
     if (!legalConsentAccepted) {
       setFormError("Devam etmek için Gizlilik Politikası, Kullanım Koşulları ve KVKK Aydınlatma Metni'ni kabul etmelisiniz.");
       return;
@@ -271,6 +283,7 @@ export function CompleteRegistrationForm() {
       companyType,
       province: provinceName,
       district,
+      mersisNo: mersisNo.trim() || undefined,
       providerServiceCategoryIds: [],
       providerDocuments: [],
       documentDeclarationAccepted: false,
@@ -416,6 +429,24 @@ export function CompleteRegistrationForm() {
           ))}
         </select>
       </div>
+
+      {/* MERSİS / İşletme Tekilliği görevi — login-form.tsx'teki AYNI koşul/opsiyonellik. */}
+      {companyType && companyType !== "bireysel" && (
+        <div>
+          <label htmlFor={mersisNoId} className="text-sm font-medium text-foreground">
+            MERSİS Numarası <span className="font-normal text-muted-foreground">(opsiyonel)</span>
+          </label>
+          <input
+            id={mersisNoId}
+            type="text"
+            inputMode="numeric"
+            value={mersisNo}
+            onChange={(event) => setMersisNo(event.target.value)}
+            placeholder="16 haneli MERSİS numarası"
+            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+        </div>
+      )}
 
       <div className="grid gap-6 sm:grid-cols-2">
         <SearchableSelect

@@ -54,6 +54,7 @@ export function isValidRegistrationMetadata(value: unknown): value is Registrati
     isCompanyType(meta.companyType) &&
     typeof meta.province === "string" &&
     typeof meta.district === "string" &&
+    (meta.mersisNo === undefined || typeof meta.mersisNo === "string") &&
     Array.isArray(meta.providerServiceCategoryIds) &&
     meta.providerServiceCategoryIds.every((id) => typeof id === "string") &&
     typeof meta.documentDeclarationAccepted === "boolean" &&

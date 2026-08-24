@@ -20,6 +20,7 @@ import type {
   Job,
   JobClosureReason,
   JobCustomsDocument,
+  JobModerationStatus,
   JobPhoto,
   JobStatus,
   NakliyeCargoGroup,
@@ -1001,14 +1002,29 @@ export function createOperationId(): string {
 }
 
 /**
- * İlan oluşturma iş kuralları arayüzden bağımsız burada uygulanır: yalnızca
- * Hizmet Alan rolü ilan oluşturabilir, en az 1 en fazla 10 fotoğraf zorunludur.
- * Yeni ilan her zaman "yayinda" durumuyla ve oluşturan kullanıcının id'siyle
- * (requesterId) sistem tarafından oluşturulur. Fotoğraf dosyaları yalnızca
- * ilan kaydı da başarılı olursa IndexedDB'ye yazılır — form/ilan kaydı
- * herhangi bir noktada başarısız olursa hiçbir sahipsiz dosya kalmaz.
+ * DÜZELTME ("Supabase Gerçek Kaynak" görevi — ilan oluşturma artık
+ * sahte-yerel-başarı GÖSTEREMEZ): bu fonksiyon eskiden `createJob`'ın TAMAMI
+ * idi (doğrulama + alan çözümleme + fotoğraf/evrak IndexedDB yazımı + `Job`
+ * nesnesinin İNŞASI + localStorage'a YAZMA, tek bir fonksiyonda). Artık
+ * yalnızca "inşa" yarısı — SON `writeUserCreatedJobs` çağrısı olmadan `Job`
+ * nesnesini üretir (fotoğraf/evraklar YİNE IndexedDB'ye yazılır, çünkü
+ * `supabase-job-sync.ts`'in Storage yükleme adımı bu blob'ları OKUR — ama
+ * ilan kaydı henüz HİÇBİR YERE (yerel de dahil) YAZILMAZ).
+ *
+ * KÖK NEDEN: `job-request-form.tsx` eskiden ÖNCE bu fonksiyonun (o zamanki
+ * adıyla `createJob`) TAMAMINI çağırıp yerel yazımı TAMAMLIYOR, SONRA
+ * `syncJobToSupabase`yi en-iyi-çaba/bloklamayan olarak deniyordu — Supabase
+ * başarısız olsa bile ilan zaten yerelde "yayında" görünüyordu (admin onay
+ * kuyruğuna hiç düşmeden, başka cihazlarda hiç görünmeden). Artık gerçek
+ * sıra `supabase-job-sync.ts#createJobWithSupabaseSync`dedir: ÖNCE bu
+ * fonksiyon (yalnızca inşa), SONRA Supabase RPC'si (bloklayan), yalnızca O
+ * BAŞARILIYSA `commitJob` ile yerel yazım. `createJob` (aşağıda) bu iki
+ * adımı ESKİ, yalnızca-yerel davranışıyla birleştiren KÜÇÜK bir sarmalayıcı
+ * olarak KALIR — dış sözleşmesi değişmedi, yalnızca artık gerçek üretim
+ * çağrısı (`job-request-form.tsx`) onun yerine `createJobWithSupabaseSync`yi
+ * kullanıyor.
  */
-export async function createJob(
+export async function buildJobForCreation(
   session: Session | null,
   input: CreateJobInput,
 ): Promise<CreateJobResult> {
@@ -1088,17 +1104,47 @@ export async function createJob(
   };
   job.facilityId = verifiedPickupFacilityId(job.category, jobProvince, jobDistrict, job.facilityId);
 
+  return { ok: true, job };
+}
+
+/**
+ * `buildJobForCreation`in (yukarıda) tamamladığı bir `Job`ı localStorage'a
+ * YAZAR — ayrı bir fonksiyondur çünkü `createJobWithSupabaseSync`
+ * (supabase-job-sync.ts) bu adımı yalnızca Supabase RPC'si GERÇEKTEN
+ * başarılı DÖNDÜKTEN SONRA çağırır. Başarısızlıkta çağıran (build sırasında
+ * IndexedDB'ye yazılmış fotoğraf/evrak blob'larının storageKey'lerini zaten
+ * elinde tuttuğu için) kendi geri alma işlemini yapar — bu fonksiyon
+ * yalnızca yazımın kendisinden sorumludur.
+ */
+export function commitJob(job: Job): boolean {
   const all = readUserCreatedJobsSnapshot();
-  if (!writeUserCreatedJobs([...all, job])) {
-    // Fotoğraflar/evraklar zaten IndexedDB'ye yazıldı (yukarıda) ama ilan
-    // kaydı hiçbir yere bağlanamadı — sahipsiz blob bırakmamak için geri
-    // alınır (persistPhotosOrRollback'teki kısmi-yazım geri alma ile aynı
-    // gerekçe).
-    await deletePhotoBlobs([...photos, ...customsDocuments].map((item) => item.storageKey));
+  return writeUserCreatedJobs([...all, job]);
+}
+
+/**
+ * ESKİ, yalnızca-yerel sözleşme — `buildJobForCreation` + `commitJob`'u
+ * art arda çağırır, başarısızlıkta fotoğraf/evrak blob'larını geri alır
+ * (eskiden bu fonksiyonun kendi içinde olan mantık, birebir aynı). Gerçek
+ * üretim akışı (job-request-form.tsx) artık bunun yerine
+ * `supabase-job-sync.ts#createJobWithSupabaseSync`yi çağırıyor — bu
+ * fonksiyon yalnızca dış sözleşmeyi (ve varsa başka bir gelecekteki
+ * yalnızca-yerel çağıranı) korumak için kalır.
+ */
+export async function createJob(
+  session: Session | null,
+  input: CreateJobInput,
+): Promise<CreateJobResult> {
+  const built = await buildJobForCreation(session, input);
+  if (!built.ok) return built;
+
+  if (!commitJob(built.job)) {
+    await deletePhotoBlobs(
+      [...built.job.photos, ...(built.job.customsDocuments ?? [])].map((item) => item.storageKey),
+    );
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 
-  return { ok: true, job };
+  return { ok: true, job: built.job };
 }
 
 /**
@@ -1240,8 +1286,17 @@ export type CreateJobsForOperationResult =
  * yasaklar. Bedeli: aynı fotoğraf içeriği IndexedDB'de hizmet sayısı kadar
  * tekrarlanır — bilinçli bir bağımsızlık/güvenlik tercihidir, depolama
  * verimliliği değil.
+ *
+ * DÜZELTME ("Supabase Gerçek Kaynak" görevi) — `buildJobForCreation`in
+ * (yukarıda) AYNI ilkesi: bu fonksiyon artık yalnızca "inşa" yarısıdır, SON
+ * `writeUserCreatedJobs` çağrısı olmadan hazırlanan `Job[]`i döner. Gerçek
+ * üretim akışı `supabase-job-sync.ts#createJobsForOperationWithSupabaseSync`
+ * üzerinden ÖNCE `create_operation_with_jobs` RPC'sini (bloklayan) dener,
+ * yalnızca O BAŞARILIYSA `commitJobs` ile yerel yazımı yapar —
+ * `createJobsForOperation` (aşağıda) eski davranışı koruyan küçük bir
+ * sarmalayıcı olarak kalır.
  */
-export async function createJobsForOperation(
+export async function buildJobsForOperation(
   session: Session | null,
   input: CreateJobsForOperationInput,
 ): Promise<CreateJobsForOperationResult> {
@@ -1390,20 +1445,41 @@ export async function createJobsForOperation(
     return job;
   });
 
+  return { ok: true, jobs, operationId };
+}
+
+/**
+ * `buildJobsForOperation`in (yukarıda) tamamladığı `Job[]`i TEK bir
+ * `writeUserCreatedJobs` çağrısıyla (operasyonun "hepsi ya da hiçbiri"
+ * atomikliği, aynı desen) localStorage'a yazar.
+ */
+export function commitJobs(jobs: Job[]): boolean {
   const all = readUserCreatedJobsSnapshot();
-  if (!writeUserCreatedJobs([...all, ...jobs])) {
-    // Her hizmet için ayrı ayrı persistlenmiş TÜM fotoğraf/evrak setleri
-    // (yukarıda) hiçbir ilana bağlanamadan sahipsiz kalmasın diye geri
-    // alınır — "hepsi ya da hiçbiri" atomikliğinin yazma başarısızlığına da
-    // uygulanmış hali.
-    await Promise.all([
-      ...persistedPhotoSets.map((set) => deletePhotoBlobs(set.map((photo) => photo.storageKey))),
-      ...persistedCustomsDocumentSets.map((set) => deletePhotoBlobs(set.map((doc) => doc.storageKey))),
-    ]);
+  return writeUserCreatedJobs([...all, ...jobs]);
+}
+
+/**
+ * ESKİ, yalnızca-yerel sözleşme — `createJob`'un `createJobsForOperation`
+ * karşılığı, AYNI gerekçeyle. Gerçek üretim akışı artık
+ * `supabase-job-sync.ts#createJobsForOperationWithSupabaseSync`yi kullanıyor.
+ */
+export async function createJobsForOperation(
+  session: Session | null,
+  input: CreateJobsForOperationInput,
+): Promise<CreateJobsForOperationResult> {
+  const built = await buildJobsForOperation(session, input);
+  if (!built.ok) return built;
+
+  if (!commitJobs(built.jobs)) {
+    await Promise.all(
+      built.jobs.map((job) =>
+        deletePhotoBlobs([...job.photos, ...(job.customsDocuments ?? [])].map((item) => item.storageKey)),
+      ),
+    );
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 
-  return { ok: true, jobs, operationId };
+  return { ok: true, jobs: built.jobs, operationId: built.operationId };
 }
 
 export type UpdateJobInput = {
@@ -1490,12 +1566,32 @@ export type UpdateJobInput = {
  * job-store.ts'e bağımlı olduğu için döngüsel import olurdu, bkz. deleteJob
  * üstündeki not) — bu yüzden liste çağıran taraftan taşınır.
  */
-export async function updateJob(
+export type BuildJobUpdateResult =
+  | {
+      ok: true;
+      job: Job;
+      existing: Job;
+      previousModerationStatus: JobModerationStatus;
+      newlyPersistedPhotos: JobPhoto[];
+      newlyPersistedCustomsDocuments: JobCustomsDocument[];
+    }
+  | { ok: false; error: string };
+
+/**
+ * "Supabase Gerçek Kaynak" görevi — createJob/createJobsForOperation'ın
+ * buildJobForCreation/buildJobsForOperation ayrımıyla AYNI ilke: bu
+ * fonksiyon HİÇBİR yerel yazım yapmaz, yalnızca doğrular/çözümler ve
+ * güncellenmiş `Job` nesnesini döndürür — asıl yazım `commitJobUpdate`'te.
+ * Bu ayrım, çağıranın (supabase-job-sync.ts#updateJobWithSupabaseSync) yerel
+ * yazımdan ÖNCE gerçek bir Supabase RPC çağrısı yapabilmesini sağlar.
+ */
+export async function buildJobUpdate(
   session: Session | null,
   jobId: string,
   input: UpdateJobInput,
   offers: Offer[],
-): Promise<CreateJobResult> {
+  fallbackJob?: Job,
+): Promise<BuildJobUpdateResult> {
   if (!session) {
     return { ok: false, error: "İlanı düzenlemek için giriş yapmalısınız." };
   }
@@ -1503,7 +1599,17 @@ export async function updateJob(
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan düzenleyebilir." };
   }
 
-  const existing = findUserCreatedJobById(jobId);
+  // Çapraz cihaz düzenleme — bu ilan bu TARAYICININ kendi localStorage
+  // havuzunda hiç yoksa (ör. başka bir cihaz/tarayıcıda oluşturuldu, burada
+  // yalnızca use-jobs.ts#useRemoteJobsFallback ile "uzaktan" birleşmiş
+  // durumda) `findUserCreatedJobById` hiçbir şey bulamaz — bu GERÇEK bir
+  // sahiplik reddi değildir, yalnızca yerel önbelleğin boş olmasıdır.
+  // Çağıran (job-edit-form.tsx), ZATEN elindeki (useJobById ile çözülmüş,
+  // yerel VEYA uzak kaynaklı) `job` nesnesini `fallbackJob` olarak sağlar;
+  // yerel bir kayıt varsa o HER ZAMAN önceliklidir (en güncel yerel taslak
+  // asla göz ardı edilmez), `fallbackJob` yalnızca yerelde hiç kayıt yokken
+  // devreye girer.
+  const existing = findUserCreatedJobById(jobId) ?? (fallbackJob && fallbackJob.id === jobId ? fallbackJob : null);
   if (!existing || existing.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1593,20 +1699,47 @@ export async function updateJob(
   // değişmez — halihazırda incelemeyi bekliyor. Admin'in KENDİ düzenlemesi
   // (admin-job-edit-form.tsx -> update_job_as_admin) bu fonksiyonu hiç
   // çağırmaz, bu kural yalnızca sahibinin kendi düzenleme yoluna uygulanır.
-  if (getJobModerationStatus(existing) !== "pending_review" && didCriticalJobContentChange(existing, updated)) {
+  const previousModerationStatus = getJobModerationStatus(existing);
+  if (previousModerationStatus !== "pending_review" && didCriticalJobContentChange(existing, updated)) {
     updated.moderationStatus = "pending_review";
     updated.moderationReviewedAt = undefined;
     updated.moderationReviewedBy = undefined;
     updated.moderationRejectionReason = undefined;
   }
 
+  return { ok: true, job: updated, existing, previousModerationStatus, newlyPersistedPhotos: newlyPersisted, newlyPersistedCustomsDocuments };
+}
+
+/**
+ * Yalnızca yerel yazım — bkz. buildJobUpdate. `jobId` yerelde zaten var olan
+ * bir kayıtsa güncellenir; yerelde hiç yoksa (çapraz cihaz düzenleme, bkz.
+ * buildJobUpdate'in fallbackJob notu) listeye YENİ bir satır olarak eklenir
+ * (upsert) — böylece bu ilan artık bu tarayıcının da yerel önbelleğinde var
+ * olur ve bir SONRAKİ düzenleme tamamen yerelden çözülebilir.
+ */
+export function commitJobUpdate(jobId: string, updated: Job): boolean {
   const all = readUserCreatedJobsSnapshot();
-  if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
+  const next = all.some((item) => item.id === jobId) ? all.map((item) => (item.id === jobId ? updated : item)) : [...all, updated];
+  return writeUserCreatedJobs(next);
+}
+
+export async function updateJob(
+  session: Session | null,
+  jobId: string,
+  input: UpdateJobInput,
+  offers: Offer[],
+  fallbackJob?: Job,
+): Promise<CreateJobResult> {
+  const built = await buildJobUpdate(session, jobId, input, offers, fallbackJob);
+  if (!built.ok) return built;
+  const { job: updated, existing, newlyPersistedPhotos, newlyPersistedCustomsDocuments } = built;
+
+  if (!commitJobUpdate(jobId, updated)) {
     // Bu düzenlemede eklenen YENİ fotoğraflar/evraklar (yukarıda persistlenmiş)
     // hiçbir ilana bağlanamadan sahipsiz kalmasın diye geri alınır. Mevcut
     // (korunan) fotoğraflara/evraklara hiç dokunulmaz — eski kayıt
     // localStorage'da olduğu gibi durur, kullanıcı hâlâ eski hâline erişebilir.
-    await deletePhotoBlobs([...newlyPersisted, ...newlyPersistedCustomsDocuments].map((item) => item.storageKey));
+    await deletePhotoBlobs([...newlyPersistedPhotos, ...newlyPersistedCustomsDocuments].map((item) => item.storageKey));
     return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
   }
 

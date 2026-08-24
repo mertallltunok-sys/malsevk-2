@@ -3,7 +3,6 @@
 import { useId, useState } from "react";
 import { Building2, CalendarDays, CheckCircle2, ClipboardList, FileText, Package, Recycle } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import {
   getCustomsRequestedServiceLabels,
   getCustomsTransactionTypeLabel,
@@ -466,15 +465,17 @@ export function JobDetailContent({ id }: { id: string }) {
   const job = useJobById(id);
   const offers = useAllOffers();
   const session = useSession();
-  const searchParams = useSearchParams();
-  // "Kritik İlan Senkronizasyonu" görevi (bölüm 2) — bu sayfaya eklenen
-  // `?senkronUyarisi=1` URL parametresi geçici/tarayıcı-yenilemede kaybolan
-  // bir sinyaldi ve "ilanınız normal şekilde kullanılabilir" gibi YANLIŞ bir
-  // güvence veriyordu (senkron gerçekten başarısız olduysa ilan sunucuda hiç
-  // YOK, admin onay kuyruğunda da hiç görünmez). Artık `job.supabaseSyncFailedAt`
-  // (kalıcı, job-store.ts) TEK doğruluk kaynağı — job-requests-panel.tsx ile
-  // AYNI kalıp/aynı yeniden deneme mekanizması.
-  const syncWarning = searchParams.get("senkronUyarisi") === "1";
+  // "Supabase Gerçek Kaynak" görevi — ilan oluşturma artık Supabase RPC'sini
+  // BLOKLAYAN olarak içeriyor (job-request-form.tsx#handlePublish →
+  // supabase-job-sync.ts#createJobWithSupabaseSync), bu yüzden "yerelde
+  // oluşturuldu ama senkron hâlâ deneniyor/denendi" ARA durumu artık
+  // yapısal olarak İMKANSIZ — eskiden bu sayfaya eklenen `?senkronUyarisi=1`
+  // URL parametresi ve onun gösterdiği "ilanınız normal şekilde
+  // kullanılabilir" mesajı bu yüzden KALDIRILDI (o mesaj zaten YANLIŞ bir
+  // güvence veriyordu). `job.supabaseSyncFailedAt` (kalıcı, job-store.ts)
+  // hâlâ TEK doğruluk kaynağı — ama artık yalnızca DÜZENLEME sonrası
+  // senkron hatası (job-edit-form.tsx) veya eski/geçiş-öncesi bir kayıt
+  // için anlamlıdır, oluşturma için değil.
   const syncFailed = Boolean(job?.supabaseSyncFailedAt);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -569,7 +570,7 @@ export function JobDetailContent({ id }: { id: string }) {
         ← İlanlara Dön
       </Link>
 
-      {syncFailed ? (
+      {syncFailed && (
         <div role="alert" className="mt-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
           <p className="font-medium">Senkronizasyon Başarısız</p>
           <p className="mt-1 text-danger/80">
@@ -587,13 +588,6 @@ export function JobDetailContent({ id }: { id: string }) {
             {retrying ? "Deneniyor..." : "Yeniden Dene"}
           </button>
         </div>
-      ) : (
-        syncWarning && (
-          <p role="alert" className="mt-3 rounded-md bg-warning-soft px-4 py-3 text-sm font-medium text-warning">
-            İlanınız bu cihazda oluşturuldu, sunucu senkronizasyonu deneniyor/denendi. Bu sayfayı yenilerseniz güncel
-            durum gösterilir.
-          </p>
-        )
       )}
 
       {/*

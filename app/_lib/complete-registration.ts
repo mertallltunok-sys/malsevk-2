@@ -56,6 +56,15 @@ export type CompleteRegistrationInput = {
   companyType: CompanyType;
   province: string;
   district: string;
+  /**
+   * MERSİS / İşletme Tekilliği görevi — yalnızca `companyType !== "bireysel"`
+   * iken formda gösterilir/toplanır, HİÇBİR `companyType` için zorunlu
+   * DEĞİLDİR (bkz. migration 0082'nin kendi "kayıt dışı bırakma riski"
+   * notu). Boşluk/tire dahil serbest biçimde girilebilir — normalize etme
+   * (yalnızca rakamları bırakma) VE tekillik doğrulaması `complete_registration`
+   * RPC'sinin (0082) KENDİSİNDE yapılır, burada TEKRARLANMAZ.
+   */
+  mersisNo?: string;
   /** Yalnızca role "hizmet-veren" iken anlamlıdır. */
   providerServiceCategoryIds: string[];
   /** Yalnızca role "hizmet-veren" iken anlamlıdır — belgeler bu fonksiyon çağrılmadan ÖNCE IndexedDB'ye zaten yazılmış olmalıdır (bkz. provider-document-upload.tsx, mevcut akışla AYNI). */
@@ -153,6 +162,10 @@ function mapCompleteRegistrationRpcError(error: { code?: string; message: string
       return "Ad Soyad, telefon, firma adı, il ve ilçe alanlarının tümü zorunludur.";
     case "ML103":
       return "Hesabınız bulunamadı. Lütfen tekrar giriş yapmayı deneyin.";
+    case "ML174":
+      return "MERSİS numarası 16 haneli bir sayı olmalıdır.";
+    case "ML175":
+      return "Bu MERSİS numarasıyla kayıtlı bir işletme zaten bulunuyor.";
     default:
       return error.message || "Kayıt tamamlanırken bir hata oluştu.";
   }
@@ -204,6 +217,7 @@ export async function finishSupabaseRegistration(
       p_company_type: input.companyType,
       p_province: input.province,
       p_district: input.district,
+      p_mersis_no: input.mersisNo || null,
     });
     // ML101 ("zaten tamamlanmış") bir yarış durumunda (ör. çift gönderim)
     // beklenen ve ZARARSIZDIR — aşağıdaki adımlara olduğu gibi devam edilir,

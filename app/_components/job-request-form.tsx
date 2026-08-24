@@ -29,7 +29,6 @@ import {
   toFacilitySelectOptions,
 } from "../_lib/job-location";
 import { FIXED_PROVINCE_LABEL } from "../_lib/job-listing-filters";
-import { createJob, createJobsForOperation, markJobSupabaseSyncFailed } from "../_lib/job-store";
 import { formatJobDate, getTodayLocalDateString } from "../_lib/jobs";
 import {
   DELIVERY_MANUAL_LOCATION_VALUE,
@@ -79,7 +78,7 @@ import { getServiceCategoryLabel, isStorageOnlyLocationCategory, SERVICE_CATEGOR
 import { isContainerStorageCategory } from "../_lib/storage-container-catalog";
 import { isHazardousStorageCategory, isTehlikeliMaddeDepolamaCategory } from "../_lib/storage-hazard-catalog";
 import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
-import { isSupabaseJobSyncEnabled, syncJobToSupabase, syncOperationToSupabase } from "../_lib/supabase-job-sync";
+import { createJobWithSupabaseSync, createJobsForOperationWithSupabaseSync } from "../_lib/supabase-job-sync";
 import {
   getDistrictId,
   getDistrictsByProvinceCode,
@@ -1489,7 +1488,7 @@ export function JobRequestForm() {
           : null;
         const isCustomLocation = location.facilityId === FACILITY_FREE_TEXT_VALUE;
         const deliveryPayload = resolveDeliveryLocationPayload(service);
-        const result = await createJob(session, {
+        const result = await createJobWithSupabaseSync(session, {
           category: service.category,
           title: service.title,
           description: service.description,
@@ -1540,27 +1539,14 @@ export function JobRequestForm() {
           );
         }
 
-        // Kritik İlan Senkronizasyonu görevi — bayrak kapalıyken bu blok hiç
-        // çalışmaz, bugünkü davranış birebir aynı kalır. Açıkken localStorage
-        // yazımı BAŞARILI olduktan SONRA beklenir (senkron); başarısız olursa
-        // yerel ilan SİLİNMEZ/geri alınmaz, gezinme ENGELLENMEZ — ama artık
-        // yalnızca geçici bir URL bayrağı DEĞİL, ilanın KENDİSİNE KALICI
-        // olarak işlenir (bkz. types.ts#Job.supabaseSyncFailedAt) — sayfa
-        // yenilense/başka ekrana geçilse bile job-requests-panel.tsx artık
-        // "Admin Onayı Bekleniyor" YERİNE gerçek durumu ("Senkronizasyon
-        // Başarısız") gösterir. Hata, gizli hiçbir Supabase bilgisi
-        // içermeden console'a da yazılır.
-        let syncWarning = false;
-        if (isSupabaseJobSyncEnabled()) {
-          const syncResult = await syncJobToSupabase(result.job);
-          if (!syncResult.ok) {
-            syncWarning = true;
-            console.error(`Supabase ilan senkronizasyonu başarısız (job ${result.job.id}):`, syncResult.error);
-            markJobSupabaseSyncFailed(result.job.id, syncResult.error);
-          }
-        }
-
-        router.push(`/ilanlar/${result.job.id}${syncWarning ? "?senkronUyarisi=1" : ""}`);
+        // "Supabase Gerçek Kaynak" görevi — `createJobWithSupabaseSync`
+        // (yukarıda çağrıldı) artık Supabase RPC'sini BLOKLAYAN olarak
+        // içeriyor: bu satıra yalnızca sunucu kaydı GERÇEKTEN başarılı
+        // olduysa ulaşılır (aksi hâlde `result.ok` zaten false döner ve
+        // yukarıdaki erken `return` ile formda kalınır). Bu yüzden burada
+        // artık ayrı bir senkron denemesi/uyarı bayrağı YOK — ilan bu satıra
+        // ulaştığında zaten hem yerelde hem Supabase'te gerçekten var.
+        router.push(`/ilanlar/${result.job.id}`);
       } else {
         // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — RPC
         // gövdesini üreten AYNI map geçişinde, her hizmetin custom pickup/
@@ -1568,7 +1554,7 @@ export function JobRequestForm() {
         // başarılı olana kadar HİÇBİRİNİ göndermez (aşağıda, result.ok'tan
         // sonra).
         const pendingCandidates: { rawText: string; province: string; district: string; source: string }[] = [];
-        const result = await createJobsForOperation(session, {
+        const result = await createJobsForOperationWithSupabaseSync(session, {
           province: provinceName,
           operationDetails,
           photos,
@@ -1643,35 +1629,20 @@ export function JobRequestForm() {
           submitFacilityCandidateBestEffort(candidate.rawText, candidate.province, candidate.district, candidate.source);
         }
 
-        // Kritik İlan Senkronizasyonu görevi — tek hizmet dalıyla AYNI ilke
-        // (bkz. yukarıdaki yorum): bayrak kapalıyken çalışmaz, açıkken
-        // localStorage yazımından SONRA beklenir, başarısız olursa hiçbir
-        // yerel ilan silinmez/geri alınmaz. `create_operation_with_jobs` TEK
-        // bir RPC olduğu için başarısızlık HEPSİNİ birden etkiler — bu yüzden
-        // operasyonun HER kardeş ilanı ayrı ayrı kalıcı olarak işaretlenir
-        // (bkz. types.ts#Job.supabaseSyncFailedAt), tek hizmet dalındaki AYNI
-        // mantık.
-        let syncWarning = false;
-        if (isSupabaseJobSyncEnabled()) {
-          const syncResult = await syncOperationToSupabase(result.jobs, result.operationId, provinceName, operationDetails);
-          if (!syncResult.ok) {
-            syncWarning = true;
-            console.error(`Supabase operasyon senkronizasyonu başarısız (operation ${result.operationId}):`, syncResult.error);
-            for (const siblingJob of result.jobs) {
-              markJobSupabaseSyncFailed(siblingJob.id, syncResult.error);
-            }
-          }
-        }
-
+        // "Supabase Gerçek Kaynak" görevi — `createJobsForOperationWithSupabaseSync`
+        // (yukarıda çağrıldı) `create_operation_with_jobs` RPC'sini BLOKLAYAN
+        // olarak içeriyor: bu satıra yalnızca TÜM operasyon sunucuda
+        // GERÇEKTEN başarıyla oluştuysa ulaşılır. Ayrı bir senkron uyarısı
+        // YOK — operasyon bu satıra ulaştığında zaten hem yerelde hem
+        // Supabase'te gerçekten var.
+        //
         // Yeni bir operasyon detay sayfası/route YOK — kullanıcı rastgele
         // tek bir ilan detayına değil, kendi ilanlarını topluca gördüğü
         // mevcut "Hizmet Taleplerim" sayfasına yönlendirilir. Başarı mesajı,
         // o sayfadaki mevcut "guncellendi=1" (bkz. job-edit-form.tsx) ile
         // AYNI query-param tabanlı banner deseniyle gösterilir (bkz.
         // job-requests-panel.tsx).
-        router.push(
-          `/panel/hizmet-taleplerim?operasyonIlanSayisi=${result.jobs.length}${syncWarning ? "&senkronUyarisi=1" : ""}`,
-        );
+        router.push(`/panel/hizmet-taleplerim?operasyonIlanSayisi=${result.jobs.length}`);
       }
     } finally {
       // createJob()/createJobsForOperation() beklenmedik şekilde reddedilse/

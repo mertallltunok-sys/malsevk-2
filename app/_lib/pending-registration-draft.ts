@@ -31,6 +31,8 @@ export type PendingRegistrationDraft = {
   companyType: CompanyType;
   province: string;
   district: string;
+  /** MERSİS / İşletme Tekilliği görevi — bkz. complete-registration.ts#CompleteRegistrationInput'un aynı alanı. */
+  mersisNo?: string;
   providerServiceCategoryIds: string[];
   providerDocuments: ProviderRegistrationDocumentInput[];
   documentDeclarationAccepted: boolean;
@@ -63,6 +65,7 @@ function isValidDraft(value: unknown): value is PendingRegistrationDraft {
     isCompanyType(draft.companyType) &&
     typeof draft.province === "string" &&
     typeof draft.district === "string" &&
+    (draft.mersisNo === undefined || typeof draft.mersisNo === "string") &&
     Array.isArray(draft.providerServiceCategoryIds) &&
     draft.providerServiceCategoryIds.every((id) => typeof id === "string") &&
     Array.isArray(draft.providerDocuments) &&

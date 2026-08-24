@@ -71,7 +71,6 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
-  const [remoteSyncWarning, setRemoteSyncWarning] = useState<string | null>(null);
 
   const companyNameId = useId();
   const bioId = useId();
@@ -138,8 +137,50 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
     setSubmitting(true);
     setSubmitError(null);
     setJustSaved(false);
-    setRemoteSyncWarning(null);
 
+    // DÜZELTME ("Firma Profilini Supabase'e Tam Bağla" görevi) — sıra artık
+    // TERS: Supabase yazımı önce, BLOKLAYAN olarak denenir; yalnızca O
+    // BAŞARILIYSA yerel yazım (aşağıda) yapılır. Eskiden yerel yazım ÖNCE
+    // yapılıyor, kullanıcıya HEMEN "kaydedildi" gösteriliyordu — Supabase
+    // yazımı (bio/foundedYear/regions/logo) SONRADAN, en-iyi-çaba denenip
+    // başarısız olsa bile yalnızca yumuşak bir "kaydedildi ama..." uyarısı
+    // gösteriliyordu (görev gereksinimi #4'ün YASAKLADIĞI tam da bu — sahte
+    // başarı). `companyName`in `provider_profiles`te hiç karşılığı
+    // OLMADIĞI (types.ts'in kendi notu — ayrı bir kavram) DEĞİŞMEDİ; bu
+    // alan hâlâ yalnızca aşağıdaki yerel yazımla kaydedilir.
+    const remoteProfileResult = await upsertMyProviderProfileRemote({ bio, foundedYear: foundedYearNum, regions });
+    if (!remoteProfileResult.ok) {
+      setSubmitting(false);
+      setSubmitError(`Firma profili merkezi veritabanına kaydedilemedi: ${remoteProfileResult.error}`);
+      return;
+    }
+
+    if (logoRemoved) {
+      const deleted = await deleteMyProviderLogoRemote();
+      if (!deleted) {
+        setSubmitting(false);
+        setSubmitError("Logo merkezi depodan kaldırılamadı. Lütfen tekrar deneyin.");
+        return;
+      }
+    } else if (logoFile) {
+      const uploadResult = await uploadMyProviderLogoRemote(logoFile);
+      if (!uploadResult.ok) {
+        setSubmitting(false);
+        setSubmitError(`Logo merkezi depoya yüklenemedi: ${uploadResult.error}`);
+        return;
+      }
+    }
+
+    // Supabase yazımı (bio/foundedYear/regions/logo) ZATEN başarıyla
+    // tamamlandı — bu andan sonra yerel yazım yalnızca bir önbellek adımıdır
+    // (`companyName`/`expertise` hariç, ikisinin de yalnızca yerel karşılığı
+    // var, bkz. yukarıdaki not). Bu yazım yine de başarısız olabilir (ör.
+    // localStorage kotası) — bu durumda kullanıcıya AÇIK bir hata gösterilir
+    // (companyName/logo'nun görünen yerel kopyası güncellenemediği için sahte
+    // başarı YİNE gösterilmez), ama Supabase'e ZATEN yazılmış olan
+    // bio/foundedYear/regions/logo geri ALINMAZ (silme/rollback RPC'si yok,
+    // ve bu veri kaybı değil — bir sonraki başarılı yerel yazımda yine aynı
+    // değerlerle üzerine yazılacaktır).
     const result = await updateProviderProfile(session, {
       companyName,
       bio,
@@ -152,38 +193,6 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
       setSubmitting(false);
       setSubmitError(result.error);
       return;
-    }
-
-    // PROFİL/PROVIDER GEÇİŞİ (tur 3): bio/foundedYear/regions artık GERÇEK
-    // `provider_profiles`e de yazılır (bkz. supabase-provider-profile.ts'in
-    // "kısmi güncelleme" dokümantasyonu — yalnızca BU ekranın sahibi olduğu
-    // alanlar gönderilir, `serviceFeatures`/`experienceRange`
-    // ServiceInfoEditor'ın uzak satırdan okunup DOKUNULMADAN korunur).
-    // `companyName`/`expertise`in provider_profiles'ta hiç karşılığı yok
-    // (companyName ayrı bir kavram, bkz. types.ts; expertise deprecated,
-    // hiçbir migrationda bir sütunu yok) — yalnızca yerelde kalır. Bu
-    // adımın başarısızlığı yerel "kaydedildi" sonucunu ENGELLEMEZ.
-    const remoteWarnings: string[] = [];
-
-    const remoteProfileResult = await upsertMyProviderProfileRemote({ bio, foundedYear: foundedYearNum, regions });
-    if (!remoteProfileResult.ok) {
-      remoteWarnings.push(`Firma profili merkezi veritabanına yansıtılamadı: ${remoteProfileResult.error}`);
-    }
-
-    if (logoRemoved) {
-      const deleted = await deleteMyProviderLogoRemote();
-      if (!deleted) {
-        remoteWarnings.push("Logo yerelden kaldırıldı ama merkezi depodan silinemedi.");
-      }
-    } else if (logoFile) {
-      const uploadResult = await uploadMyProviderLogoRemote(logoFile);
-      if (!uploadResult.ok) {
-        remoteWarnings.push(`Logo merkezi depoya yüklenemedi: ${uploadResult.error}`);
-      }
-    }
-
-    if (remoteWarnings.length > 0) {
-      setRemoteSyncWarning(`Firma profiliniz kaydedildi ama: ${remoteWarnings.join(" ")}`);
     }
 
     setSubmitting(false);
@@ -345,11 +354,6 @@ export function ProviderProfileEditor({ session, user }: { session: Session; use
         {justSaved && (
           <p role="status" aria-live="polite" className="text-sm font-medium text-success">
             Firma profiliniz kaydedildi.
-          </p>
-        )}
-        {remoteSyncWarning && (
-          <p role="alert" className="text-sm text-danger">
-            {remoteSyncWarning}
           </p>
         )}
 

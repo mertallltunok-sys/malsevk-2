@@ -21,7 +21,6 @@ import {
   toFacilitySelectOptions,
 } from "../_lib/job-location";
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "../_lib/job-requests";
-import { markJobSupabaseSyncFailed, updateJob } from "../_lib/job-store";
 import { getTodayLocalDateString } from "../_lib/jobs";
 import { deriveLegacyMirrorFields, getJobCargoGroups } from "../_lib/nakliye-cargo-groups";
 import {
@@ -57,7 +56,7 @@ import { isStorageOnlyLocationCategory, resolveLegacyJobCategoryToId, SERVICE_CA
 import { isContainerStorageCategory, normalizeStorageContainerGroupsForDisplay } from "../_lib/storage-container-catalog";
 import { isHazardousStorageCategory, isTehlikeliMaddeDepolamaCategory } from "../_lib/storage-hazard-catalog";
 import { submitFacilityCandidateBestEffort } from "../_lib/supabase-facility-candidates";
-import { isSupabaseJobSyncEnabled, retryJobSupabaseSync } from "../_lib/supabase-job-sync";
+import { updateJobWithSupabaseSync } from "../_lib/supabase-job-sync";
 import type { Job, Offer, Session } from "../_lib/types";
 import {
   getDistrictId,
@@ -571,7 +570,7 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
       showStorageFields && storageTonnageRaw.length > 0 ? parseProductTonnage(storageFields.storageProductTonnage) : null;
 
     setSubmitting(true);
-    const result = await updateJob(
+    const result = await updateJobWithSupabaseSync(
       session,
       job.id,
       {
@@ -686,38 +685,22 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
         newCustomsDocuments: customsDocumentState.newCustomsDocuments,
       },
       offers,
+      job,
     );
     setSubmitting(false);
 
+    // "Supabase Gerçek Kaynak" görevi — sıra artık TERS: `updateJobWithSupabaseSync`
+    // (job hâlâ "pending_review" ise) gerçek `update_job_as_requester` RPC'sini
+    // yerel yazımdan ÖNCE, BLOKLAYARAK çağırır (bkz. o fonksiyonun kendi
+    // dokümanı, supabase-job-sync.ts) — bu yüzden `result.ok` ARTIK yalnızca
+    // yerel değil, gerçek sunucu başarısını da garanti eder. Sunucu
+    // güncellemesi başarısız olursa `result.error` zaten sunucudan gelen
+    // gerçek hatadır, form verisi (henüz gönderilmemiş gibi) korunur ve
+    // kullanıcı yeniden deneyebilir — ayrı bir "senkron başarısız" işaretleme/
+    // uyarı akışına gerek yok, çünkü hiçbir sahte-yerel-başarı hiç oluşmadı.
     if (!result.ok) {
       setSubmitError(result.error);
       return;
-    }
-
-    // "Kritik İlan Senkronizasyonu" görevi Bölüm 2 — admin henüz karar
-    // vermeden (bu düzenlemeden ÖNCE zaten "pending_review") yapılan bir
-    // düzenleme, YEREL yazım başarılı olduktan hemen SONRA Supabase'e de
-    // itilir. Kapsam BİLEREK dar: yalnızca düzenlemeden ÖNCE hâlâ
-    // pending_review olan ilanlar (bkz. update_job_as_requester RPC'sinin
-    // kendi moderation_status kontrolü — zaten onaylanmış/reddedilmiş bir
-    // ilanın yerel "yeniden incelemeye alma" dalı, job-store.ts#updateJob'un
-    // KENDİ, bu görevin kapsamı dışındaki, önceden var olan davranışıdır).
-    // Sunucu güncellemesi BAŞARISIZ olursa kullanıcıya asla başarı
-    // gösterilmez (görev gereksinimi) — "Onay Bekliyor" ekranına
-    // yönlendirmek yerine burada, formda kalınarak açık bir hata gösterilir;
-    // ilan `markJobSupabaseSyncFailed` ile işaretlenir, böylece
-    // job-requests-panel.tsx/job-detail-content.tsx'teki AYNI "Senkronizasyon
-    // Başarısız" + Yeniden Dene UI'ı (ayrı bir kod yolu İCAT EDİLMEDEN)
-    // devreye girer.
-    if (job.moderationStatus === "pending_review" && isSupabaseJobSyncEnabled()) {
-      const syncResult = await retryJobSupabaseSync(result.job);
-      if (!syncResult.ok) {
-        markJobSupabaseSyncFailed(result.job.id, syncResult.error);
-        setSubmitError(
-          `Değişiklikleriniz bu cihazda kaydedildi ancak sunucuya iletilemedi: ${syncResult.error} Lütfen "Hizmet Taleplerim" ekranından yeniden deneyin.`,
-        );
-        return;
-      }
     }
 
     // Sistem Beslemesi (bkz. supabase-facility-candidates.ts) — ana

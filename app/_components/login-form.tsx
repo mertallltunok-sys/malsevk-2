@@ -118,6 +118,7 @@ export function LoginForm({
   const confirmPasswordId = useId();
   const companyNameId = useId();
   const companyTypeId = useId();
+  const mersisNoId = useId();
   const provinceId = useId();
   const districtId = useId();
   const legalConsentId = useId();
@@ -133,6 +134,7 @@ export function LoginForm({
   const [role, setRole] = useState<UserRole | "">("");
   const [companyName, setCompanyName] = useState("");
   const [companyType, setCompanyType] = useState<CompanyType | "">("");
+  const [mersisNo, setMersisNo] = useState("");
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
@@ -223,10 +225,10 @@ export function LoginForm({
         return;
       }
 
-      // account_status kontrolü (ÖNEMLİ SINIR: yalnızca istemci taraflı bir
-      // kapı — bkz. session.ts'in kendi dokümantasyonu, Faz 1'in hiçbir RLS/
-      // RPC'si bu bayrağı henüz uygulamıyor). Askıya alınmış/kapalı bir
-      // hesap burada AÇIKÇA reddedilir ve oturum hemen kapatılır — sessizce
+      // account_status kontrolü (bu katman istemci taraflı bir erken kapıdır;
+      // gerçek zorlama artık ayrıca sunucu tarafında da var — bkz. migration
+      // 0042/assert_active_user(), 41 mutation RPC'sinde çağrılıyor). Askıya
+      // alınmış/kapalı bir hesap burada AÇIKÇA reddedilir ve oturum hemen kapatılır — sessizce
       // "oturum yokmuş" gibi davranan belirsiz bir duruma bırakılmaz.
       const { data: profile } = await supabase
         .from("profiles")
@@ -300,6 +302,7 @@ export function LoginForm({
         companyType,
         province: provinceName,
         district,
+        mersisNo,
         legalConsentAccepted,
       });
       setErrors(fieldErrors);
@@ -352,6 +355,7 @@ export function LoginForm({
         companyType,
         province: provinceName,
         district,
+        mersisNo: mersisNo.trim() || undefined,
         providerServiceCategoryIds: [],
         documentDeclarationAccepted: false,
         customsLicenseDeclarationAccepted: false,
@@ -401,6 +405,7 @@ export function LoginForm({
         companyType,
         province: provinceName,
         district,
+        mersisNo: mersisNo.trim() || undefined,
         providerServiceCategoryIds: [] as string[],
         providerDocuments: [] as { indexedDbStorageKey: string; originalFileName: string; mimeType: string; extension: string; size: number }[],
         documentDeclarationAccepted: false,
@@ -862,6 +867,39 @@ export function LoginForm({
                 </p>
               )}
             </div>
+
+            {/* MERSİS / İşletme Tekilliği görevi — yalnızca "Bireysel" DIŞINDAKİ
+                firma tiplerinde gösterilir (bkz. register-form-validation.ts'in
+                aynı koşulu); ZORUNLU DEĞİLDİR, yalnızca doluysa biçim/tekillik
+                doğrulanır (bkz. migration 0082). */}
+            {companyType && companyType !== "bireysel" && (
+              <div>
+                <label htmlFor={mersisNoId} className="text-sm font-medium text-foreground">
+                  MERSİS Numarası <span className="font-normal text-muted-foreground">(opsiyonel)</span>
+                </label>
+                <input
+                  id={mersisNoId}
+                  type="text"
+                  inputMode="numeric"
+                  value={mersisNo}
+                  onChange={(event) => {
+                    setMersisNo(event.target.value);
+                    clearFieldError("mersisNo");
+                  }}
+                  placeholder="16 haneli MERSİS numarası"
+                  aria-invalid={errors.mersisNo ? true : undefined}
+                  aria-describedby={errors.mersisNo ? `${mersisNoId}-error` : undefined}
+                  className={`mt-2 w-full rounded-md border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    errors.mersisNo ? "border-danger" : "border-border"
+                  }`}
+                />
+                {errors.mersisNo && (
+                  <p id={`${mersisNoId}-error`} className="mt-2 text-sm text-danger">
+                    {errors.mersisNo}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="grid gap-6 sm:grid-cols-2">
               <div>

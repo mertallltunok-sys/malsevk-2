@@ -1,6 +1,22 @@
-import { markJobSupabaseSyncFailed } from "./job-store";
-import { getPhotoBlob } from "./photo-blob-store";
+import {
+  buildJobForCreation,
+  buildJobsForOperation,
+  buildJobUpdate,
+  commitJob,
+  commitJobs,
+  commitJobUpdate,
+  markJobSupabaseSyncFailed,
+  type CreateJobInput,
+  type CreateJobResult,
+  type CreateJobsForOperationInput,
+  type CreateJobsForOperationResult,
+  type UpdateJobInput,
+} from "./job-store";
+import { STORAGE_WRITE_ERROR_MESSAGE } from "./local-storage";
+import { deletePhotoBlobs, getPhotoBlob } from "./photo-blob-store";
 import { reportSystemError } from "./system-health";
+import { getAccountStatusErrorMessage } from "./supabase-mutation-errors";
+import type { Offer, Session } from "./types";
 import { createSupabaseBrowserClient } from "./supabase/browser-client";
 import { deleteJobPhotosFromStorage, uploadJobPhotoToStorage } from "./supabase-job-photos";
 import type { Job } from "./types";
@@ -216,7 +232,7 @@ async function updateJobAsRequesterOnSupabase(job: Job): Promise<JobSyncResult> 
     p_recycling_waste_code_unknown: job.recyclingWasteCodeUnknown ?? null,
     p_recycling_hazard_properties: job.recyclingHazardProperties ?? null,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: getAccountStatusErrorMessage(error.code) ?? error.message };
   return { ok: true };
 }
 
@@ -387,7 +403,7 @@ export async function syncJobToSupabase(job: Job): Promise<JobSyncResult> {
     // yetim kalmasın diye geri silinir (bkz. modülün üstündeki dokümantasyon).
     await deleteJobPhotosFromStorage(photosResult.uploadedPaths);
     reportSystemError({ message: error.message, source: "server", errorCode: error.code, affectedAction: "create_job", affectedScreen: "İlan Oluşturma" });
-    return { ok: false, error: error.message };
+    return { ok: false, error: getAccountStatusErrorMessage(error.code) ?? error.message };
   }
   return { ok: true };
 }
@@ -512,7 +528,161 @@ export async function syncOperationToSupabase(
   });
   if (error) {
     await deleteJobPhotosFromStorage(allUploadedPaths);
-    return { ok: false, error: error.message };
+    return { ok: false, error: getAccountStatusErrorMessage(error.code) ?? error.message };
   }
   return { ok: true };
+}
+
+/**
+ * "Supabase Gerçek Kaynak" görevi — `job-request-form.tsx`'in ÖNCEKİ
+ * "önce yerelde oluştur, sonra en-iyi-çaba senkronla" sırasının yerine
+ * geçen TEK giriş noktası. Sıra artık TERS: `buildJobForCreation`
+ * (job-store.ts) yalnızca `Job` nesnesini İNŞA EDER (fotoğraflar zaten
+ * IndexedDB'ye yazılır, çünkü `syncJobToSupabase`'in Storage yükleme adımı
+ * bu blob'ları okur) — HENÜZ localStorage'a hiç YAZILMAZ. `syncJobToSupabase`
+ * (yukarıda, DEĞİŞTİRİLMEDİ) BAŞARISIZ olursa, henüz hiçbir yere
+ * bağlanmamış fotoğraf/evrak IndexedDB blob'ları geri alınır ve hata
+ * döner — kullanıcı formda kalır, yerel "sahte yayımlanmış" bir ilan asla
+ * oluşmaz. Yalnızca Supabase GERÇEKTEN başarılı döndükten SONRA `commitJob`
+ * (job-store.ts) çağrılır; bu andan itibaren localStorage yalnızca
+ * yardımcı önbellektir (görev gereksinimi #4) — asıl kaynak zaten
+ * Supabase'te GERÇEKTEN var olan satırdır.
+ *
+ * Çift tıklama/mükerrer gönderim koruması bu fonksiyonun KENDİSİNDE değil,
+ * çağıranın (job-request-form.tsx#submitLockRef, değişmedi) senkron
+ * kilidinde kalmaya devam eder — burada YENİ bir kilit mekanizması İCAT
+ * EDİLMEDİ.
+ */
+export async function createJobWithSupabaseSync(
+  session: Session | null,
+  input: CreateJobInput,
+): Promise<CreateJobResult> {
+  const built = await buildJobForCreation(session, input);
+  if (!built.ok) return built;
+
+  const syncResult = await syncJobToSupabase(built.job);
+  if (!syncResult.ok) {
+    await deletePhotoBlobs(
+      [...built.job.photos, ...(built.job.customsDocuments ?? [])].map((item) => item.storageKey),
+    );
+    return { ok: false, error: syncResult.error };
+  }
+
+  // Sunucu kaydı ZATEN başarıyla oluştu — bu andan sonra yerel yazım
+  // yalnızca bir önbellek adımıdır. Başarısız olsa bile genel sonuç
+  // BAŞARIdır (görev gereksinimi #4): `useAllJobs()`'un uzak-geri-dönüşü
+  // (bkz. use-jobs.ts) bu ilanı bir SONRAKİ getirmede zaten gösterecektir —
+  // yalnızca gerçek hata console'a loglanır, kullanıcıya sahte bir
+  // BAŞARISIZLIK gösterilmez (tam tersi de doğru: sahte başarı da
+  // gösterilmez, çünkü Supabase zaten gerçekten başarılı oldu).
+  if (!commitJob(built.job)) {
+    console.error(`İlan Supabase'e kaydedildi ancak yerel önbelleğe yazılamadı (job ${built.job.id}).`);
+  }
+
+  return { ok: true, job: built.job };
+}
+
+/** `createJobWithSupabaseSync`in çoklu hizmet/operasyon karşılığı — AYNI ilke. */
+export async function createJobsForOperationWithSupabaseSync(
+  session: Session | null,
+  input: CreateJobsForOperationInput,
+): Promise<CreateJobsForOperationResult> {
+  const built = await buildJobsForOperation(session, input);
+  if (!built.ok) return built;
+
+  // `.trim()` — `buildJobsForOperation`in (job-store.ts) kendi içinde
+  // `province`/`operationDetails`i her bir `job` alanına yazarken uyguladığı
+  // AYNI normalizasyon; burada tekrarlanır çünkü `CreateJobsForOperationResult`
+  // trim'lenmiş halini ayrıca döndürmez — `.trim()` idempotent olduğu için
+  // bu, sonucu asla değiştirmez, yalnızca iki tarafın (yerel `Job.province`
+  // ve `syncOperationToSupabase`'e giden paylaşılan `province`) AYNI ham
+  // girdiden AYNI şekilde türetildiğini garanti eder.
+  const syncResult = await syncOperationToSupabase(
+    built.jobs,
+    built.operationId,
+    input.province.trim(),
+    input.operationDetails.trim(),
+  );
+  if (!syncResult.ok) {
+    await Promise.all(
+      built.jobs.map((job) =>
+        deletePhotoBlobs([...job.photos, ...(job.customsDocuments ?? [])].map((item) => item.storageKey)),
+      ),
+    );
+    return { ok: false, error: syncResult.error };
+  }
+
+  if (!commitJobs(built.jobs)) {
+    console.error(`Operasyon Supabase'e kaydedildi ancak yerel önbelleğe yazılamadı (operation ${built.operationId}).`);
+  }
+
+  return { ok: true, jobs: built.jobs, operationId: built.operationId };
+}
+
+/**
+ * "Supabase Gerçek Kaynak" görevi — `job-edit-form.tsx`'in ÖNCEKİ "önce
+ * yerelde güncelle, sonra en-iyi-çaba senkronla" sırasının yerine geçen TEK
+ * giriş noktası; `createJobWithSupabaseSync`'in AYNI ters-sıra ilkesi
+ * (build -> uzak yazım BLOKLAYAN -> yalnızca başarılıysa yerel commit).
+ *
+ * KAPSAM SINIRI (bilerek, YENİ bir RPC/kapsam İCAT EDİLMEDİ): `update_job_
+ * as_requester` RPC'si (migration 0051) yalnızca hâlâ "pending_review" olan
+ * bir satırı kabul eder — admin ZATEN karar vermiş (approved/rejected) bir
+ * ilanın sahibi tarafından düzenlenmesi bu RPC'nin ÖNCEDEN VAR OLAN, bilinçli
+ * kapsam dışıdır (admin'in kendi ayrı `update_job_as_admin` yolu var). Bu
+ * durumda (`previousModerationStatus !== "pending_review"`) GÖREV1'in
+ * "Supabase önce" kuralı hiç uygulanmaz — düzenleme, bu görevden ÖNCEKİYLE
+ * BİREBİR AYNI şekilde yalnızca yerel kalır (moderationStatus zaten
+ * job-store.ts#buildJobUpdate içinde "pending_review"a sıfırlanmış olabilir,
+ * bu YENİ bir davranış değil, önceden var olan "İlan Onayı" kuralıdır).
+ *
+ * `update_job_as_requester` fotoğraf/evrak senkronlamaz (bkz.
+ * updateJobAsRequesterOnSupabase'in kendi dokümanı) — bu yüzden yeni
+ * persistlenmiş blob'ların geri alınması SAF yerel bir kaygıdır, uzak
+ * senkronun başarı/başarısızlığından bağımsız olarak (job-store.ts#updateJob'un
+ * orijinal, değişmemiş davranışıyla BİREBİR aynı) ele alınır.
+ */
+export async function updateJobWithSupabaseSync(
+  session: Session | null,
+  jobId: string,
+  input: UpdateJobInput,
+  offers: Offer[],
+  fallbackJob?: Job,
+): Promise<CreateJobResult> {
+  const built = await buildJobUpdate(session, jobId, input, offers, fallbackJob);
+  if (!built.ok) return built;
+  const { job: updated, existing, previousModerationStatus, newlyPersistedPhotos, newlyPersistedCustomsDocuments } = built;
+
+  async function rollbackNewBlobs() {
+    await deletePhotoBlobs([...newlyPersistedPhotos, ...newlyPersistedCustomsDocuments].map((item) => item.storageKey));
+  }
+
+  if (previousModerationStatus === "pending_review") {
+    const syncResult = await retryJobSupabaseSync(updated);
+    if (!syncResult.ok) {
+      await rollbackNewBlobs();
+      return { ok: false, error: syncResult.error };
+    }
+  }
+
+  if (!commitJobUpdate(jobId, updated)) {
+    if (previousModerationStatus === "pending_review") {
+      // Sunucu kaydı ZATEN güncellendi — bu andan sonra yerel yazım yalnızca
+      // bir önbellek adımıdır (createJobWithSupabaseSync'in AYNI ilkesi).
+      console.error(`İlan güncellemesi Supabase'e kaydedildi ancak yerel önbelleğe yazılamadı (job ${jobId}).`);
+    } else {
+      await rollbackNewBlobs();
+      return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+    }
+  } else {
+    const removedPhotos = existing.photos.filter((photo) => !input.keptPhotoIds.includes(photo.id));
+    if (removedPhotos.length > 0) await deletePhotoBlobs(removedPhotos.map((photo) => photo.storageKey));
+    const finalCustomsDocumentIds = new Set((updated.customsDocuments ?? []).map((doc) => doc.id));
+    const orphanedCustomsDocuments = [...(existing.customsDocuments ?? []), ...newlyPersistedCustomsDocuments].filter(
+      (doc) => !finalCustomsDocumentIds.has(doc.id),
+    );
+    if (orphanedCustomsDocuments.length > 0) await deletePhotoBlobs(orphanedCustomsDocuments.map((doc) => doc.storageKey));
+  }
+
+  return { ok: true, job: updated };
 }

@@ -48,7 +48,6 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
-  const [remoteSyncWarning, setRemoteSyncWarning] = useState<string | null>(null);
 
   const experienceRangeId = useId();
   const regionsId = useId();
@@ -77,36 +76,35 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
     setSubmitting(true);
     setSubmitError(null);
     setJustSaved(false);
-    setRemoteSyncWarning(null);
 
+    // DÜZELTME ("Firma Profilini Supabase'e Tam Bağla" görevi) —
+    // provider-profile-editor.tsx'teki AYNI sıra tersine çevirme: Supabase
+    // yazımı (bkz. supabase-provider-profile.ts'in "kısmi güncelleme"
+    // dokümantasyonu — yalnızca bu iki alan gönderilir, `serviceFeatures`
+    // anahtarı BİLEREK hiç geçirilmez, `bio`/`foundedYear` de
+    // ProviderProfileEditor'ın kendi satırından korunur) artık ÖNCE,
+    // BLOKLAYAN olarak denenir; yalnızca O BAŞARILIYSA yerel yazım yapılır.
+    const remoteProfileResult = await upsertMyProviderProfileRemote({
+      regions,
+      experienceRange: experienceRange || null,
+    });
+    if (!remoteProfileResult.ok) {
+      setSubmitting(false);
+      setSubmitError(`Hizmet bilgileriniz merkezi veritabanına kaydedilemedi: ${remoteProfileResult.error}`);
+      return;
+    }
+
+    // Supabase yazımı ZATEN başarıyla tamamlandı — bu andan sonra yerel
+    // yazım yalnızca bir önbellek adımıdır.
     const result = await updateProviderServiceInfo(session, {
       regions,
       experienceRange: experienceRange || null,
     });
 
+    setSubmitting(false);
     if (!result.ok) {
-      setSubmitting(false);
       setSubmitError(result.error);
       return;
-    }
-
-    // PROFİL/PROVIDER GEÇİŞİ: `regions`/`experienceRange` (tur 3) GERÇEK
-    // `provider_profiles`e de yazılır — yerel yazımın YANINDA, en iyi çaba
-    // (bkz. supabase-provider-profile.ts'in "kısmi güncelleme"
-    // dokümantasyonu: yalnızca bu iki alan gönderilir — `serviceFeatures`
-    // anahtarı BİLEREK hiç geçirilmez, böylece var olan uzak değeri
-    // dokunulmadan korunur, `bio`/`foundedYear` de aynı şekilde
-    // ProviderProfileEditor'ın kendi satırından korunur). Yerel yazım
-    // zaten başarılı olduğu için bu adımın başarısızlığı genel
-    // "kaydedildi" sonucunu ENGELLEMEZ.
-    const remoteProfileResult = await upsertMyProviderProfileRemote({
-      regions,
-      experienceRange: experienceRange || null,
-    });
-
-    setSubmitting(false);
-    if (!remoteProfileResult.ok) {
-      setRemoteSyncWarning("Hizmet bilgileriniz kaydedildi ama bölge/deneyim bilgileriniz merkezi veritabanına yansıtılamadı. Lütfen daha sonra tekrar deneyin.");
     }
     setJustSaved(true);
   }
@@ -197,11 +195,6 @@ export function ServiceInfoEditor({ session, user }: { session: Session; user: S
         {justSaved && (
           <p role="status" aria-live="polite" className="text-sm font-medium text-success">
             Hizmet bilgileriniz kaydedildi.
-          </p>
-        )}
-        {remoteSyncWarning && (
-          <p role="alert" className="text-sm text-danger">
-            {remoteSyncWarning}
           </p>
         )}
 

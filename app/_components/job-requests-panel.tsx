@@ -956,11 +956,6 @@ function JobRequestsList({ session }: { session: Session }) {
   const operationJobCount = operationJobCountParam ? Number.parseInt(operationJobCountParam, 10) : null;
   const justCreatedOperation =
     operationJobCount !== null && Number.isInteger(operationJobCount) && operationJobCount >= 2;
-  // Supabase Geçişi Faz 2 — job-request-form.tsx'in Supabase senkron
-  // denemesi başarısız olduğunda hedef URL'ye eklediği bayrak (bkz. o
-  // dosyadaki dokümantasyon). Yerel ilan zaten başarıyla oluşturuldu — bu
-  // yalnızca "gerekiyorsa sade bir senkronizasyon uyarısı" (görev bölüm 3).
-  const syncWarning = searchParams.get("senkronUyarisi") === "1";
 
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1115,13 +1110,6 @@ function JobRequestsList({ session }: { session: Session }) {
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
           {operationJobCount} hizmet ilanı başarıyla oluşturuldu.
-        </p>
-      )}
-
-      {syncWarning && (
-        <p role="alert" className="mb-4 rounded-md bg-warning-soft px-4 py-3 text-sm font-medium text-warning">
-          İlanınız oluşturuldu ancak sunucu senkronizasyonunda bir sorun oluştu. Ekibimiz bilgilendirildi, ilanınız
-          normal şekilde kullanılabilir.
         </p>
       )}
 

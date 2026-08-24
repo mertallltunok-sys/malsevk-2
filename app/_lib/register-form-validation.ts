@@ -15,6 +15,8 @@ export type RegisterFormErrors = Partial<{
   companyType: string;
   province: string;
   district: string;
+  /** MERSİS / İşletme Tekilliği görevi — yalnızca biçim hatası (16 hane değil); tekillik yalnızca sunucuda (complete_registration RPC'si, migration 0082) doğrulanabilir. */
+  mersisNo: string;
   /**
    * Gizlilik Politikası/Kullanım Koşulları/KVKK Aydınlatma Metni'ni TEK
    * birleşik onay kutusu üzerinden kapsar (bkz. login-form.tsx) — önceden
@@ -44,6 +46,7 @@ export function validateRegisterFormFields(fields: {
   companyType: string;
   province: string;
   district: string;
+  mersisNo: string;
   legalConsentAccepted: boolean;
 }): RegisterFormValidation {
   const errors: RegisterFormErrors = {};
@@ -104,6 +107,22 @@ export function validateRegisterFormFields(fields: {
 
     if (fields.district.trim().length === 0) {
       errors.district = "İlçe zorunludur.";
+    }
+
+    // MERSİS / İşletme Tekilliği görevi — yalnızca "bireysel" DIŞINDAKİ
+    // firma tiplerinde anlamlıdır (bkz. migration 0082'nin kendi
+    // gerekçesi); ZORUNLU değildir (görev bölüm 9 — bireysel/MERSİS'i
+    // olmayan kullanıcıları yanlışlıkla kayıt dışı bırakmama uyarısı, aynı
+    // ilke burada "MERSİS'ini şu an elinde bulundurmayan gerçek bir
+    // işletme"ye de uygulanır) — yalnızca DOLU girildiğinde biçimi
+    // (normalize edilince tam 16 hane) doğrulanır. Tekillik yalnızca
+    // sunucuda (complete_registration RPC'si) doğrulanabilir, burada
+    // TEKRARLANMAZ.
+    if (fields.companyType !== "bireysel") {
+      const digitsOnly = fields.mersisNo.replace(/\D/g, "");
+      if (digitsOnly.length > 0 && digitsOnly.length !== 16) {
+        errors.mersisNo = "MERSİS numarası 16 haneli bir sayı olmalıdır.";
+      }
     }
 
     // HİZMET VEREN ONBOARDING SADELEŞTİRMESİ (bkz. proje raporu): kayıt
