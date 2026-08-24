@@ -55,11 +55,11 @@ export function AccountSettingsContent() {
   // Hook, koşulsuz (Rules of Hooks) her render'da çağrılır — session henüz
   // yokken `null` geçilir, useUserById bunu zaten `null` olarak ele alır.
   const user = useUserById(session?.id ?? null);
-  // PROFİL/PROVIDER GEÇİŞİ: ProfileInfoCard artık GERÇEK Supabase `profiles`
-  // satırından beslenir (bkz. profile-page-content.tsx'in AYNI deseni) —
-  // `user` (localStorage) yalnızca ProviderProfileEditor/ContactVisibilitySettings
-  // için hâlâ gereklidir (providerProfile/showEmail.../showPhone... hâlâ
-  // yalnızca localStorage'da, bkz. son rapor).
+  // PROFİL/PROVIDER GEÇİŞİ: ProfileInfoCard/ContactVisibilitySettings artık
+  // GERÇEK Supabase `profiles` satırından beslenir (bkz. profile-page-
+  // content.tsx'in AYNI deseni, ve İLETİŞİM GİZLİLİĞİ GÖREVİ — migration
+  // 0079) — `user` (localStorage) yalnızca ProviderProfileEditor için hâlâ
+  // gereklidir (`providerProfile` hâlâ yalnızca localStorage'da).
   const profileDetails = useSessionProfileDetails();
 
   if (!session) {
@@ -104,7 +104,7 @@ export function AccountSettingsContent() {
 
         {session.role === "hizmet-veren" && <ProviderDocumentStatusList />}
 
-        {user && <ContactVisibilitySettings session={session} user={user} />}
+        {profileDetails && <ContactVisibilitySettings profileDetails={profileDetails} role={session.role} />}
 
         <div className="rounded-card border border-border bg-surface p-6">
           <h2 className="text-lg font-bold tracking-heading leading-tight text-foreground">Güvenlik</h2>

@@ -172,26 +172,68 @@ export function getAllOffers(): Offer[] {
 }
 
 /**
- * GENEL GÜVENLİK/VERİ DOĞRULAMA görevi §14 — bkz. supabase-offer-reads.ts'in
- * kendi başlık dokümanı: `fetchVisibleOffersFromSupabase()`ın döndürdüğü
- * satırlardan, bu tarayıcının YEREL deposunda karşılığı (aynı
- * `supabaseOfferId`) OLMAYANLARI depoya YAZAR — böylece bir SONRAKİ
- * `updateOfferStatus`/`withdrawOffer`/vb. çağrısı bu teklifi sıradan bir
- * yerel kayıt gibi bulur. Var olan bir yerel kaydın hiçbir alanına ASLA
- * dokunmaz (yalnızca EKLER) — bu tarayıcının kendi, henüz senkronlanmamış bir
- * yerel değişikliği hiçbir zaman sessizce ezilmez.
+ * TEKLİF DURUMLARINI SUPABASE İLE UZLAŞTIRMA GÖREVİ — bu fonksiyon eskiden
+ * (bkz. `hydrateMissingOffersFromRemote`, önceki adı) yalnızca YEREL depoda
+ * hiç karşılığı olmayan teklifleri EKLERDİ; var olan bir yerel kaydın
+ * durumunu ASLA güncellemezdi. Kanıtlanmış kök neden ("Canlıya Geçiş Öncesi
+ * Son Durum Analizi" raporu, Konu 3/4): `close_job`/`delete_job` RPC'leri
+ * (offers.ts#closeJobListing/deleteJobWithOffers) bekleyen kardeş
+ * teklifleri Supabase'te ZATEN doğru/atomik şekilde `rejected` yapıyordu, ve
+ * `sweep_completion_auto_approvals` (migration 0018, canlı/çalışan bir
+ * pg_cron görevi) 7 gün sonra teklifi Supabase'te ZATEN `completed`
+ * yapıyordu — ama bu tarayıcı o teklifi ZATEN yerel önbelleğinde
+ * biliyorsa (ör. sağlayıcının kendi verdiği teklif), bu "yalnızca-ekle"
+ * mantığı sunucudaki bu yeni durumu ASLA yerel depoya taşımıyordu; kullanıcı
+ * ekranında süresiz eski durumu (`pending`/`completion_requested`) görmeye
+ * devam ediyordu.
+ *
+ * Artık İKİ İŞ yapar: (1) hâlâ EKLEME (bu tarayıcının hiç bilmediği
+ * teklifler) — DEĞİŞMEDİ; (2) UZLAŞTIRMA — zaten yerelde var olan bir
+ * teklif için, sunucudaki satırın `updated_at`i bu tarayıcının kendi
+ * `updatedAt`inden GERÇEKTEN daha yeniyse, sunucu satırı (durum + tüm
+ * durum-bağımlı alanlar) yerel kaydın ÜZERİNE yazılır — yalnızca `id`
+ * (yerel PK, `offers.ts#createOffer`'da `supabaseOfferId`den BAĞIMSIZ
+ * üretilir, bkz. supabase-offer-reads.ts'in kendi notu) korunur. Eşit veya
+ * daha eski bir `updated_at` ASLA uygulanmaz — bu, offers.ts'in HER teklif
+ * yaşam döngüsü mutasyonunun (createOffer/updateOfferStatus/
+ * requestCompletion/...) zaten Supabase'e BLOKLAYAN ve YEREL yazımdan ÖNCE
+ * senkronlandığı gerçeğiyle birlikte, "eski bir sunucu cevabının daha yeni
+ * bir yerel işlemi geri çevirmesini" yapısal olarak engeller (görev
+ * tanımının §8 gerekliliği) — bu cihazdaki bir mutasyon zaten kendi
+ * bloklayan yazımıyla sunucu `updated_at`ini KENDİSİ ilerletmiş olur.
+ *
+ * Tekliften TÜRETİLEN bildirimler (notifications.ts, "Notifications are
+ * derived, not stored") bu fonksiyonun YAZDIĞI `Offer.status`ı doğrudan
+ * okuduğu için, hiçbir ek değişiklik olmadan otomatik olarak doğru çalışır
+ * (görev tanımının §7 gerekliliği).
  */
-export function hydrateMissingOffersFromRemote(remoteOffers: Offer[]): void {
+export function reconcileOffersFromRemote(remoteOffers: Offer[]): void {
   if (remoteOffers.length === 0) return;
   const local = readAllOffersSnapshot();
+  const remoteBySupabaseId = new Map(
+    remoteOffers
+      .filter((offer): offer is Offer & { supabaseOfferId: string } => Boolean(offer.supabaseOfferId))
+      .map((offer) => [offer.supabaseOfferId, offer]),
+  );
   const localSupabaseIds = new Set(
     local.map((offer) => offer.supabaseOfferId).filter((id): id is string => Boolean(id)),
   );
   const missing = remoteOffers.filter(
     (offer) => offer.supabaseOfferId && !localSupabaseIds.has(offer.supabaseOfferId),
   );
-  if (missing.length === 0) return;
-  writeAllOffers([...local, ...missing]);
+
+  let changed = missing.length > 0;
+  const reconciled = local.map((offer) => {
+    if (!offer.supabaseOfferId) return offer;
+    const remote = remoteBySupabaseId.get(offer.supabaseOfferId);
+    if (!remote) return offer;
+    if (new Date(remote.updatedAt).getTime() <= new Date(offer.updatedAt).getTime()) return offer;
+    changed = true;
+    return { ...remote, id: offer.id };
+  });
+
+  if (!changed) return;
+  writeAllOffers([...reconciled, ...missing]);
 }
 
 /**
@@ -1246,7 +1288,7 @@ export async function deleteJobWithOffers(
     }
   }
 
-  const jobDeleteResult = await deleteJobRecord(session, jobId);
+  const jobDeleteResult = await deleteJobRecord(session, job);
   if (!jobDeleteResult.ok) {
     return jobDeleteResult;
   }
@@ -1348,7 +1390,7 @@ export async function closeJobListing(
     }
   }
 
-  const closeResult = closeJobRecord(session, jobId, reason);
+  const closeResult = closeJobRecord(session, job, reason);
   if (!closeResult.ok) {
     return closeResult;
   }
@@ -1642,12 +1684,25 @@ export async function resolveCompletionDispute(
  * "completion_requested" durumundaki, Hizmet Alan'ın hiç işlem yapmadığı
  * teklifleri COMPLETION_AUTO_APPROVE_DAYS (7 gün) dolunca otomatik
  * "completed" yapar (`autoCompleted: true` işaretiyle — bkz. ratings.ts'teki
- * 30 günlük puanlama penceresi). Projede gerçek bir backend/zamanlayıcı
- * olmadığı için (bkz. CLAUDE.md) bu GECİKMELİ (lazy) çalışır: yalnızca bu
- * fonksiyon çağrıldığında (bkz. use-offers.ts) kontrol edilir — "7 gün
- * doldu" anında değil, taraflardan biri sonraki ziyaretinde tetiklenir.
- * Hiç değişiklik yoksa `writeAllOffers`/`notify()` hiç çağrılmaz (gereksiz
- * re-render'dan kaçınmak için).
+ * 30 günlük puanlama penceresi).
+ *
+ * DÜZELTME ("Canlıya Geçiş Öncesi Son Durum Analizi" raporu, Konu 4): bu
+ * yorum eskiden "projede gerçek bir backend/zamanlayıcı yok" diyordu — bu
+ * ARTIK DOĞRU DEĞİL. `public.sweep_completion_auto_approvals()` (migration
+ * 0018) GERÇEK, çalışan bir `pg_cron` görevidir (saatlik, Development'ta
+ * canlı doğrulandı) ve bu fonksiyonun BİREBİR SQL yansımasıdır — sunucu
+ * tarafı, kullanıcı hiç geri dönmese BİLE 7 gün sonra teklifi zaten
+ * `completed` yapar. Bu YEREL fonksiyon artık BİRİNCİL mekanizma DEĞİL,
+ * ikinci/yedek bir yoldur: yalnızca bu tarayıcının kendi (henüz sunucudan
+ * hiç çekilmemiş) yerel kopyasını da aynı sonuca getirir — sunucudaki
+ * GERÇEK geçiş, bu tarayıcıya `use-offers.ts`nin `reconcileOffersFromRemote`
+ * çağrısıyla (offers.ts, TEKLİF DURUMLARINI SUPABASE İLE UZLAŞTIRMA GÖREVİ)
+ * ayrıca ve bağımsız olarak da ulaşır — böylece BAŞKA bir cihazdaki taraf da
+ * (bu cihaz hiç ziyaret etmese bile) doğru "completed" durumunu görür. Bu
+ * fonksiyonun kendisi hâlâ GECİKMELİ (lazy) çalışır: yalnızca bu fonksiyon
+ * çağrıldığında (bkz. use-offers.ts) kontrol edilir. Hiç değişiklik yoksa
+ * `writeAllOffers`/`notify()` hiç çağrılmaz (gereksiz re-render'dan
+ * kaçınmak için).
  */
 export function applyExpiredCompletionAutoApprovals(): void {
   const all = readAllOffersSnapshot();

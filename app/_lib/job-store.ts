@@ -1931,20 +1931,31 @@ export type DeleteJobResult = { ok: true } | { ok: false; error: string };
  * offers.ts#deleteJobWithOffers içinde yapılır — normal akışta kullanıcı
  * arayüzünün çağırması gereken, asıl yetkilendirilmiş giriş noktası odur.
  */
-export async function deleteJob(session: Session | null, jobId: string): Promise<DeleteJobResult> {
+// DÜZELTME (TEKLİF DURUMLARINI SUPABASE İLE UZLAŞTIRMA GÖREVİ, `closeJob`
+// ile AYNI kök nedenden gerçek çapraz-cihaz testinde bulundu): `job` artık
+// ÇAĞIRANDAN (offers.ts#deleteJobWithOffers, zaten `findJobByIdWithRemoteFallback`
+// ile sahipliği VE "aktif/tamamlanmış iş var mı" kuralını doğrulamış) parametre
+// olarak alınır — eskiden bu fonksiyon KENDİ İÇİNDE `findUserCreatedJobById`
+// (YEREL-ONLY) ile ayrıca arıyor ve `existing.status === "tamamlandi"` gibi
+// daha kaba bir kontrol de tekrarlıyordu. Bu ilan yalnızca BAŞKA bir cihazda
+// oluşturulmuşsa, sunucu tarafı silme ZATEN başarıyla tamamlanmış olsa bile
+// (`deleteJobOnSupabase` başarılı döner) bu fonksiyon sahte bir "yetkiniz
+// yok" hatası döndürüyordu. Artık: bu cihazda yerel bir kopya YOKSA
+// silinecek/temizlenecek hiçbir şey yoktur — bu bir hata DEĞİLDİR, çünkü
+// `fetchAllVisibleJobsFromSupabase` (bkz. supabase-job-reads.ts) silinen
+// ilanı bir SONRAKİ getirmede zaten döndürmeyecektir.
+export async function deleteJob(session: Session | null, job: Job): Promise<DeleteJobResult> {
   if (!session) {
     return { ok: false, error: "İlanı silmek için giriş yapmalısınız." };
   }
   if (session.role !== "hizmet-alan") {
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan silebilir." };
   }
-
-  const existing = findUserCreatedJobById(jobId);
-  if (!existing || existing.requesterId !== session.id) {
+  if (job.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
 
-  if (existing.status === "tamamlandi") {
+  if (job.status === "tamamlandi") {
     return {
       ok: false,
       error: "Bu ilana bağlı aktif veya tamamlanmış bir iş bulunduğu için ilan silinemez.",
@@ -1952,25 +1963,27 @@ export async function deleteJob(session: Session | null, jobId: string): Promise
   }
 
   const all = readUserCreatedJobsSnapshot();
-  if (!writeUserCreatedJobs(all.filter((item) => item.id !== jobId))) {
-    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
-  }
+  if (all.some((item) => item.id === job.id)) {
+    if (!writeUserCreatedJobs(all.filter((item) => item.id !== job.id))) {
+      return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+    }
 
-  if (existing.photos.length > 0) {
-    await deletePhotoBlobs(existing.photos.map((photo) => photo.storageKey));
-  }
-  // DÜZELTME (Y5, veritabanı geçişi öncesi denetim): eskiden yalnızca
-  // fotoğraf blob'ları temizleniyordu — Gümrük Müşavirliği evrakları
-  // (customsDocuments) hiç silinmiyordu, ilan silindiğinde bu evrakların
-  // IndexedDB blob'ları hiçbir kayıt tarafından referans edilmeden kalıcı
-  // olarak sahipsiz (orphan) kalıyordu. `updateJob` bunu zaten doğru
-  // yapıyordu (bkz. aşağıdaki removedCustomsDocuments) — bu, o desenle
-  // tutarlı hale getirir. Yalnızca O6 düzeltmesiyle (republishJob artık
-  // evrakları da bağımsız storageKey'lerle kopyalıyor) birlikte GÜVENLİDİR
-  // — aksi halde yeniden yayınlanmış bir ilanın (eski storageKey'leri
-  // PAYLAŞAN) evrakları da kırılırdı.
-  if (existing.customsDocuments && existing.customsDocuments.length > 0) {
-    await deletePhotoBlobs(existing.customsDocuments.map((doc) => doc.storageKey));
+    if (job.photos.length > 0) {
+      await deletePhotoBlobs(job.photos.map((photo) => photo.storageKey));
+    }
+    // DÜZELTME (Y5, veritabanı geçişi öncesi denetim): eskiden yalnızca
+    // fotoğraf blob'ları temizleniyordu — Gümrük Müşavirliği evrakları
+    // (customsDocuments) hiç silinmiyordu, ilan silindiğinde bu evrakların
+    // IndexedDB blob'ları hiçbir kayıt tarafından referans edilmeden kalıcı
+    // olarak sahipsiz (orphan) kalıyordu. `updateJob` bunu zaten doğru
+    // yapıyordu (bkz. aşağıdaki removedCustomsDocuments) — bu, o desenle
+    // tutarlı hale getirir. Yalnızca O6 düzeltmesiyle (republishJob artık
+    // evrakları da bağımsız storageKey'lerle kopyalıyor) birlikte GÜVENLİDİR
+    // — aksi halde yeniden yayınlanmış bir ilanın (eski storageKey'leri
+    // PAYLAŞAN) evrakları da kırılırdı.
+    if (job.customsDocuments && job.customsDocuments.length > 0) {
+      await deletePhotoBlobs(job.customsDocuments.map((doc) => doc.storageKey));
+    }
   }
 
   return { ok: true };
@@ -1989,10 +2002,28 @@ export type CloseJobResult = { ok: true; job: Job } | { ok: false; error: string
  * odur. Zaten kapatılmış bir ilan için ikinci bir çağrı KESİN olarak
  * reddedilir (rule: işlem geri alınamaz — bir ilan iki kez, farklı
  * nedenlerle kapatılamaz).
+ *
+ * DÜZELTME (TEKLİF DURUMLARINI SUPABASE İLE UZLAŞTIRMA GÖREVİ, gerçek
+ * çapraz-cihaz testinde bulundu): `job` artık ÇAĞIRANDAN (offers.ts#
+ * closeJobListing, `jobs-lookup.ts#findJobByIdWithRemoteFallback` ile ZATEN
+ * uzak-geri-dönüşlü olarak çözülmüş ve sahiplik doğrulanmış) parametre
+ * olarak alınır — eskiden bu fonksiyon KENDİ İÇİNDE `findUserCreatedJobById`
+ * (YEREL-ONLY, uzak geri dönüşü YOK) ile ayrıca arıyordu. Sonuç: ilan sahibi
+ * bu ilanı BAŞKA bir cihazda oluşturmuşsa (bu cihazın `userJobsStore`'unda
+ * hiç yoktur, yalnızca `useAllJobs()`'un render-zamanı uzak-geri-dönüş
+ * birleşiminde vardır), sunucu tarafı kapatma ZATEN BAŞARIYLA tamamlanmış
+ * olsa bile (`closeJobOnSupabase` başarılı döner) bu fonksiyon "Bu ilan
+ * üzerinde işlem yapma yetkiniz yok." hatasıyla YANLIŞ BİR BAŞARISIZLIK
+ * bildiriyordu — kullanıcı diyalog kapanmadan, sahte bir hata görüyordu,
+ * oysa ilan sunucuda GERÇEKTEN kapanmıştı. Artık: bu cihazda yerel bir
+ * kopya YOKSA yazacak hiçbir şey yoktur (silinecek/güncellenecek yerel
+ * kayıt yok) — bu bir hata DEĞİLDİR, çünkü `useAllJobs()`'un kendi
+ * `remoteWinsOverLocal`ı (`Boolean(remote.closedAt)`) bir SONRAKİ uzak
+ * getirmede bu kapatmayı zaten doğru yansıtacaktır (bkz. use-jobs.ts).
  */
 export function closeJob(
   session: Session | null,
-  jobId: string,
+  job: Job,
   reason: JobClosureReason,
 ): CloseJobResult {
   if (!session) {
@@ -2001,19 +2032,19 @@ export function closeJob(
   if (session.role !== "hizmet-alan") {
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan kapatabilir." };
   }
-
-  const existing = findUserCreatedJobById(jobId);
-  if (!existing || existing.requesterId !== session.id) {
+  if (job.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
-  if (isJobManuallyClosed(existing)) {
+  if (isJobManuallyClosed(job)) {
     return { ok: false, error: JOB_ALREADY_CLOSED_MESSAGE };
   }
 
-  const updated: Job = { ...existing, closedAt: new Date().toISOString(), closureReason: reason };
+  const updated: Job = { ...job, closedAt: new Date().toISOString(), closureReason: reason };
   const all = readUserCreatedJobsSnapshot();
-  if (!writeUserCreatedJobs(all.map((item) => (item.id === jobId ? updated : item)))) {
-    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+  if (all.some((item) => item.id === job.id)) {
+    if (!writeUserCreatedJobs(all.map((item) => (item.id === job.id ? updated : item)))) {
+      return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
+    }
   }
   return { ok: true, job: updated };
 }

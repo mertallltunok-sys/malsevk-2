@@ -16,12 +16,14 @@ import type { Currency, DisagreementReason, Offer, OfferStatus } from "./types";
  * izin verdiği (`offers_select_parties_or_admin`, 0013) satırları okur.
  *
  * `use-offers.ts#useAllOffers` bu fonksiyonu mount'ta bir kez çağırıp
- * `hydrateMissingOffersFromRemote()` (offers.ts) ile eksik olanları YEREL
- * depoya YAZAR — böylece bir SONRAKİ `updateOfferStatus`/`withdrawOffer`
- * çağrısı onu sıradan bir yerel teklif gibi bulur, mutasyon fonksiyonlarının
- * kendisi HİÇ değiştirilmeden. Var olan bir yerel kaydın üzerine ASLA
- * yazılmaz (bkz. `hydrateLocalUserMirrorIfMissing`'in AYNI "yalnızca eksikse
- * doldur" ilkesi).
+ * `reconcileOffersFromRemote()` (offers.ts) ile eksik olanları YEREL depoya
+ * YAZAR — böylece bir SONRAKİ `updateOfferStatus`/`withdrawOffer` çağrısı
+ * onu sıradan bir yerel teklif gibi bulur, mutasyon fonksiyonlarının kendisi
+ * HİÇ değiştirilmeden. TEKLİF DURUMLARINI SUPABASE İLE UZLAŞTIRMA GÖREVİ:
+ * `reconcileOffersFromRemote` artık var olan bir yerel kaydın üzerine de
+ * yazabilir — ama YALNIZCA sunucu satırının `updated_at`i yerelinkinden
+ * gerçekten daha yeniyse (bkz. o fonksiyonun kendi dokümanı); bu tarayıcının
+ * kendi, henüz sunucuya ulaşmamış bir değişikliği asla geri alınmaz.
  */
 
 type OfferRow = {
@@ -51,8 +53,8 @@ function mapRow(row: OfferRow): Offer {
   return {
     // Bu tarayıcının HİÇ görmediği bir teklif için yerel id, sunucu id'siyle
     // AYNI seçilir (iki ayrı UUID uzayını eşlemeye gerek kalmaz) — bu satır
-    // zaten hiçbir yerel kayıtla eşleşmiyorsa (bkz. hydrateMissingOffersFromRemote)
-    // bu güvenlidir; eşleşiyorsa zaten materialize edilmez.
+    // zaten hiçbir yerel kayıtla eşleşmiyorsa (bkz. reconcileOffersFromRemote)
+    // bu güvenlidir; eşleşiyorsa bu `id` hiç kullanılmaz (yerel `id` korunur).
     id: row.id,
     jobId: row.job_id,
     providerId: row.provider_id,

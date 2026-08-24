@@ -2,21 +2,28 @@
 
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
-import type { Session } from "../_lib/types";
-import { CONTACT_VISIBILITY_MIN_ONE_MESSAGE, updateContactVisibility, type StoredUser } from "../_lib/users";
+import type { SessionProfileDetails } from "../_lib/session";
+import { updateMyContactVisibilityRemote } from "../_lib/supabase-contact-visibility";
+import type { UserRole } from "../_lib/types";
+import { CONTACT_VISIBILITY_MIN_ONE_MESSAGE } from "../_lib/users";
 
 /**
  * Hesap Ayarları'na eklenen "İletişim Bilgisi Görünürlüğü" bölümü —
- * `provider-profile-editor.tsx` ile AYNI submit/loading/success/error deseni,
- * ama BİLEREK role-gated DEĞİL (account-settings-content.tsx'e hem
- * hizmet-alan hem hizmet-veren için render edilir, bkz. users.ts#
- * updateContactVisibility'nin rol kontrolü olmaması). `undefined` (henüz
- * tercih belirlenmemiş) her iki kutu için de "açık" (mevcut davranışla aynı)
- * olarak başlatılır.
+ * `basic-profile-editor.tsx` ile AYNI submit/loading/success/error deseni VE
+ * AYNI veri kaynağı (`SessionProfileDetails`, GERÇEK Supabase `profiles`
+ * satırı — localStorage `StoredUser` aynası DEĞİL, bkz. görev tanımı "asıl
+ * kaynak Supabase olmalı"). BİLEREK role-gated DEĞİL (account-settings-
+ * content.tsx'e hem hizmet-alan hem hizmet-veren için render edilir).
  */
-export function ContactVisibilitySettings({ session, user }: { session: Session; user: StoredUser }) {
-  const [showEmail, setShowEmail] = useState(user.showEmailAfterAgreement ?? true);
-  const [showPhone, setShowPhone] = useState(user.showPhoneAfterAgreement ?? true);
+export function ContactVisibilitySettings({
+  profileDetails,
+  role,
+}: {
+  profileDetails: SessionProfileDetails;
+  role: UserRole;
+}) {
+  const [showEmail, setShowEmail] = useState(profileDetails.showEmailAfterAgreement);
+  const [showPhone, setShowPhone] = useState(profileDetails.showPhoneAfterAgreement);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -48,15 +55,20 @@ export function ContactVisibilitySettings({ session, user }: { session: Session;
     setShowPhone(checked);
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     setJustSaved(false);
 
-    const result = updateContactVisibility(session, {
+    const result = await updateMyContactVisibilityRemote({
       showEmailAfterAgreement: showEmail,
       showPhoneAfterAgreement: showPhone,
+      currentRole: role,
+      currentName: profileDetails.fullName,
+      currentEmail: profileDetails.email,
+      currentPhone: profileDetails.phone ?? "",
     });
 
     setSubmitting(false);

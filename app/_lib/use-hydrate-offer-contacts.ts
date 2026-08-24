@@ -6,7 +6,7 @@ import { findJobByIdWithRemoteFallback } from "./jobs-lookup";
 import { fetchOfferContactFromSupabase } from "./supabase-contact-reveal";
 import { requiresBackendOfferSync } from "./supabase-offer-sync";
 import type { Job, Offer, Session } from "./types";
-import { findUserById, upsertSupabaseUserMirror } from "./users";
+import { upsertSupabaseUserMirror } from "./users";
 
 /**
  * "İletişim Bilgilerinin Görünürlüğü" görevi — contact-access.ts#
@@ -18,14 +18,19 @@ import { findUserById, upsertSupabaseUserMirror } from "./users";
  * my-offers-panel.tsx'in kendi teklif listesi bir `.map()` içinde, hook
  * kuralları gereği orada çağrılamaz) BİR KEZ çağrılır: bu tarayıcının
  * `StoredUser` aynasında (users.ts) eksik olan karşı taraf profillerini
- * (`get_offer_contact` RPC'si, migration 0078) arka planda hidratlar —
+ * (`get_offer_contact` RPC'si, migration 0078/0079) arka planda hidratlar —
  * böylece `getRevealedContactForOffer`in KENDİ değişmemiş `findUserById`
  * çağrısı bir SONRAKİ render'da veriyi yerelde bulur.
  *
- * Yalnızca "meşgul" (ENGAGED_OFFER_STATUSES) teklifler için dener — RPC'nin
- * kendi `can_view_offer_contact` yetkilendirmesi zaten tek doğruluk kaynağı,
- * bu hook onu tekrarlamaz; yetkisiz bir deneme sunucuda sessizce boş satır
- * döner (zararsız).
+ * İLETİŞİM GİZLİLİĞİ GÖREVİ (0079): `get_offer_contact` artık HAM
+ * phone/email değil, karşı tarafın KENDİ Supabase tercihine göre zaten
+ * SÜZÜLMÜŞ bir sonuç döner (gizliyse `null`). Bu yüzden bir teklif MEVCUT
+ * bir yerel aynaya sahip olsa bile ("zaten mirrored") YENİDEN denenir —
+ * aksi halde, karşı taraf tercihini SONRADAN "gizle"ye çevirirse, bu
+ * cihazda önceden önbelleğe alınmış ESKİ (hâlâ görünür) değer süresiz
+ * saklanır kalırdı; "localStorage yalnızca yardımcı önbellek olmalı, asıl
+ * kaynak Supabase olmalı" ilkesiyle çelişirdi. `attemptedRef` yine de her
+ * teklifi bu mount'ta YALNIZCA BİR KEZ dener (gereksiz tekrar isteği yok).
  */
 export function useHydrateOfferContacts(offers: readonly Offer[], jobs: readonly Job[], session: Session | null): void {
   const attemptedRef = useRef<Set<string>>(new Set());
@@ -41,8 +46,7 @@ export function useHydrateOfferContacts(offers: readonly Offer[], jobs: readonly
       if (attemptedRef.current.has(offer.id)) return false;
       const counterpartyId =
         session.id === offer.providerId ? jobById.get(offer.jobId)?.requesterId : offer.providerId;
-      if (!counterpartyId) return false;
-      return !findUserById(counterpartyId);
+      return Boolean(counterpartyId);
     });
     if (candidates.length === 0) return;
 
@@ -75,23 +79,40 @@ export function useHydrateOfferContacts(offers: readonly Offer[], jobs: readonly
         attemptedRef.current.add(offer.id);
         if (!contact) continue;
 
-        if (offer.providerId !== session.id && contact.providerEmail) {
+        // DÜZELTME (İLETİŞİM GİZLİLİĞİ GÖREVİ): işaret eskiden yalnızca
+        // `contact.providerEmail` (yalnızca e-posta) doluysa yazılıyordu —
+        // karşı taraf yalnızca telefonunu görünür bırakıp e-postasını
+        // gizlediyse (ya da tersi), bu, o kısmen görünür teklif için
+        // aynanın HİÇ yazılmamasına (yani telefonun bile hiç
+        // hidratlanmamasına) yol açıyordu. Artık `contact` (RPC'nin kendisi
+        // yetkilendirmeyi geçtiyse) tek koşul — hangi alanın `null`
+        // (gizli) hangisinin dolu (görünür) olduğu, aşağıdaki
+        // `showXAfterAgreement` ile aynanın KENDİSİNE taşınır; böylece
+        // contact-access.ts#applyContactVisibility bu aynayı okurken
+        // GERÇEKTEN doğru alanı gizler/gösterir (RPC'nin sunucu tarafında
+        // zaten verdiği kararı yalnızca tekrar uygular, kendi kararını
+        // İCAT ETMEZ).
+        if (offer.providerId !== session.id) {
           upsertSupabaseUserMirror({
             id: offer.providerId,
             name: contact.providerName,
-            email: contact.providerEmail,
+            email: contact.providerEmail ?? "",
             phone: contact.providerPhone ?? "",
             role: "hizmet-veren",
+            showEmailAfterAgreement: contact.providerEmail !== null,
+            showPhoneAfterAgreement: contact.providerPhone !== null,
           });
           hydratedAny = true;
         }
-        if (job.requesterId && job.requesterId !== session.id && contact.requesterEmail) {
+        if (job.requesterId && job.requesterId !== session.id) {
           upsertSupabaseUserMirror({
             id: job.requesterId,
             name: contact.requesterName,
-            email: contact.requesterEmail,
+            email: contact.requesterEmail ?? "",
             phone: contact.requesterPhone ?? "",
             role: "hizmet-alan",
+            showEmailAfterAgreement: contact.requesterEmail !== null,
+            showPhoneAfterAgreement: contact.requesterPhone !== null,
           });
           hydratedAny = true;
         }

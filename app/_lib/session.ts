@@ -48,6 +48,8 @@ type ProfileSnapshot = {
   district: string | null;
   account_status: string | null;
   onboarding_completed: boolean | null;
+  show_email_after_agreement: boolean | null;
+  show_phone_after_agreement: boolean | null;
 };
 
 /**
@@ -75,6 +77,9 @@ export type SessionProfileDetails = {
   role: UserRole | null;
   accountStatus: string;
   onboardingCompleted: boolean;
+  /** İLETİŞİM GİZLİLİĞİ GÖREVİ — bkz. profiles.show_email_after_agreement/show_phone_after_agreement (migration 0079). Hesap Ayarları'ndaki "İletişim Bilgisi Görünürlüğü" kartının GERÇEK, cihazlar arası tutarlı başlangıç değeridir (localStorage aynası DEĞİL). */
+  showEmailAfterAgreement: boolean;
+  showPhoneAfterAgreement: boolean;
 };
 
 const listeners = new Set<() => void>();
@@ -131,7 +136,9 @@ async function refreshSessionCache(): Promise<void> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, full_name, phone, company_name, company_type, province, district, account_status, onboarding_completed")
+    .select(
+      "role, full_name, phone, company_name, company_type, province, district, account_status, onboarding_completed, show_email_after_agreement, show_phone_after_agreement",
+    )
     .eq("id", user.id)
     .maybeSingle<ProfileSnapshot>();
 
@@ -153,6 +160,8 @@ async function refreshSessionCache(): Promise<void> {
     role: profile.role,
     accountStatus: profile.account_status ?? "active",
     onboardingCompleted: profile.onboarding_completed ?? false,
+    showEmailAfterAgreement: profile.show_email_after_agreement ?? true,
+    showPhoneAfterAgreement: profile.show_phone_after_agreement ?? true,
   });
 
   if (!profile.role || profile.account_status !== "active") {
@@ -182,6 +191,8 @@ async function refreshSessionCache(): Promise<void> {
     companyType: isCompanyType(profile.company_type) ? profile.company_type : undefined,
     province: profile.province ?? undefined,
     district: profile.district ?? undefined,
+    showEmailAfterAgreement: profile.show_email_after_agreement ?? true,
+    showPhoneAfterAgreement: profile.show_phone_after_agreement ?? true,
   });
 }
 

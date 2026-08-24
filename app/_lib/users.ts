@@ -375,6 +375,19 @@ export type SupabaseUserMirrorInput = {
   companyType?: CompanyType;
   province?: string;
   district?: string;
+  /**
+   * İLETİŞİM GİZLİLİĞİ GÖREVİ: opsiyonel — verilmezse davranış DEĞİŞMEZ
+   * (`existing?.x ?? true`e düşer, aşağıya bkz.). İki farklı çağıran BUNU
+   * FARKLI anlamda doldurur: (1) `hydrate-provider-mirror.ts` kendi
+   * SESSION SAHİBİNİN gerçek `profiles.show_*_after_agreement` ham
+   * değerini geçirir; (2) `use-hydrate-offer-contacts.ts` KARŞI TARAFIN
+   * ham tercihini hiç bilmez — bunun yerine `get_offer_contact`in (0079)
+   * o alanı zaten null döndürüp döndürmediğini (yani "bu görüntüleyici bu
+   * alanı görebildi mi") geçirir, ki `applyContactVisibility`nin ihtiyaç
+   * duyduğu şey tam olarak budur (bkz. o dosyanın kendi dokümanı).
+   */
+  showEmailAfterAgreement?: boolean;
+  showPhoneAfterAgreement?: boolean;
 };
 
 /**
@@ -427,8 +440,8 @@ export function upsertSupabaseUserMirror(input: SupabaseUserMirrorInput): boolea
     province: input.province?.trim() || undefined,
     district: input.district?.trim() || undefined,
     providerProfile: existing?.providerProfile,
-    showEmailAfterAgreement: existing?.showEmailAfterAgreement ?? true,
-    showPhoneAfterAgreement: existing?.showPhoneAfterAgreement ?? true,
+    showEmailAfterAgreement: input.showEmailAfterAgreement ?? existing?.showEmailAfterAgreement ?? true,
+    showPhoneAfterAgreement: input.showPhoneAfterAgreement ?? existing?.showPhoneAfterAgreement ?? true,
   };
 
   if (existing) {
@@ -664,63 +677,29 @@ export type UpdateContactVisibilityInput = {
   showPhoneAfterAgreement: boolean;
 };
 
-export type UpdateContactVisibilityResult =
-  | { ok: true; user: StoredUser }
-  | { ok: false; error: string };
+export type UpdateContactVisibilityResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Telefon/e-posta görünürlüğünden EN AZ birinin her zaman açık kalması
- * gereken kuralın TEK, paylaşılan uyarı metni — hem arayüz (contact-visibility-
- * settings.tsx, ikinci seçeneği de kapatmaya çalışırken) hem bu dosyanın
- * kendi `updateContactVisibility`'si (arayüze güvenmeyen, atlanamaz asıl
- * doğrulama) AYNI metni gösterir, hiçbiri kendi versiyonunu icat etmez.
+ * gereken kuralın TEK, paylaşılan uyarı metni — hem arayüz
+ * (contact-visibility-settings.tsx, ikinci seçeneği de kapatmaya
+ * çalışırken) hem `supabase-contact-visibility.ts#updateMyContactVisibilityRemote`
+ * (arayüze güvenmeyen, atlanamaz asıl doğrulama) AYNI metni gösterir,
+ * hiçbiri kendi versiyonunu icat etmez.
+ *
+ * İLETİŞİM GİZLİLİĞİ GÖREVİ: bu tercihin YAZMA yolu artık burada değil —
+ * `basic-profile-editor.tsx`/`updateMyProfileRemote` ile AYNI gerekçeyle
+ * (asıl kaynak Supabase olmalı, localStorage yalnızca en-iyi-çaba bir ayna)
+ * `supabase-contact-visibility.ts#updateMyContactVisibilityRemote`e
+ * taşındı — o modül GERÇEK `profiles.show_email_after_agreement`/
+ * `show_phone_after_agreement` sütunlarına yazar, sonra bu tarayıcının
+ * `StoredUser` aynasını en-iyi-çaba günceller. Eski, yalnızca-localStorage
+ * yazan `updateContactVisibility` fonksiyonu KALDIRILDI (ikinci bir yazma
+ * yolu icat etmemek için, bkz. görev tanımı "aynı işi yapan ikinci bir
+ * sistem kurma").
  */
 export const CONTACT_VISIBILITY_MIN_ONE_MESSAGE =
   "Teklif kabul edildiğinde iletişim kurulabilmesi için telefon veya e-posta bilgilerinden en az biri görünür olmalıdır.";
-
-/**
- * "İletişim Bilgisi Görünürlüğü" tercihini günceller — `updateProviderProfile`
- * ile AYNI oku-değiştir-yaz şekli, ama BİLEREK rol kontrolü YOK: hem
- * hizmet-alan hem hizmet-veren kendi tercihini kendi hesabından yönetebilir
- * (bkz. görev tanımı). Bu iki alan yalnızca contact-access.ts#getRevealedContactForOffer
- * tarafından, teklif zaten kabul edildikten SONRA (ENGAGED_OFFER_STATUSES
- * zamanlaması hiç değişmedi) okunur — bu fonksiyonun kendisi telefon/e-posta
- * DEĞERLERİNE hiç dokunmaz, yalnızca görünürlük tercihini yazar.
- *
- * İkisi birden `false` olan bir istek reddedilir — arayüz (aşağıdaki bileşen)
- * bunu zaten önceden engeller, ama veri katmanı burada AYRICA ve atlanamaz
- * şekilde tekrar kontrol eder (yalnızca UI kontrolüne güvenilmez, bkz. görev
- * tanımı), tıpkı offers.ts#updateOfferStatus'un kendi yetki kontrolünü UI'dan
- * bağımsız tekrarlaması gibi.
- */
-export function updateContactVisibility(
-  session: Session | null,
-  input: UpdateContactVisibilityInput,
-): UpdateContactVisibilityResult {
-  if (!session) {
-    return { ok: false, error: "Bu işlem için giriş yapmalısınız." };
-  }
-
-  if (!input.showEmailAfterAgreement && !input.showPhoneAfterAgreement) {
-    return { ok: false, error: CONTACT_VISIBILITY_MIN_ONE_MESSAGE };
-  }
-
-  const existing = findUserById(session.id);
-  if (!existing) {
-    return { ok: false, error: "Kullanıcı bulunamadı." };
-  }
-
-  const updated: StoredUser = {
-    ...existing,
-    showEmailAfterAgreement: input.showEmailAfterAgreement,
-    showPhoneAfterAgreement: input.showPhoneAfterAgreement,
-  };
-  if (!writeUsers(readUsers().map((user) => (user.id === existing.id ? updated : user)))) {
-    return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
-  }
-
-  return { ok: true, user: updated };
-}
 
 export type UpdateProviderServiceInfoInput = {
   regions: string[];

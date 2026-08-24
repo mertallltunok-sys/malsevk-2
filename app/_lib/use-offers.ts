@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useSyncExternalStore } from "react";
-import { applyExpiredCompletionAutoApprovals, hydrateMissingOffersFromRemote, offersStore } from "./offers";
+import { applyExpiredCompletionAutoApprovals, reconcileOffersFromRemote, offersStore } from "./offers";
 import { fetchVisibleOffersFromSupabase } from "./supabase-offer-reads";
 import { isSupabaseJobSyncEnabled } from "./supabase-job-sync";
 import type { Offer } from "./types";
@@ -23,10 +23,12 @@ export function useAllOffers(): Offer[] {
     applyExpiredCompletionAutoApprovals();
   }, []);
 
-  // GENEL GÜVENLİK/VERİ DOĞRULAMA görevi §14 — cihazlar arası görünürlük:
-  // bu tarayıcının localStorage'ında hiç bulunmayan (başka bir cihaz/hesapta
-  // oluşturulmuş) ama RLS'in bu oturuma GÖSTERMESİNE izin verdiği teklifleri
-  // bir kez (mount'ta) çeker ve depoya yazar — job-store.ts'in
+  // GENEL GÜVENLİK/VERİ DOĞRULAMA görevi §14 + TEKLİF DURUMLARINI SUPABASE
+  // İLE UZLAŞTIRMA GÖREVİ — cihazlar arası görünürlük VE uzlaştırma: bu
+  // tarayıcının localStorage'ında hiç bulunmayan teklifleri EKLER, zaten
+  // var olan tekliflerin durumunu ise sunucudaki daha yeni bir `updated_at`
+  // varsa GÜNCELLER (bkz. offers.ts#reconcileOffersFromRemote'un kendi
+  // dokümanı) — bir kez (mount'ta) çeker, job-store.ts'in
   // `useRemoteJobsFallback`ıyla AYNI "mount'ta bir kez, canlı abonelik değil"
   // ilkesi. `writeAllOffers` zaten `notify()` çağırdığı için bu, yukarıdaki
   // `useSyncExternalStore`ı otomatik olarak yeniden render eder.
@@ -35,7 +37,7 @@ export function useAllOffers(): Offer[] {
     let cancelled = false;
     void fetchVisibleOffersFromSupabase().then((remoteOffers) => {
       if (cancelled) return;
-      hydrateMissingOffersFromRemote(remoteOffers);
+      reconcileOffersFromRemote(remoteOffers);
     });
     return () => {
       cancelled = true;

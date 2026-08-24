@@ -118,8 +118,8 @@ export function getRatingForOffer(offerId: string): Rating | null {
 }
 
 /**
- * "Puanlamanın Sunucuya Kaydı" görevi — `offers.ts#hydrateMissingOffersFromRemote`
- * ile AYNI desen: bu tarayıcının hiç bilmediği (başka bir cihazda/hesapta
+ * "Puanlamanın Sunucuya Kaydı" görevi — `offers.ts#reconcileOffersFromRemote`nin
+ * "ekleme" yarısı ile AYNI desen: bu tarayıcının hiç bilmediği (başka bir cihazda/hesapta
  * gönderilmiş) puanları depoya ekler. Eşleştirme `offerId` üzerinden yapılır
  * (bir teklif yalnızca 1 kez puanlanabilir, bkz. submit_rating RPC'sinin
  * kendi MLK74 kontrolü) — yerel `Rating.id` sunucununkiyle hiç eşleşmesi
