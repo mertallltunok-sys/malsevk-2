@@ -109,18 +109,19 @@ export function validateRegisterFormFields(fields: {
       errors.district = "İlçe zorunludur.";
     }
 
-    // MERSİS / İşletme Tekilliği görevi — yalnızca "bireysel" DIŞINDAKİ
-    // firma tiplerinde anlamlıdır (bkz. migration 0082'nin kendi
-    // gerekçesi); ZORUNLU değildir (görev bölüm 9 — bireysel/MERSİS'i
-    // olmayan kullanıcıları yanlışlıkla kayıt dışı bırakmama uyarısı, aynı
-    // ilke burada "MERSİS'ini şu an elinde bulundurmayan gerçek bir
-    // işletme"ye de uygulanır) — yalnızca DOLU girildiğinde biçimi
-    // (normalize edilince tam 16 hane) doğrulanır. Tekillik yalnızca
-    // sunucuda (complete_registration RPC'si) doğrulanabilir, burada
-    // TEKRARLANMAZ.
+    // MERSİS / İşletme Tekilliği görevi — "Development Kapanış Turu"
+    // görevi MERSİS'i "bireysel" DIŞINDAKİ firma tiplerinde ZORUNLU kıldı
+    // (migration 0083 — 0082'nin ilk sürümünde bilerek opsiyonel bırakılmıştı,
+    // bu görev bunu bilinçli olarak değiştirdi). Bireysel kullanıcı hâlâ
+    // MERSİS'siz kayıt olabilir (o zaten hiç MERSİS'e sahip olamaz). Gerçek
+    // tekillik yalnızca sunucuda (complete_registration RPC'si, ML176)
+    // doğrulanabilir — burada TEKRARLANMAZ, yalnızca "boş bırakılmasın" ve
+    // "biçim 16 hane olsun" istemci-taraflı erken geri bildirimdir.
     if (fields.companyType !== "bireysel") {
       const digitsOnly = fields.mersisNo.replace(/\D/g, "");
-      if (digitsOnly.length > 0 && digitsOnly.length !== 16) {
+      if (digitsOnly.length === 0) {
+        errors.mersisNo = "MERSİS numarası zorunludur.";
+      } else if (digitsOnly.length !== 16) {
         errors.mersisNo = "MERSİS numarası 16 haneli bir sayı olmalıdır.";
       }
     }

@@ -261,12 +261,20 @@ export function CompleteRegistrationForm() {
       return;
     }
     // MERSİS / İşletme Tekilliği görevi — login-form.tsx'in register-form-
-    // validation.ts üzerinden yaptığı AYNI biçim kontrolü (bu form kendi
-    // doğrulamasını inline yapıyor, o paylaşılan fonksiyonu kullanmıyor) —
-    // yalnızca "bireysel" DIŞINDA VE doluysa, 16 haneye normalize olmalı.
-    if (companyType !== "bireysel" && mersisNo.replace(/\D/g, "").length > 0 && mersisNo.replace(/\D/g, "").length !== 16) {
-      setFormError("MERSİS numarası 16 haneli bir sayı olmalıdır.");
-      return;
+    // validation.ts üzerinden yaptığı AYNI kontrol (bu form kendi
+    // doğrulamasını inline yapıyor, o paylaşılan fonksiyonu kullanmıyor).
+    // "Development Kapanış Turu" göreviyle "bireysel" DIŞINDAKİ tiplerde
+    // ZORUNLU hâle geldi (bkz. migration 0083).
+    if (companyType !== "bireysel") {
+      const mersisDigits = mersisNo.replace(/\D/g, "");
+      if (mersisDigits.length === 0) {
+        setFormError("MERSİS numarası zorunludur.");
+        return;
+      }
+      if (mersisDigits.length !== 16) {
+        setFormError("MERSİS numarası 16 haneli bir sayı olmalıdır.");
+        return;
+      }
     }
     if (!legalConsentAccepted) {
       setFormError("Devam etmek için Gizlilik Politikası, Kullanım Koşulları ve KVKK Aydınlatma Metni'ni kabul etmelisiniz.");
@@ -430,16 +438,17 @@ export function CompleteRegistrationForm() {
         </select>
       </div>
 
-      {/* MERSİS / İşletme Tekilliği görevi — login-form.tsx'teki AYNI koşul/opsiyonellik. */}
+      {/* MERSİS / İşletme Tekilliği görevi — login-form.tsx'teki AYNI koşul; "Development Kapanış Turu" göreviyle bu tiplerde ZORUNLU. */}
       {companyType && companyType !== "bireysel" && (
         <div>
           <label htmlFor={mersisNoId} className="text-sm font-medium text-foreground">
-            MERSİS Numarası <span className="font-normal text-muted-foreground">(opsiyonel)</span>
+            MERSİS Numarası
           </label>
           <input
             id={mersisNoId}
             type="text"
             inputMode="numeric"
+            required
             value={mersisNo}
             onChange={(event) => setMersisNo(event.target.value)}
             placeholder="16 haneli MERSİS numarası"

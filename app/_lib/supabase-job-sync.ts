@@ -12,7 +12,6 @@ import {
   type CreateJobsForOperationResult,
   type UpdateJobInput,
 } from "./job-store";
-import { STORAGE_WRITE_ERROR_MESSAGE } from "./local-storage";
 import { deletePhotoBlobs, getPhotoBlob } from "./photo-blob-store";
 import { reportSystemError } from "./system-health";
 import { getAccountStatusErrorMessage } from "./supabase-mutation-errors";
@@ -627,14 +626,13 @@ export async function createJobsForOperationWithSupabaseSync(
  *
  * KAPSAM SINIRI (bilerek, YENİ bir RPC/kapsam İCAT EDİLMEDİ): `update_job_
  * as_requester` RPC'si (migration 0051) yalnızca hâlâ "pending_review" olan
- * bir satırı kabul eder — admin ZATEN karar vermiş (approved/rejected) bir
- * ilanın sahibi tarafından düzenlenmesi bu RPC'nin ÖNCEDEN VAR OLAN, bilinçli
- * kapsam dışıdır (admin'in kendi ayrı `update_job_as_admin` yolu var). Bu
- * durumda (`previousModerationStatus !== "pending_review"`) GÖREV1'in
- * "Supabase önce" kuralı hiç uygulanmaz — düzenleme, bu görevden ÖNCEKİYLE
- * BİREBİR AYNI şekilde yalnızca yerel kalır (moderationStatus zaten
- * job-store.ts#buildJobUpdate içinde "pending_review"a sıfırlanmış olabilir,
- * bu YENİ bir davranış değil, önceden var olan "İlan Onayı" kuralıdır).
+ * bir satırı kabul eder. "Development Kapanış Turu" göreviyle, admin zaten
+ * karar vermiş (approved/rejected) bir ilanı sahibinin düzenlemesi artık
+ * job-store.ts#buildJobUpdate'in kendisinde TAMAMEN reddediliyor (bkz.
+ * job-moderation.ts#isJobModerationPending) — bu yüzden `built.ok === true`
+ * ise `previousModerationStatus` ARTIK HER ZAMAN "pending_review"dır, bu
+ * fonksiyona hiçbir zaman "yerel-only kal" dalı gerekmez (eskiden vardı,
+ * kaldırıldı — o dal sunucuya hiç ulaşmayan sahte bir yerel başarıydı).
  *
  * `update_job_as_requester` fotoğraf/evrak senkronlamaz (bkz.
  * updateJobAsRequesterOnSupabase'in kendi dokümanı) — bu yüzden yeni
@@ -651,29 +649,22 @@ export async function updateJobWithSupabaseSync(
 ): Promise<CreateJobResult> {
   const built = await buildJobUpdate(session, jobId, input, offers, fallbackJob);
   if (!built.ok) return built;
-  const { job: updated, existing, previousModerationStatus, newlyPersistedPhotos, newlyPersistedCustomsDocuments } = built;
+  const { job: updated, existing, newlyPersistedPhotos, newlyPersistedCustomsDocuments } = built;
 
   async function rollbackNewBlobs() {
     await deletePhotoBlobs([...newlyPersistedPhotos, ...newlyPersistedCustomsDocuments].map((item) => item.storageKey));
   }
 
-  if (previousModerationStatus === "pending_review") {
-    const syncResult = await retryJobSupabaseSync(updated);
-    if (!syncResult.ok) {
-      await rollbackNewBlobs();
-      return { ok: false, error: syncResult.error };
-    }
+  const syncResult = await retryJobSupabaseSync(updated);
+  if (!syncResult.ok) {
+    await rollbackNewBlobs();
+    return { ok: false, error: syncResult.error };
   }
 
   if (!commitJobUpdate(jobId, updated)) {
-    if (previousModerationStatus === "pending_review") {
-      // Sunucu kaydı ZATEN güncellendi — bu andan sonra yerel yazım yalnızca
-      // bir önbellek adımıdır (createJobWithSupabaseSync'in AYNI ilkesi).
-      console.error(`İlan güncellemesi Supabase'e kaydedildi ancak yerel önbelleğe yazılamadı (job ${jobId}).`);
-    } else {
-      await rollbackNewBlobs();
-      return { ok: false, error: STORAGE_WRITE_ERROR_MESSAGE };
-    }
+    // Sunucu kaydı ZATEN güncellendi — bu andan sonra yerel yazım yalnızca
+    // bir önbellek adımıdır (createJobWithSupabaseSync'in AYNI ilkesi).
+    console.error(`İlan güncellemesi Supabase'e kaydedildi ancak yerel önbelleğe yazılamadı (job ${jobId}).`);
   } else {
     const removedPhotos = existing.photos.filter((photo) => !input.keptPhotoIds.includes(photo.id));
     if (removedPhotos.length > 0) await deletePhotoBlobs(removedPhotos.map((photo) => photo.storageKey));

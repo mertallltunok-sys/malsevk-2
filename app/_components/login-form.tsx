@@ -870,17 +870,19 @@ export function LoginForm({
 
             {/* MERSİS / İşletme Tekilliği görevi — yalnızca "Bireysel" DIŞINDAKİ
                 firma tiplerinde gösterilir (bkz. register-form-validation.ts'in
-                aynı koşulu); ZORUNLU DEĞİLDİR, yalnızca doluysa biçim/tekillik
-                doğrulanır (bkz. migration 0082). */}
+                aynı koşulu). "Development Kapanış Turu" göreviyle bu tiplerde
+                ZORUNLU hâle geldi (bkz. migration 0083) — bireysel akış
+                etkilenmez, o zaten bu alanı hiç görmez. */}
             {companyType && companyType !== "bireysel" && (
               <div>
                 <label htmlFor={mersisNoId} className="text-sm font-medium text-foreground">
-                  MERSİS Numarası <span className="font-normal text-muted-foreground">(opsiyonel)</span>
+                  MERSİS Numarası
                 </label>
                 <input
                   id={mersisNoId}
                   type="text"
                   inputMode="numeric"
+                  required
                   value={mersisNo}
                   onChange={(event) => {
                     setMersisNo(event.target.value);

@@ -2,7 +2,7 @@ import { isCustomsBrokerageCategory } from "./customs-brokerage-catalog";
 import { isSimplifiedLocationCategory } from "./job-location";
 import { isRecyclingCategory } from "./recycling-catalog";
 import { deriveWasteCodeHazardous } from "./recycling-waste-code-catalog";
-import { didCriticalJobContentChange, getJobModerationStatus } from "./job-moderation";
+import { getJobModerationStatus, isJobModerationPending, JOB_NOT_EDITABLE_MODERATION_MESSAGE } from "./job-moderation";
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "./job-requests";
 import { createPublishWindow, isJobListingExpired } from "./job-publish-window";
 import { isJobClosureReason, isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE } from "./job-closure";
@@ -1613,6 +1613,16 @@ export async function buildJobUpdate(
   if (!existing || existing.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
+  // "Development Kapanış Turu" görevi — admin zaten karar vermiş (approved/
+  // rejected) bir ilan artık hiç düzenlenemez (bkz. job-moderation.ts#
+  // isJobModerationPending'in kendi dokümanı — update_job_as_requester RPC'si
+  // zaten yalnızca pending_review'ı kabul ediyordu, bu kontrol olmadan
+  // aşağıdaki yazım yalnızca YEREL kalıp kullanıcıya sahte bir başarı
+  // gösterebiliyordu). job-requests-panel.tsx'in "Düzenle" linki ve
+  // job-edit-form.tsx'in route koruması AYNI kontrolü paylaşır.
+  if (!isJobModerationPending(existing)) {
+    return { ok: false, error: JOB_NOT_EDITABLE_MODERATION_MESSAGE };
+  }
   // İlan Kapatma: kapatılmış bir ilan artık aktif sayılmadığından (bkz.
   // job-closure.ts) düzenleme de anlamsızdır — `isJobEditable`in kendisi
   // teklif durumlarına bakar, kapatma ise tamamen ayrı/manuel bir işlemdir,
@@ -1689,23 +1699,17 @@ export async function buildJobUpdate(
   };
   updated.facilityId = verifiedPickupFacilityId(updated.category, updatedProvince, updatedDistrict, updated.facilityId);
 
-  // İlan Onayı — görev bölüm 9: ilan sahibi, admin tarafından zaten
-  // karara bağlanmış (approved/rejected) bir ilanın içeriğini etkileyen bir
-  // alanı değiştirirse eski karar artık geçerli sayılmaz, ilan yeniden
-  // incelemeye alınır (bkz. job-moderation.ts#didCriticalJobContentChange —
-  // yalnızca görevin listelediği "içerik" alanları kritik sayılır; salt
-  // fotoğraf/operationDetails değişikliği gereksiz bir yeniden inceleme
-  // OLUŞTURMAZ). Zaten "pending_review" olan bir ilan bu dalda hiç
-  // değişmez — halihazırda incelemeyi bekliyor. Admin'in KENDİ düzenlemesi
-  // (admin-job-edit-form.tsx -> update_job_as_admin) bu fonksiyonu hiç
-  // çağırmaz, bu kural yalnızca sahibinin kendi düzenleme yoluna uygulanır.
+  // "Development Kapanış Turu" görevi — bu fonksiyonun en başındaki
+  // isJobModerationPending(existing) kontrolü sayesinde bu satıra yalnızca
+  // ZATEN "pending_review" olan bir ilan ulaşabilir; `updated` de `existing`i
+  // spread ettiği için moderationStatus zaten "pending_review" olarak
+  // korunur — eskiden burada var olan "onaylanmış/reddedilmiş bir ilanı
+  // kritik alan değişince yeniden incelemeye al" yerel-only geri düşüşü
+  // (job-moderation.ts#didCriticalJobContentChange) artık YAPISAL OLARAK
+  // ERİŞİLEMEZ olduğu için kaldırıldı — o dal hiçbir zaman sunucuya
+  // ulaşmıyordu (update_job_as_requester zaten yalnızca pending_review'ı
+  // kabul ediyordu), yalnızca kullanıcıya sahte bir yerel başarı gösteriyordu.
   const previousModerationStatus = getJobModerationStatus(existing);
-  if (previousModerationStatus !== "pending_review" && didCriticalJobContentChange(existing, updated)) {
-    updated.moderationStatus = "pending_review";
-    updated.moderationReviewedAt = undefined;
-    updated.moderationReviewedBy = undefined;
-    updated.moderationRejectionReason = undefined;
-  }
 
   return { ok: true, job: updated, existing, previousModerationStatus, newlyPersistedPhotos: newlyPersisted, newlyPersistedCustomsDocuments };
 }

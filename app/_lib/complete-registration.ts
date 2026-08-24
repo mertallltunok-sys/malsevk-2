@@ -166,6 +166,8 @@ function mapCompleteRegistrationRpcError(error: { code?: string; message: string
       return "MERSİS numarası 16 haneli bir sayı olmalıdır.";
     case "ML175":
       return "Bu MERSİS numarasıyla kayıtlı bir işletme zaten bulunuyor.";
+    case "ML176":
+      return "MERSİS numarası zorunludur.";
     default:
       return error.message || "Kayıt tamamlanırken bir hata oluştu.";
   }

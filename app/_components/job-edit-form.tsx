@@ -20,6 +20,7 @@ import {
   STANDARD_MANUAL_FACILITY_OPTION_LABEL,
   toFacilitySelectOptions,
 } from "../_lib/job-location";
+import { JOB_NOT_EDITABLE_MODERATION_MESSAGE, isJobModerationPending } from "../_lib/job-moderation";
 import { isJobEditable, JOB_NOT_EDITABLE_MESSAGE } from "../_lib/job-requests";
 import { getTodayLocalDateString } from "../_lib/jobs";
 import { deriveLegacyMirrorFields, getJobCargoGroups } from "../_lib/nakliye-cargo-groups";
@@ -120,9 +121,21 @@ export function JobEditForm({ jobId }: { jobId: string }) {
     return <AuthGateNotice message="Bu ilanı düzenleme yetkiniz yok." />;
   }
 
+  // Admin zaten karar vermiş (approved/rejected) bir ilan artık sahibi
+  // tarafından hiç düzenlenemez — update_job_as_requester RPC'sinin kendi,
+  // önceden var olan kısıtı (yalnızca pending_review'ı kabul eder) sunucuda
+  // zaten bunu zorluyordu; burada da AYNI kontrol (job-requests-panel.tsx'in
+  // "Düzenle" linki ve job-store.ts#buildJobUpdate'in veri katmanı
+  // korumasıyla PAYLAŞILAN tek doğruluk kaynağı, job-moderation.ts#
+  // isJobModerationPending) uygulanarak yerelde de asla sahte bir başarı
+  // oluşmasının önüne geçilir (bkz. "Development Kapanış Turu" görevi).
+  if (!isJobModerationPending(job)) {
+    return <AuthGateNotice message={JOB_NOT_EDITABLE_MODERATION_MESSAGE} />;
+  }
+
   // Teklif süreci başlamış (kabul edilmiş/devam eden/tamamlanmış/iptal
   // edilmiş) bir ilan artık düzenlenemez — job-requests-panel.tsx'teki
-  // "Düzenle" linkinin görünürlüğü ve job-store.ts#updateJob'daki veri
+  // "Düzenle" linkinin görünürlüğü ve job-store.ts#buildJobUpdate'teki veri
   // katmanı koruması ile AYNI tek doğruluk kaynağını (isJobEditable)
   // kullanır, bu kural üç yerde ayrı ayrı yazılmaz.
   if (!isJobEditable(job.id, offers)) {

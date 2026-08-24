@@ -34,6 +34,7 @@ import {
   getJobModerationStatus,
   getJobModerationStatusLabel,
   getJobModerationStatusTone,
+  isJobModerationPending,
 } from "../_lib/job-moderation";
 import { clearJobSupabaseSyncFailure, republishJob } from "../_lib/job-store";
 import { isSafeHttpUrl } from "../_lib/text-sanitization";
@@ -1063,7 +1064,7 @@ function JobRequestsList({ session }: { session: Session }) {
       filter: getJobRequestFilter(job, offers),
       engagedOffer: getEngagedOfferForJob(job.id, offers),
       completedOffer: getCompletedOfferForJob(job.id, offers),
-      editable: isJobEditable(job.id, offers),
+      editable: isJobEditable(job.id, offers) && isJobModerationPending(job),
       isExpired: isJobListingExpired(job, offers),
       isClosed: isJobManuallyClosed(job),
       visibleOfferCount: offers.filter((offer) => offer.jobId === job.id && isOfferVisibleInNormalLists(offer))

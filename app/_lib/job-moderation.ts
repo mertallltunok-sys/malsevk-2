@@ -44,6 +44,25 @@ export function isJobModerationPending(job: Job): boolean {
   return getJobModerationStatus(job) === "pending_review";
 }
 
+/**
+ * "Development Kapanış Turu" görevi — İlan sahibi kendi ilanını yalnızca
+ * hâlâ "pending_review" iken düzenleyebilir. Bu, önceki (uncommitted, hiç
+ * gerçek bir Supabase karşılığı olmayan) "kritik alan değişince yeniden
+ * incelemeye al" yerel-only geri düşüşünün YERİNE geçer — `update_job_as_
+ * requester` RPC'si (migration 0051) zaten YALNIZCA sunucudaki satır hâlâ
+ * "pending_review" iken bir güncellemeyi kabul ediyor (aksi halde ML131),
+ * bu yüzden onaylanmış/reddedilmiş bir ilanı "yeniden incelemeye alacak
+ * şekilde" düzenlemenin sunucuya ulaşan GERÇEK bir yolu hiç yoktu — eski
+ * davranış yalnızca localStorage'ı sessizce güncelleyip kullanıcıya sahte
+ * bir başarı gösteriyordu. Burada YENİ bir "yeniden inceleme talebi" RPC/
+ * akışı İCAT EDİLMEDİ (görev talimatı) — onaylanmış/reddedilmiş bir ilan
+ * artık sahibi tarafından hiç düzenlenemez, üç katmanda da (job-requests-
+ * panel.tsx'in "Düzenle" linki, job-edit-form.tsx'in route koruması,
+ * job-store.ts#buildJobUpdate'in veri katmanı koruması) AYNI bu fonksiyon
+ * kontrol edilir.
+ */
+export const JOB_NOT_EDITABLE_MODERATION_MESSAGE = "Bu ilan mevcut durumundayken düzenlenemez.";
+
 export function isJobModerationRejected(job: Job): boolean {
   return getJobModerationStatus(job) === "rejected";
 }
@@ -91,15 +110,18 @@ export function getJobModerationStatusTone(status: JobModerationStatus): "succes
 }
 
 /**
- * Bir Hizmet Alan'ın kendi ilanını düzenlemesi sonrası, ilan içeriğini
- * etkileyen (görev gereksinimi: hizmet türü/başlık/açıklama/ürün
- * bilgileri/lokasyon/tarih/nakliye rotası) alanlardan biri değiştiyse
- * `true` döner — job-store.ts#updateJob bunu, önceden onaylanmış/reddedilmiş
- * bir ilanı yeniden `"pending_review"`ye almak için kullanır. Yalnızca
- * fotoğraf/operationDetails gibi "teknik" alanlar değiştiyse `false` —
- * görev gereksiniminin "gereksiz yeniden onay oluşturma" kuralı. Admin'in
- * kendi düzenlemesi (admin-job-edit-form.tsx) bu fonksiyonu HİÇ çağırmaz —
- * admin zaten aynı işlemin bir parçası olarak onay/red kararını ayrıca verir.
+ * Bir ilanın içeriğini etkileyen (hizmet türü/başlık/açıklama/ürün
+ * bilgileri/lokasyon/tarih/nakliye rotası) alanlardan biri değişip
+ * değişmediğini söyler. ARTIK HİÇBİR ÇAĞIRANI YOK ("Development Kapanış
+ * Turu" görevi) — job-store.ts#buildJobUpdate eskiden bunu, önceden
+ * onaylanmış/reddedilmiş bir ilanı YALNIZCA YEREL olarak yeniden
+ * "pending_review"ye almak için kullanıyordu; bu davranış sunucuya hiç
+ * ulaşmadığından (update_job_as_requester zaten yalnızca pending_review'ı
+ * kabul eder) kullanıcıya sahte bir yerel başarı gösteriyordu ve kaldırıldı
+ * — artık onaylanmış/reddedilmiş bir ilan sahibi tarafından hiç
+ * düzenlenemez (bkz. isJobModerationPending). Fonksiyonun kendisi,
+ * `jobHasAcceptedOffer`/`fetchJobByIdFromSupabase` ile AYNI "belgelenmiş
+ * ama artık çağrılmayan" ilkeyle burada bırakıldı.
  */
 export function didCriticalJobContentChange(before: Job, after: Job): boolean {
   const CRITICAL_SCALAR_KEYS = [
