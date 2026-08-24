@@ -1,7 +1,6 @@
 import { ENGAGED_OFFER_STATUSES } from "./job-requests";
-import { findJobById } from "./jobs-lookup";
 import { getAllOffers } from "./offers";
-import type { Session } from "./types";
+import type { Job, Session } from "./types";
 import { findUserById, type StoredUser } from "./users";
 
 /**
@@ -55,25 +54,31 @@ function applyContactVisibility(user: StoredUser): ContactInfo {
  *  - Oturumdaki kullanıcı işin taraflarından biri mi (teklifi veren
  *    Hizmet Veren ya da ilanı oluşturan Hizmet Alan)?
  *
- * NOT (mimari sınır): Bu uygulamada gerçek bir backend yok; tüm kullanıcı
- * kayıtları (telefon/e-posta dahil) tarayıcının localStorage'ında durur ve
- * teknik olarak herhangi bir istemci JS'i (ör. devtools konsolu) bu ham
- * veriyi doğrudan okuyabilir. Bu fonksiyon, UYGULAMA KATMANININ (React
- * bileşenlerinin) yetkisiz veriye asla erişmemesini garanti eder — ama
- * localStorage'ın kendisini bir üçüncü tarafın doğrudan incelemesine karşı
- * koruyamaz. Bu, gerçek bir sunucu/API olmadan aşılamayacak temel bir
- * mimari sınırdır.
+ * DÜZELTME ("İletişim Bilgilerinin Görünürlüğü" görevi): `job` artık
+ * ÇAĞIRANDAN parametre olarak alınır — eskiden bu fonksiyon kendi içinde
+ * `jobs-lookup.ts#findJobById`i (YEREL/localStorage-only) çağırıyordu, bu da
+ * karşı tarafın (Hizmet Alan <-> Hizmet Veren) BAŞKA bir cihazda oluşturduğu
+ * bir ilanı bu fonksiyonun HİÇ bulamaması anlamına geliyordu — hâlbuki HER
+ * İKİ çağıran (incoming-offer-card.tsx/my-offers-panel.tsx) zaten `job`ı
+ * `useAllJobs()`in KENDİ uzak-geri-dönüşlü (remote-fallback) birleşiminden
+ * prop olarak ALIYORDU. Bu fonksiyonu KONTROLSÜZCE async yapmak yerine (bkz.
+ * görev tanımının uyarısı — iki render call site'ı da senkron kalmalı),
+ * zaten doğru şekilde çözülmüş veriyi TEKRAR (ve YANLIŞ, yerel-only) bir
+ * şekilde çözmek yerine parametre olarak kabul etmek yeterliydi. Karşı
+ * tarafın `StoredUser` (phone/email) aynası hâlâ AYRI bir mekanizmayla
+ * (bkz. use-hydrate-offer-contacts.ts) arka planda hidratlanır — bu
+ * fonksiyon o ikisini birleştiren TEK, hâlâ tamamen senkron erişim kapısıdır.
  */
 export function getRevealedContactForOffer(
   session: Session | null,
   offerId: string,
+  job: Job | null | undefined,
 ): RevealedContact | null {
   if (!session) return null;
 
   const offer = getAllOffers().find((item) => item.id === offerId);
   if (!offer || !ENGAGED_OFFER_STATUSES.includes(offer.status)) return null;
 
-  const job = findJobById(offer.jobId);
   if (!job || !job.requesterId) return null;
 
   const isParty = session.id === offer.providerId || session.id === job.requesterId;

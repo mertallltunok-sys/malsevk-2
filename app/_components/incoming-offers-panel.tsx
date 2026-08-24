@@ -15,6 +15,7 @@ import { newOfferNotificationId } from "../_lib/notifications";
 import type { Offer } from "../_lib/types";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
+import { useHydrateOfferContacts } from "../_lib/use-hydrate-offer-contacts";
 import { useReadNotificationIds } from "../_lib/use-notification-reads";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
@@ -25,6 +26,11 @@ export function IncomingOffersPanel() {
   const session = useSession();
   const jobs = useAllJobs();
   const offers = useAllOffers();
+  // "İletişim Bilgilerinin Görünürlüğü" görevi — bkz. use-hydrate-offer-contacts.ts
+  // dosya başlığı. contact-access.ts#getRevealedContactForOffer'ı hiç
+  // değiştirmez, yalnızca karşı tarafın profilini arka planda yerel aynaya
+  // hidratlar.
+  useHydrateOfferContacts(offers, jobs, session);
   const searchParams = useSearchParams();
   const highlightOfferId = searchParams.get("offerId");
   const highlightJobId = searchParams.get("ilanId");

@@ -214,7 +214,7 @@ export function IncomingOfferCard({
   const [error, setError] = useState<string | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const provider = findUserById(offer.providerId);
-  const revealedContact = getRevealedContactForOffer(session, offer.id);
+  const revealedContact = getRevealedContactForOffer(session, offer.id, job);
   const allOffers = useAllOffers();
   const allRatings = useAllRatings();
   const providerProfile = provider?.providerProfile;

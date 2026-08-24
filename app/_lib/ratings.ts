@@ -1,6 +1,8 @@
 import { findJobByIdWithRemoteFallback } from "./jobs-lookup";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { getAllOffers } from "./offers";
+import { submitRatingOnSupabase } from "./supabase-rating-sync";
+import { requiresBackendOfferSync } from "./supabase-offer-sync";
 import type { Offer, Rating, Session } from "./types";
 
 const RATINGS_STORAGE_KEY = "malsevk.ratings.v1";
@@ -116,6 +118,25 @@ export function getRatingForOffer(offerId: string): Rating | null {
 }
 
 /**
+ * "Puanlamanın Sunucuya Kaydı" görevi — `offers.ts#hydrateMissingOffersFromRemote`
+ * ile AYNI desen: bu tarayıcının hiç bilmediği (başka bir cihazda/hesapta
+ * gönderilmiş) puanları depoya ekler. Eşleştirme `offerId` üzerinden yapılır
+ * (bir teklif yalnızca 1 kez puanlanabilir, bkz. submit_rating RPC'sinin
+ * kendi MLK74 kontrolü) — yerel `Rating.id` sunucununkiyle hiç eşleşmesi
+ * gerekmez (offers.ts#Offer.supabaseOfferId'nin aksine, puanlar için ayrı
+ * bir "yerel/uzak kimlik" ayrımı yoktur, kayıt bir kez oluşturulur ve asla
+ * güncellenmez).
+ */
+export function hydrateMissingRatingsFromRemote(remoteRatings: Rating[]): void {
+  if (remoteRatings.length === 0) return;
+  const local = readAllRatingsSnapshot();
+  const localOfferIds = new Set(local.map((rating) => rating.offerId));
+  const missing = remoteRatings.filter((rating) => !localOfferIds.has(rating.offerId));
+  if (missing.length === 0) return;
+  writeAllRatings([...local, ...missing]);
+}
+
+/**
  * Verilen id'lere sahip değerlendirme kayıtlarını doğrudan kaldırır — normal
  * kullanıcı akışlarındaki hiçbir yetkilendirme/geçiş kontrolü uygulanmaz.
  * Yalnızca dev-only demo veri sıfırlama aracı (bkz. reset-demo-data.ts,
@@ -219,6 +240,24 @@ export async function submitRating(
         ok: false,
         error: `Bu iş otomatik tamamlandığı için değerlendirme süresi (${AUTO_COMPLETED_RATING_WINDOW_DAYS} gün) dolmuştur.`,
       };
+    }
+  }
+
+  // "Puanlamanın Sunucuya Kaydı" görevi — offers.ts'teki
+  // requiresBackendOfferSync() ile AYNI ilke: bloklayan sunucu senkronu,
+  // yerel yazımdan ÖNCE. submit_rating RPC'si kendi yetki/durum/mükerrer
+  // kontrollerini KENDİSİ yapar (bkz. supabase-rating-sync.ts) — burada
+  // TEKRARLANMAZ, yalnızca sonucu yerel yazımı bloke etmek için kullanılır.
+  if (requiresBackendOfferSync()) {
+    if (!offer.supabaseOfferId) {
+      return {
+        ok: false,
+        error: "Bu teklif sunucuya hiç kaydedilmemiş olduğu için puan verilemiyor.",
+      };
+    }
+    const syncResult = await submitRatingOnSupabase(offer.supabaseOfferId, stars);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
     }
   }
 

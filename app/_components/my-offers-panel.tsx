@@ -28,6 +28,7 @@ import { getCompletionDeadlineIso } from "../_lib/time-remaining";
 import type { Offer } from "../_lib/types";
 import { useAllJobs } from "../_lib/use-jobs";
 import { useAllOffers } from "../_lib/use-offers";
+import { useHydrateOfferContacts } from "../_lib/use-hydrate-offer-contacts";
 import { useSession } from "../_lib/use-session";
 import { AuthGateNotice } from "./auth-gate-notice";
 import { CompletionCountdown } from "./completion-countdown";
@@ -247,6 +248,11 @@ export function MyOffersPanel() {
   // işe başlayıp başlamadığına bakar (bkz. job-requests.ts#
   // getProviderOfferFilter'ın ikinci parametresi).
   const allOffers = useAllOffers();
+  // "İletişim Bilgilerinin Görünürlüğü" görevi — bkz. use-hydrate-offer-contacts.ts
+  // dosya başlığı. Bu ekranın kendi teklif listesi bir `.map()` içinde
+  // render edildiği için (bkz. aşağısı) hook orada ÇAĞRILAMAZ — bu yüzden
+  // PANEL seviyesinde, TÜM tekliflerle bir kez çağrılır.
+  useHydrateOfferContacts(allOffers, jobs, session);
 
   const [completionTarget, setCompletionTarget] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -379,7 +385,7 @@ export function MyOffersPanel() {
               // İlan görünürlük dışıysa (job undefined) karşı tarafın
               // iletişim bilgisi de gösterilmez — aksi halde ilan bilgisi
               // gizliyken bile telefon/e-posta sızmış olurdu.
-              const revealedContact = job ? getRevealedContactForOffer(session, offer.id) : null;
+              const revealedContact = job ? getRevealedContactForOffer(session, offer.id, job) : null;
               const isLong = offer.description.length > DESCRIPTION_PREVIEW_LENGTH;
               const preview = isLong
                 ? `${offer.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`

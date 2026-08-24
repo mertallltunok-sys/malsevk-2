@@ -182,12 +182,22 @@ async function run() {
     const pageAdmin = await ctxAdmin.newPage();
     await loginAs(pageAdmin, admin.email);
     await pageAdmin.goto(`${APP_ORIGIN}/admin/ilanlar/${jobId}`);
-    await pageAdmin.waitForTimeout(1500);
     const onaylaButton = pageAdmin.getByRole("button", { name: /^Onayla/ });
-    const onaylaVisible = (await onaylaButton.count()) > 0;
-    if (onaylaVisible) {
+    // Sabit uyku yerine GERÇEK görünürlüğü/sonucu bekle — Development ortamı
+    // bu oturum boyunca biriken çok sayıda eski test kaydı taşıyor (temizlik
+    // bu görevin SON aşamasında yapılacak).
+    let onaylaVisible = false;
+    try {
+      await onaylaButton.waitFor({ state: "visible", timeout: 20000 });
+      onaylaVisible = true;
       await onaylaButton.click();
-      await pageAdmin.waitForTimeout(1500);
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        const row = runSql(`select moderation_status from public.jobs where id = '${jobId}';`)[0];
+        if (row?.moderation_status === "approved") break;
+        await pageAdmin.waitForTimeout(1000);
+      }
+    } catch {
+      onaylaVisible = false;
     }
     const moderationRow = runSql(`select moderation_status from public.jobs where id = '${jobId}';`)[0];
     record(
@@ -245,11 +255,17 @@ async function run() {
     const pageAdmin2 = await ctxAdmin2.newPage();
     await loginAs(pageAdmin2, admin.email);
     await pageAdmin2.goto(`${APP_ORIGIN}/admin/ilanlar/${jobId2}`);
-    await pageAdmin2.waitForTimeout(1500);
     const onaylaButton2 = pageAdmin2.getByRole("button", { name: /^Onayla/ });
-    if ((await onaylaButton2.count()) > 0) {
+    try {
+      await onaylaButton2.waitFor({ state: "visible", timeout: 20000 });
       await onaylaButton2.click();
-      await pageAdmin2.waitForTimeout(1500);
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        const row = runSql(`select moderation_status from public.jobs where id = '${jobId2}';`)[0];
+        if (row?.moderation_status === "approved") break;
+        await pageAdmin2.waitForTimeout(1000);
+      }
+    } catch {
+      // Onayla butonu görünmedi — aşağıdaki assertion bunu zaten yansıtacak.
     }
     await ctxAdmin2.close();
 
@@ -287,9 +303,18 @@ async function run() {
     const pageRequesterCheck = await ctxRequesterCheck.newPage();
     await loginAs(pageRequesterCheck, requester.email);
     await pageRequesterCheck.goto(`${APP_ORIGIN}/panel/gelen-teklifler`);
-    await pageRequesterCheck.waitForTimeout(1500);
-    const offerVisibleToRequester = (await pageRequesterCheck.getByText(/15\.000|15000/).count()) > 0
-      || (await pageRequesterCheck.getByText("Capraz cihaz testi", { exact: false }).count()) > 0;
+    // Sabit uyku yerine GERÇEK sonucu bekle — Development ortamı bu oturum
+    // boyunca biriken çok sayıda eski test kaydı taşıyor (temizlik bu görevin
+    // SON aşamasında yapılacak), useAllJobs()/useAllOffers()'ın uzak getirme
+    // round-trip'i sabit 1500ms'den daha uzun sürebilir.
+    let offerVisibleToRequester = false;
+    try {
+      await pageRequesterCheck.getByText(/15\.000|15000/).first().waitFor({ state: "visible", timeout: 20000 });
+      offerVisibleToRequester = true;
+    } catch {
+      offerVisibleToRequester =
+        (await pageRequesterCheck.getByText("Capraz cihaz testi", { exact: false }).count()) > 0;
+    }
     record("8) TEST 9 — Regresyon: teklif, ilan sahibinin 'Gelen Teklifler' ekranında görünüyor", offerVisibleToRequester);
     await ctxRequesterCheck.close();
 

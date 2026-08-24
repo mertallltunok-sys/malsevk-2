@@ -64,9 +64,35 @@ import type { Job } from "./types";
 
 export type JobSyncResult = { ok: true } | { ok: false; error: string };
 
-/** `.env.local`'a eklenecek, `NEXT_PUBLIC_SUPABASE_*` ile AYNI `NEXT_PUBLIC_` önek kuralını izleyen, opsiyonel/varsayılan-kapalı bayrak. */
+/**
+ * DÜZELTME (canlıya hazırlık, "Kritik Senkronizasyon Ayarı" görevi):
+ * `NEXT_PUBLIC_ENABLE_SUPABASE_JOB_SYNC` eskiden bu fonksiyonun TEK kaynağıydı
+ * ve `.env.example`'daki varsayılanı `false`ydu — bu, ilan/teklif/operasyon
+ * yaşam döngüsünün TAMAMINI (ilan oluşturma senkronu, `findJobByIdWithRemoteFallback`
+ * geri dönüşü, `useAllJobs`/`useAllOffers`'ın cihazlar-arası hidratasyonu, ve
+ * offers.ts'teki TÜM `requiresBackendOfferSync()` blokları — kabul/ret/geri
+ * çekme/işe başlama/tamamlama/itiraz/anlaşma sağlanamadı) bu TEK, kolayca
+ * unutulabilir/yanlış bırakılabilir ortam değişkenine bağlıyordu. Gerçek
+ * çapraz-cihaz testleri (bkz. proje raporu) bu yüzden değişken açıkken
+ * (Development) çalışıyor, ama değişken `.env.example`'ın kendi varsayılanıyla
+ * (`false`) hiç set edilmeden yapılacak bir prod deploy'da TÜM bu düzeltmeler
+ * SESSİZCE devre dışı kalıyordu — hiçbir hata/uyarı olmadan, işlemler yerelde
+ * "başarılı" görünmeye devam ederdi.
+ *
+ * `NEXT_PUBLIC_*` değişkenleri build zamanında gömüldüğü için (bir prod
+ * ortamının runtime'da bunu "düzeltmesi" mümkün değildir — yalnızca doğru
+ * değerle YENİDEN BUILD edilmesi gerekir) tek başına bir env-var varsayılanı
+ * değiştirmek bu riski gerçek anlamda kapatmaz; bir sonraki ortam kurulumu
+ * yine aynı hatayı tekrar edebilir. Bu yüzden senkron artık ortam
+ * değişkeninden BAĞIMSIZ, KOŞULSUZ olarak etkin — Faz 2'nin "opt-in, kademeli
+ * rollout" döneminin gerçek amacı zaten buydu, o dönem artık kapandı (bkz.
+ * CLAUDE.md'nin Faz 2-4 doğrulama geçmişi). `NEXT_PUBLIC_ENABLE_SUPABASE_JOB_SYNC`
+ * hâlâ okunuyor ama artık HİÇBİR davranışı belirlemiyor — geriye dönük
+ * uyumluluk/dokümantasyon amaçlı `.env.example`'da bırakıldı, bkz. o dosyadaki
+ * güncellenmiş açıklama.
+ */
 export function isSupabaseJobSyncEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ENABLE_SUPABASE_JOB_SYNC === "true";
+  return true;
 }
 
 type RpcPhoto = {

@@ -413,9 +413,10 @@ async function run() {
     const rejectCard = offerCardByText(pageReject, "Reddedilecek teklif");
     await rejectCard.waitFor({ state: "visible", timeout: 10000 });
     const reddetVisible = await clickSingleClickAction(rejectCard, "Reddet");
-    if (reddetVisible) await pageReject.waitForTimeout(1200);
+    const rejectedRow = reddetVisible
+      ? await pollOfferStatus(offerReject.id, "rejected")
+      : runSql(`select status from public.offers where id = '${offerReject.id}';`)[0];
     await ctxReject.close();
-    const rejectedRow = runSql(`select status from public.offers where id = '${offerReject.id}';`)[0];
     record("2) SENARYO 2 — Temiz/izole context'te teklif reddedildi, backend'e yansıdı", rejectedRow?.status === "rejected", `reddet_butonu_gorundu=${reddetVisible}, status=${rejectedRow?.status}`);
 
     // ============ SENARYO 1 — Farklı cihazda teklif kabulü ============

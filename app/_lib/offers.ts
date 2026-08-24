@@ -17,13 +17,14 @@ import { isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE, JOB_CLOSURE_BLOCKED_ME
 import { isJobModerationApproved } from "./job-moderation";
 import { closeJob as closeJobRecord, deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
 import { isProviderAuthorizedToOfferOnJob } from "./job-visibility";
-import { findJobById, findJobByIdWithRemoteFallback } from "./jobs-lookup";
+import { findJobByIdWithRemoteFallback } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
 import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { isValidCurrency, MAX_OFFER_AMOUNT, hasAtMostTwoDecimals } from "./money";
 import { isTransportationCategory } from "./product-catalog";
 import { hasReachedActiveJobLimit } from "./provider-capacity";
 import { isRecyclingCategory, isRecyclingCommercialDirection } from "./recycling-catalog";
+import { closeJobOnSupabase, deleteJobOnSupabase } from "./supabase-job-lifecycle-sync";
 import {
   acceptOfferOnSupabase,
   confirmCompletionOnSupabase,
@@ -1212,7 +1213,9 @@ export async function deleteJobWithOffers(
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan silebilir." };
   }
 
-  const job = findJobById(jobId);
+  // "İlan Kapatma ve Silme" görevi — offers.ts'in geri kalanındaki AYNI
+  // gerekçe: ilan sahibi bu ilanı BAŞKA bir cihazda oluşturmuş olabilir.
+  const job = await findJobByIdWithRemoteFallback(jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1229,6 +1232,18 @@ export async function deleteJobWithOffers(
       ok: false,
       error: "Bu ilana bağlı aktif veya tamamlanmış bir iş bulunduğu için ilan silinemez.",
     };
+  }
+
+  // "İlan Kapatma ve Silme" görevi — bloklayan sunucu senkronu, yerel
+  // silmeden ÖNCE (bkz. offers.ts'teki requiresBackendOfferSync() bloklarıyla
+  // AYNI ilke). `delete_job` RPC'si (migration 0014) zaten VARDI ama istemci
+  // hiç çağırmıyordu — silinen bir ilan yalnızca BU cihazda kayboluyor,
+  // başka bir cihaz/hesap onu hâlâ aktif görmeye devam ediyordu.
+  if (requiresBackendOfferSync()) {
+    const syncResult = await deleteJobOnSupabase(jobId);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const jobDeleteResult = await deleteJobRecord(session, jobId);
@@ -1306,7 +1321,8 @@ export async function closeJobListing(
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan kapatabilir." };
   }
 
-  const job = findJobById(jobId);
+  // "İlan Kapatma ve Silme" görevi — deleteJobWithOffers'taki AYNI gerekçe.
+  const job = await findJobByIdWithRemoteFallback(jobId);
   if (!job || job.requesterId !== session.id) {
     return { ok: false, error: "Bu ilan üzerinde işlem yapma yetkiniz yok." };
   }
@@ -1318,6 +1334,18 @@ export async function closeJobListing(
   const all = readAllOffersSnapshot();
   if (isJobClosedToNewOffers(jobId, all)) {
     return { ok: false, error: JOB_CLOSURE_BLOCKED_MESSAGE };
+  }
+
+  // "İlan Kapatma ve Silme" görevi — deleteJobWithOffers'taki AYNI ilke:
+  // bloklayan sunucu senkronu, yerel kapatmadan ÖNCE. `close_job` RPC'si
+  // (migration 0014) zaten VARDI ama istemci hiç çağırmıyordu — kapatılan
+  // bir ilan yalnızca BU cihazda "kapalı" görünüyor, başka bir cihazdaki
+  // hizmet veren onu hâlâ aktif ilan listesinde görmeye devam ediyordu.
+  if (requiresBackendOfferSync()) {
+    const syncResult = await closeJobOnSupabase(jobId, reason);
+    if (!syncResult.ok) {
+      return { ok: false, error: syncResult.error };
+    }
   }
 
   const closeResult = closeJobRecord(session, jobId, reason);
