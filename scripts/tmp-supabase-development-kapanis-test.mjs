@@ -54,12 +54,32 @@ async function pollSql(sql, isReady, timeoutMs = 12000) {
 function freshClient() {
   return createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 }
+
+// GÖREV 1 ("Testlerin Dosya Bırakmasını Engelle") — sign-in sayısını en aza
+// indirmek (rate-limit'e çarpmayı azaltmak) VE temizlik aşamasında HER
+// kullanıcı için YENİDEN oturum açmadan (bu, önceki 180-yetim-dosya
+// olayının kök nedeniydi — geç, toplu, tek seferlik bir temizlik denemesi
+// rate limit'e takılıp kullanıcı zaten silindiği için dosyalar sonsuza
+// kadar erişilemez kaldı) doğrudan AYNI, ZATEN kimliği doğrulanmış
+// istemciyi kullanabilmek için — her e-posta için TEK bir istemci burada
+// önbelleğe alınır, tüm çağıranlar (test mantığı VE temizlik) AYNI
+// nesneyi paylaşır.
+const clientCache = new Map();
 async function clientAs(email) {
+  const cached = clientCache.get(email);
+  if (cached) return cached;
   const client = freshClient();
   const { error } = await client.auth.signInWithPassword({ email, password: PASSWORD });
   if (error) throw new Error(`signInWithPassword(${email}) failed: ${error.message}`);
+  clientCache.set(email, client);
   return client;
 }
+
+// GÖREV 1 — bu koşunun oluşturduğu HER kullanıcı burada izlenir; temizlik
+// yalnızca bu listedeki kullanıcıları (ve onların Storage klasörlerini/DB
+// satırlarını) hedefler — "yalnızca ilgili testin oluşturduğu dosyalar"
+// gereksinimi.
+const createdUsers = [];
 
 const stamp = Date.now();
 async function createUser(label, role, { skipComplete = false, companyType = "bireysel", mersisNo } = {}) {
@@ -71,6 +91,13 @@ async function createUser(label, role, { skipComplete = false, companyType = "bi
   if (!data.session) {
     runSql(`update auth.users set email_confirmed_at = now(), confirmed_at = now() where id = '${userId}';`);
   }
+  // signUp() zaten bu istemciyi kimliği doğrulanmış hâle getirdi (ya da
+  // e-posta onayı gerektiriyorsa bir sonraki gerçek signInWithPassword bunu
+  // yapacak) — bu istemciyi HEMEN önbelleğe alarak, bu e-posta için
+  // clientAs()'ın HER SONRAKİ çağrısı (test mantığı ve temizlik dahil)
+  // YENİ bir sign-in yapmadan bunu yeniden kullanır.
+  clientCache.set(email, client);
+  createdUsers.push({ id: userId, email });
   if (!skipComplete) {
     const { error: crError } = await client.rpc("complete_registration", {
       p_role: role, p_full_name: `DKT ${label}`, p_phone: "+905551110099",
@@ -80,6 +107,133 @@ async function createUser(label, role, { skipComplete = false, companyType = "bi
     if (crError) throw new Error(`complete_registration(${label}) failed: ${crError.message}`);
   }
   return { id: userId, email };
+}
+
+async function removeAllUnderFolder(client, bucket, folder) {
+  const { data: topEntries, error: listErr } = await client.storage.from(bucket).list(folder, { limit: 1000 });
+  if (listErr) throw new Error(`list(${bucket}/${folder}) failed: ${listErr.message}`);
+  if (!topEntries) return;
+  const filesAtTop = topEntries.filter((e) => e.id !== null).map((e) => `${folder}/${e.name}`);
+  const subfolders = topEntries.filter((e) => e.id === null).map((e) => e.name);
+  if (filesAtTop.length > 0) {
+    const { error } = await client.storage.from(bucket).remove(filesAtTop);
+    if (error) throw new Error(`remove(${bucket}) failed: ${error.message}`);
+  }
+  for (const sub of subfolders) {
+    const { data: subEntries } = await client.storage.from(bucket).list(`${folder}/${sub}`, { limit: 1000 });
+    const files = (subEntries ?? []).map((e) => `${folder}/${sub}/${e.name}`);
+    if (files.length > 0) {
+      const { error } = await client.storage.from(bucket).remove(files);
+      if (error) throw new Error(`remove(${bucket}/${sub}) failed: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * GÖREV 1 — TEK, kapsamlı temizlik fonksiyonu. run()'ın try/finally'sinden
+ * çağrılır (HATA olsun olmasın çalışır). Sıra kasıtlı:
+ *   1) Bu koşunun kullanıcılarına ait Storage nesne sayısı (ÖNCESİ) ölçülür.
+ *   2) Her kullanıcı için KENDİ (önbellekteki, YENİDEN sign-in gerektirmeyen)
+ *      istemcisiyle job-photos/provider-logos klasörü RLS ile silinir.
+ *   3) BAŞARISIZ olanlar (rate limit vb.) için birkaç kez, artan bekleme
+ *      süreleriyle YENİDEN denenir.
+ *   4) DB satırları (FK-güvenli sırayla) TÜM kullanıcılar için silinir —
+ *      bunun Storage'la bir ilişkisi yok, güvenle her zaman yapılabilir.
+ *   5) auth.users SADECE Storage temizliği nihayetinde BAŞARILI olan
+ *      kullanıcılar için silinir — "Storage dosyaları, ilgili kullanıcı
+ *      hesabı silinmeden ÖNCE silinmeli" gereksinimi burada YAPISAL olarak
+ *      zorlanıyor: temizlenemeyen bir kullanıcının hesabı silinMEZ, bir
+ *      SONRAKİ koşuda (ya da elle) tekrar denenebilir durumda kalır —
+ *      önceki "kullanıcı zaten silindiği için dosyalar sonsuza kadar
+ *      erişilemez" hatası yapısal olarak imkânsız hâle gelir.
+ *   6) Storage nesne sayısı (SONRASI) tekrar ölçülüp ÖNCESİ ile karşılaştırılır.
+ */
+async function cleanupEverything() {
+  console.log("\n=== TEMİZLİK (try/finally — testler başarısız olsa da çalışır) ===");
+  if (createdUsers.length === 0) {
+    console.log("Bu koşu hiç kullanıcı oluşturmadı, temizlenecek bir şey yok.");
+    return;
+  }
+  const idList = createdUsers.map((u) => `'${u.id}'`).join(",");
+  const countObjects = () =>
+    runSql(
+      `select count(*) as n from storage.objects where bucket_id in ('job-photos','provider-logos') and (storage.foldername(name))[1] in (${idList});`,
+    )[0]?.n ?? 0;
+
+  const beforeCount = countObjects();
+  console.log(`Bu koşunun ${createdUsers.length} kullanıcısına ait Storage nesnesi (temizlik ÖNCESİ): ${beforeCount}`);
+
+  async function tryCleanUser(user) {
+    const client = await clientAs(user.email);
+    await removeAllUnderFolder(client, "job-photos", user.id);
+    await removeAllUnderFolder(client, "provider-logos", user.id);
+  }
+
+  let pending = [...createdUsers];
+  for (let attempt = 0; attempt < 4 && pending.length > 0; attempt += 1) {
+    if (attempt > 0) {
+      const waitMs = attempt * 10000;
+      console.log(`  ${pending.length} kullanıcı için Storage temizliği yeniden deneniyor (deneme ${attempt + 1}/4, ${waitMs / 1000}sn bekleme sonrası)...`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    const stillPending = [];
+    for (const user of pending) {
+      try {
+        await tryCleanUser(user);
+      } catch (e) {
+        stillPending.push(user);
+        if (attempt === 3) console.log(`  (uyarı) ${user.email}: ${e.message}`);
+      }
+    }
+    pending = stillPending;
+  }
+  const cleanedCount = createdUsers.length - pending.length;
+  console.log(`${cleanedCount}/${createdUsers.length} kullanıcı için Storage temizliği başarılı.`);
+
+  const afterCount = countObjects();
+  console.log(`Bu koşunun kullanıcılarına ait Storage nesnesi (temizlik SONRASI): ${afterCount}`);
+  console.log(`Storage nesne sayısı karşılaştırması: ${beforeCount} -> ${afterCount} (${beforeCount - afterCount} nesne silindi).`);
+
+  console.log("--- Veritabanı satırları FK-güvenli sırayla siliniyor (TÜM kullanıcılar için — Storage'dan bağımsız) ---");
+  runSql(`delete from public.job_activity_events where job_id in (select id from public.jobs where requester_id in (${idList}));`);
+  runSql(`delete from public.offer_status_history where offer_id in (select id from public.offers where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList}));`);
+  runSql(`delete from public.notifications where offer_id in (select id from public.offers where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList}));`);
+  runSql(`delete from public.ratings where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList}) or rater_id in (${idList});`);
+  runSql(`delete from public.offers where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList});`);
+  runSql(`delete from public.notifications where job_id in (select id from public.jobs where requester_id in (${idList}));`);
+  runSql(`delete from public.recently_viewed_jobs where job_id in (select id from public.jobs where requester_id in (${idList}));`);
+  runSql(`update public.jobs set republished_from_job_id = null, republished_to_job_id = null where requester_id in (${idList});`);
+  runSql(`delete from public.jobs where requester_id in (${idList});`);
+  runSql(`delete from public.operations where requester_id in (${idList});`);
+  runSql(`delete from public.provider_document_reviews where provider_id in (${idList});`);
+  runSql(`delete from public.provider_documents where provider_id in (${idList});`);
+  runSql(`delete from public.provider_badges where provider_id in (${idList});`);
+  runSql(`delete from public.provider_recycling_waste_code_authorizations where provider_id in (${idList});`);
+  runSql(`delete from public.provider_storage_risk_authorizations where provider_id in (${idList});`);
+  runSql(`delete from public.provider_service_authorizations where provider_id in (${idList});`);
+
+  console.log("--- auth.users siliniyor (yalnızca Storage temizliği BAŞARILI olan kullanıcılar) ---");
+  const stillFailedIds = new Set(pending.map((u) => u.id));
+  let deletedCount = 0;
+  for (const user of createdUsers) {
+    if (stillFailedIds.has(user.id)) {
+      console.log(`  (ATLANDI) ${user.email} (${user.id}) — Storage temizliği başarısız olduğu için hesap SİLİNMEDİ (yetim dosya oluşmasın diye); bu betik yeniden çalıştırılarak tekrar denenebilir.`);
+      continue;
+    }
+    try {
+      runSql(`delete from auth.users where id = '${user.id}';`);
+      deletedCount += 1;
+    } catch (e) {
+      console.error(`  HATA: ${user.email} silinemedi: ${e.message}`);
+    }
+  }
+  console.log(`${deletedCount}/${createdUsers.length} kullanıcı hesabı silindi.`);
+
+  if (pending.length > 0) {
+    console.log(`UYARI: ${pending.length} kullanıcının hesabı, Storage temizliği başarısız olduğu için BİLEREK silinmedi — yetim dosya oluşturmaktansa hesabı elde tutmak tercih edildi. Bu kullanıcıların id'leri: ${pending.map((u) => u.id).join(", ")}`);
+  } else {
+    console.log("Bu koşunun TÜM kullanıcıları ve Storage nesneleri temizlendi.");
+  }
 }
 
 async function loginAs(page, email) {
@@ -204,6 +358,21 @@ async function approveJobAsAdmin(jobId) {
 }
 
 async function run() {
+  // GÖREV 1 — test başlangıcındaki Storage nesne sayısı. Bu koşunun kendi
+  // kullanıcıları henüz hiç oluşturulmadığı için anlamlı bir taban çizgisi
+  // yalnızca "malsevk-dkt-%" e-posta örüntüsüyle KENDİ önceki bir koşusundan
+  // kalmış olabilecek yetim kullanıcı/dosya olup olmadığını görmek içindir
+  // (normalde 0 olmalı — sıfır DEĞİLSE önceki bir koşu tam temizlenmemiş
+  // demektir, bu betiğin KENDİSİ o eski kullanıcıları da göz ardı etmez).
+  const preExistingUserIds = runSql(`select id from auth.users where email ilike 'malsevk-dkt-%@gmail.com';`).map((r) => r.id);
+  const startCount =
+    preExistingUserIds.length === 0
+      ? 0
+      : runSql(
+          `select count(*) as n from storage.objects where bucket_id in ('job-photos','provider-logos') and (storage.foldername(name))[1] in (${preExistingUserIds.map((id) => `'${id}'`).join(",")});`,
+        )[0]?.n ?? 0;
+  console.log(`Test BAŞLANGICINDA (bu betiğin önceki bir koşusundan kalmış olabilecek) Storage nesnesi: ${startCount}${preExistingUserIds.length > 0 ? ` (${preExistingUserIds.length} eski kullanıcıya ait)` : ""}`);
+
   const browser = await chromium.launch();
   try {
     // ================================================================
@@ -775,8 +944,21 @@ async function run() {
       console.log("Başarısız: " + results.filter((r) => !r.pass).map((r) => r.name).join(", "));
       process.exitCode = 1;
     }
+  } catch (error) {
+    // GÖREV 1 — test AKIŞI ortasında bir istisna fırlasa bile (ör. bir
+    // Playwright zaman aşımı) finally bloğu YİNE de çalışır; burada hatayı
+    // yeniden fırlatmadan önce sadece logluyoruz ki finally'nin kendisi
+    // (temizlik) HER ZAMAN çalışsın ve süreç doğru çıkış koduyla sonlansın.
+    console.error("HATA (test akışı):", error);
+    process.exitCode = 1;
   } finally {
     await browser.close();
+    try {
+      await cleanupEverything();
+    } catch (cleanupError) {
+      console.error("HATA (temizlik):", cleanupError);
+      process.exitCode = 1;
+    }
   }
 }
 

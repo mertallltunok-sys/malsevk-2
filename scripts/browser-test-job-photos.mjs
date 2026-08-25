@@ -4,18 +4,47 @@
 // sistemi için gerçek tarayıcı testleri (TEST 1-10 + mobil TEST 10 + HEIC
 // TEST 11/12 uçtan uca UI akışı). Ön koşul: `npm run dev`
 // http://localhost:3000 üzerinde çalışıyor olmalı.
+//
+// "Son Açıkları Kapat" GÖREV 5 düzeltmesi: bu betik eskiden SABİT, artık
+// Supabase Auth'ta var olmayan localStorage-seed hesapları (zeynep@test.com/
+// mert@test.com) kullanıyordu (bkz. browser-test-regression.mjs'deki aynı
+// kök neden notu). Artık KENDİ gerçek Supabase Auth hesaplarını (signUp +
+// complete_registration) oluşturuyor. Ayrıca: job-store.ts#createJob artık
+// HER yeni ilanı `moderationStatus: "pending_review"` ile yazıyor (bkz.
+// CLAUDE.md "İlan Moderasyonu") — TEST 9 provider'ın ilanı görebilmesini
+// beklediği için, o ilan admin tarafından onaylanmış GİBİ işaretlenmeli
+// (doğrudan localStorage'a admin RPC'si taklit edilerek yazılır, gerçek bir
+// admin oturumu gerekmez — bkz. aşağıdaki approveJobLocally).
 
 import assert from "node:assert/strict";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
 const BASE_URL = "http://localhost:3000";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const PASSWORD = "TestSifre2026!";
 const FIX = (name) => path.join(os.tmpdir(), name);
 const PROGRESS_LOG = path.join(os.tmpdir(), "browser-test-job-photos-progress.log");
 writeFileSync(PROGRESS_LOG, "");
 let passed = 0;
+
+if (!SUPABASE_URL || !/trfnmpihcnriqgikglpu/.test(SUPABASE_URL)) {
+  console.error(`[browser-test-job-photos] FAIL: beklenen Development projeyi işaret etmiyor: ${SUPABASE_URL}`);
+  process.exit(1);
+}
+
+const scratchDir = mkdtempSync(path.join(os.tmpdir(), "malsevk-phototest-"));
+function runSql(query) {
+  const file = path.join(scratchDir, `q-${Date.now()}-${Math.random().toString(36).slice(2)}.sql`);
+  writeFileSync(file, query, "utf8");
+  const out = execSync(`npx supabase db query --linked --file ${file} --output json`, { encoding: "utf8" });
+  return JSON.parse(out).rows ?? [];
+}
 
 function ok(description) {
   passed++;
@@ -24,12 +53,67 @@ function ok(description) {
   appendFileSync(PROGRESS_LOG, line + "\n");
 }
 
+async function createRealTestUser(label, role) {
+  const email = `malsevk-phototest-${label}-${Date.now()}@gmail.com`;
+  const cli = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+  const { data, error } = await cli.auth.signUp({ email, password: PASSWORD });
+  if (error) throw new Error(`signUp(${label}) failed: ${error.message}`);
+  const userId = data.user.id;
+  if (!data.session) {
+    runSql(`update auth.users set email_confirmed_at = now(), confirmed_at = now() where id = '${userId}';`);
+  }
+  const { error: crError } = await cli.rpc("complete_registration", {
+    p_role: role, p_full_name: `Foto Test ${label}`, p_phone: "+905551110099",
+    p_company_name: `Foto Test Firma ${label}`, p_company_type: "bireysel", p_province: "Kocaeli", p_district: "Dilovası",
+  });
+  if (crError) throw new Error(`complete_registration(${label}) failed: ${crError.message}`);
+  return { id: userId, email, client: cli };
+}
+
+// GÖREV 1 kök neden düzeltmesi: `npx supabase storage rm` (CLI/anon yol)
+// bu projede doğrulanmış şekilde işlevsiz (service_role'ün public şema
+// REST erişimi olmadığı platform kısıtlamasıyla tutarlı, sessizce
+// `{"deleted":[]}` döner). Ama Storage RLS (job_photos_bucket_delete_own_folder)
+// SAHİBİNİN KENDİ oturumuna silme izni veriyor — bu yüzden hesap silinmeden
+// ÖNCE, o hesabın KENDİ signUp() istemcisiyle (hâlâ oturumu açık) kendi
+// klasörünü siliyoruz. Hesap zaten silinmişse (ör. daha önceki hatalı bir
+// çalıştırmadan kalan yetim) bu artık mümkün değildir — GÖREV 2'nin
+// karşılaştığı, kalıcı olarak engellenmiş 180 nesnelik durum tam olarak budur.
+async function deleteOwnStorageFolder(client, userId) {
+  const jobsBucketObjects = runSql(`select name from storage.objects where bucket_id = 'job-photos' and name like '${userId}/%';`);
+  if (jobsBucketObjects.length > 0) {
+    const { error } = await client.storage.from("job-photos").remove(jobsBucketObjects.map((o) => o.name));
+    if (error) throw new Error(`job-photos Storage temizliği başarısız: ${error.message}`);
+  }
+  return jobsBucketObjects.length;
+}
+
 async function login(page, email, password) {
   await page.goto(`${BASE_URL}/giris-yap?redirect=/hizmet-talebi-olustur`);
   await page.locator('input[type="email"]').fill(email);
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole("button", { name: "Giriş Yap" }).click();
   await page.waitForURL(`${BASE_URL}/hizmet-talebi-olustur`);
+}
+
+// job-store.ts#createJob her yeni ilanı moderationStatus: "pending_review" ile
+// yazar (bkz. CLAUDE.md "İlan Moderasyonu") — TEST 9'un provider'ın ilanı
+// görebilmesi için bu ilan onaylanmış olmalı. Gerçek bir admin oturumu/RPC
+// akışı kurmak yerine, TAM OLARAK admin onayının bu tarayıcıda yapacağı yerel
+// yamayı (job-store.ts#applyAdminModerationDecision'ın kendisi) doğrudan
+// localStorage üzerinde uyguluyoruz — aynı `malsevk.jobs.v1` anahtarı,
+// approved durumu.
+async function approveJobLocally(page, jobId) {
+  await page.evaluate((id) => {
+    const raw = window.localStorage.getItem("malsevk.jobs.v1");
+    if (!raw) return;
+    const jobs = JSON.parse(raw);
+    const job = jobs.find((j) => j.id === id);
+    if (!job) return;
+    job.moderationStatus = "approved";
+    job.moderationReviewedAt = new Date().toISOString();
+    window.localStorage.setItem("malsevk.jobs.v1", JSON.stringify(jobs));
+  }, jobId);
 }
 
 // DÜZELTME (Y7, veritabanı geçişi öncesi denetim): bu yardımcı, MALSEVK'in
@@ -102,6 +186,22 @@ async function waitForPhotosReady(page, expectedCount) {
 }
 
 async function main() {
+  const storageCountBefore = runSql(
+    `select count(*) as n from storage.objects where bucket_id = 'job-photos';`,
+  )[0]?.n ?? 0;
+  console.log(`Başlangıç Storage nesne sayısı (job-photos): ${storageCountBefore}`);
+
+  const requester = await createRealTestUser("req", "hizmet-alan");
+  const provider = await createRealTestUser("prov", "hizmet-veren");
+  // job-detail-content.tsx bir ilanı doğrudan URL ile bile yalnızca
+  // useIsJobVisibleToSession true dönerse gösterir (bkz. dosya başlığı) —
+  // fillBaseFormFields "vinc-operatoru" kategorisini kullanıyor, provider bu
+  // kategoriye açıkça yetkilendirilmeden TEST 9 ilan sayfasını hiç göremez.
+  runSql(
+    `insert into public.provider_service_authorizations (provider_id, service_category_id, authorized_at) values ('${provider.id}', 'vinc-operatoru', now()) on conflict do nothing;`,
+  );
+  console.log(`requester=${requester.email} provider=${provider.email} (vinc-operatoru için yetkilendirildi)`);
+
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -120,14 +220,50 @@ async function main() {
     await runTests();
   } finally {
     await browser.close();
+    console.log("--- Test hesapları temizleniyor ---");
+    try {
+      // Bu test formu gerçek UI'dan yayınladığı için oluşturulan ilanlar
+      // job-request-form.tsx üzerinden best-effort Supabase'e de senkronlanmış
+      // olabilir (bkz. CLAUDE.md "Faz 2") — requester hesabı silinmeden önce
+      // FK-safe sırayla temizlenir (bkz. job_activity_events/jobs_requester_id_fkey).
+      const deletedStorageCount = await deleteOwnStorageFolder(requester.client, requester.id);
+      console.log(`Storage temizliği: ${deletedStorageCount} nesne (requester kendi oturumuyla) silindi.`);
+      const jobRows = runSql(`select id from public.jobs where requester_id = '${requester.id}';`);
+      for (const { id: jobId } of jobRows) {
+        runSql(`delete from public.job_activity_events where job_id = '${jobId}';`);
+        runSql(`delete from public.notifications where job_id = '${jobId}';`);
+        runSql(`delete from public.offers where job_id = '${jobId}';`);
+        runSql(`delete from public.job_photos where job_id = '${jobId}';`);
+        runSql(`delete from public.jobs where id = '${jobId}';`);
+      }
+      runSql(`delete from public.provider_service_authorizations where provider_id = '${provider.id}';`);
+    } catch (e) {
+      console.error(`  (uyarı) senkronlanmış ilanlar/yetkiler temizlenemedi: ${e.message}`);
+    }
+    for (const id of [requester.id, provider.id]) {
+      try {
+        runSql(`delete from auth.users where id = '${id}';`);
+      } catch (e) {
+        console.error(`  (uyarı) ${id} temizlenemedi: ${e.message}`);
+      }
+    }
+    const remaining = runSql(`select count(*) as n from auth.users where email ilike 'malsevk-phototest-%@gmail.com';`)[0]?.n ?? 0;
+    console.log(`Temizlik sonrası kalan test hesabı: ${remaining}`);
+    const storageCountAfter = runSql(
+      `select count(*) as n from storage.objects where bucket_id = 'job-photos';`,
+    )[0]?.n ?? 0;
+    console.log(`Bitiş Storage nesne sayısı (job-photos): ${storageCountAfter} (başlangıç: ${storageCountBefore})`);
+    if (storageCountAfter > storageCountBefore) {
+      console.error(`  UYARI: bu çalıştırma ${storageCountAfter - storageCountBefore} yetim Storage nesnesi bırakmış olabilir.`);
+    }
   }
 
   console.log(`\n[browser-test-job-photos] ${passed}/${passed} test geçti.`);
 
   async function runTests() {
   console.log("[browser-test-job-photos] Hizmet Alan olarak giriş yapılıyor...");
-  await login(page, "zeynep@test.com", "Zeynep1!");
-  ok("Giriş başarılı (zeynep@test.com / hizmet-alan)");
+  await login(page, requester.email, PASSWORD);
+  ok(`Giriş başarılı (${requester.email} / hizmet-alan, gerçek Supabase Auth hesabı)`);
 
   // TEST 1: Fotoğraf yüklemeden formu göndermeye çalış
   await fillBaseFormFields(page, "1");
@@ -147,11 +283,16 @@ async function main() {
   await assert.doesNotReject(page.getByText("1 / 10 fotoğraf yüklendi").waitFor({ state: "visible" }));
   await publishJob(page);
   const firstJobUrl = page.url();
+  const firstJobId = firstJobUrl.split("/ilanlar/")[1];
   await assert.doesNotReject(page.locator("img[alt*=' - fotoğraf ']").waitFor({ state: "visible", timeout: 10000 }));
+  // TEST 9 (aşağıda) provider'ın bu ilanı görebilmesini bekliyor — yeni
+  // ilanlar artık pending_review ile başlıyor (bkz. dosya başlığı notu),
+  // bu yüzden admin onayı burada yerel olarak taklit edilir.
+  await approveJobLocally(page, firstJobId);
   ok("TEST 2: 1 geçerli fotoğrafla ilan başarıyla oluşturuldu, detay sayfasında kapak fotoğrafı görünüyor");
 
   // TEST 3: Birden fazla fotoğraf, sıralama değiştir, birini sil
-  await login(page, "zeynep@test.com", "Zeynep1!");
+  await login(page, requester.email, PASSWORD);
   await fillBaseFormFields(page, "3");
   await page.setInputFiles('input[type="file"]', [
     FIX("fixture-valid-1.jpg"),
@@ -212,7 +353,7 @@ async function main() {
   ok("TEST 3: Çoklu fotoğraf yüklendi, sıralandı (valid-2, valid-1), valid-3 silindi; son sıra doğru kaydedildi");
 
   // TEST 4: 10'dan fazla fotoğraf yüklemeye çalış
-  await login(page, "zeynep@test.com", "Zeynep1!");
+  await login(page, requester.email, PASSWORD);
   await fillBaseFormFields(page, "4");
   const elevenDistinctFiles = Array.from({ length: 11 }, (_, i) => FIX(`fixture-valid-${i + 1}.jpg`));
   await page.setInputFiles('input[type="file"]', elevenDistinctFiles);
@@ -223,7 +364,7 @@ async function main() {
   ok(`TEST 4: 11 dosya seçilince en fazla ${cardCountAfter11} kabul edildi (≤10), Türkçe uyarı gösterildi`);
 
   // TEST 5: 10MB üzeri dosya
-  await login(page, "zeynep@test.com", "Zeynep1!");
+  await login(page, requester.email, PASSWORD);
   await fillBaseFormFields(page, "5");
   await page.setInputFiles('input[type="file"]', [FIX("fixture-oversized.jpg")]);
   await assert.doesNotReject(
@@ -242,7 +383,22 @@ async function main() {
   assert.equal(cardCountAfterFake, 0, "Sahte dosya kart olarak eklenmemeli");
   ok("TEST 6: Gerçek içeriği resim olmayan sahte dosya (.jpg uzantılı düz metin) reddedildi");
 
-  // TEST 11/12 (UI akışı): Gerçek HEIC dosyası yükle, işlensin, önizlensin
+  // TEST 11/12 (UI akışı): Gerçek HEIC dosyası yükle, işlensin, önizlensin.
+  // NOT: `%TEMP%\sample-test.heic` bu repoda hiçbir betik tarafından
+  // üretilmiyor (generate-photo-test-fixtures.mjs de dahil) — gerçek bir HEIC
+  // konteynerini sıfırdan sentezlemek pratik değil, bu yüzden bu tek dosya
+  // önceden bir insan tarafından o yola elle kopyalanmış olmalı. Yoksa bu
+  // alt testi sahte veriyle "geçmiş" GÖSTERMEK yerine açıkça ATLA.
+  const heicFixturePath = FIX("sample-test.heic");
+  let heicFixtureExists = true;
+  try {
+    await (await import("node:fs/promises")).stat(heicFixturePath);
+  } catch {
+    heicFixtureExists = false;
+  }
+  if (!heicFixtureExists) {
+    console.log(`  ⚠ TEST 11/12 ATLANDI: ${heicFixturePath} bulunamadı (bu ortamda önceden yerleştirilmiş gerçek bir HEIC örneği yok, repo'daki hiçbir betik bunu üretmiyor)`);
+  } else {
   await page.setInputFiles('input[type="file"]', [FIX("sample-test.heic")]);
   await waitForPhotosReady(page, 1);
   const heicPreviewImg = page.locator("img").first();
@@ -255,14 +411,15 @@ async function main() {
   const detailNaturalWidth = await detailCoverImg.evaluate((img) => img.naturalWidth);
   assert.ok(detailNaturalWidth > 0, "İlan detayında HEIC'ten dönüştürülen fotoğraf açılmadı");
   ok("TEST 11/12: Gerçek HEIC fotoğraf yüklendi, önizlendi, ilan detayında doğru şekilde açıldı");
+  }
 
   // TEST 9: Hizmet Veren hesabıyla ilan detayını aç, fotoğrafları gör, düzenleme kontrolü olmasın
   // NOT: localStorage temizlenmez — bu, zeynep'in daha önce oluşturduğu ilan
   // kayıtlarını (malsevk.jobs.v1) da silerdi. Giriş yapmak zaten oturum
   // anahtarının üzerine yazar, başka bir temizliğe gerek yoktur.
   await page.goto(`${BASE_URL}/giris-yap`);
-  await page.locator('input[type="email"]').fill("mert@test.com");
-  await page.locator('input[type="password"]').fill("Mert123!");
+  await page.locator('input[type="email"]').fill(provider.email);
+  await page.locator('input[type="password"]').fill(PASSWORD);
   await page.getByRole("button", { name: "Giriş Yap" }).click();
   await page.waitForURL(BASE_URL + "/");
   await page.goto(firstJobUrl);
@@ -282,7 +439,7 @@ async function main() {
 
   // TEST 10: Mobil responsive (2 sütun önizleme + yükleme akışı)
   await page.setViewportSize({ width: 390, height: 844 });
-  await login(page, "zeynep@test.com", "Zeynep1!");
+  await login(page, requester.email, PASSWORD);
   await fillBaseFormFields(page, "mobil");
   await page.setInputFiles('input[type="file"]', [FIX("fixture-valid-1.jpg"), FIX("fixture-valid-2.jpg")]);
   await waitForPhotosReady(page, 2);

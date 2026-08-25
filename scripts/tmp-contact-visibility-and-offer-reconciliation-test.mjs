@@ -104,7 +104,71 @@ async function createUser(label, role) {
     p_district: "Gebze",
   });
   if (crError) throw new Error(`complete_registration(${label}) failed: ${crError.message}`);
+  createdUserIds.push(userId);
   return { id: userId, email };
+}
+
+// "Son Açıkları Kapat" GÖREV 1 düzeltmesi: bu betik başlangıçta hiç cleanup
+// yapmıyordu (finally yalnızca tarayıcıyı kapatıyordu) — 8 test hesabı ve
+// bunların gerçek Storage nesneleri (job-photos) kalıcı olarak birikiyordu.
+// `npx supabase storage rm` (CLI/anon yol) bu projede doğrulanmış şekilde
+// işlevsiz; Storage RLS (job_photos_bucket_delete_own_folder) yalnızca
+// SAHİBİNİN KENDİ oturumuna silme izni veriyor — bu yüzden hesap silinmeden
+// ÖNCE, sahibinin kendi (clientAs ile yeniden açılan) oturumuyla kendi
+// klasörü siliniyor.
+const createdUserIds = [];
+async function cleanupAllTestData() {
+  console.log("--- Test hesapları ve Storage nesneleri temizleniyor ---");
+  const storageBefore = runSql(`select count(*) as n from storage.objects where bucket_id in ('job-photos', 'provider-logos');`)[0]?.n ?? 0;
+  for (const userId of createdUserIds) {
+    try {
+      const row = runSql(`select email from auth.users where id = '${userId}';`)[0];
+      if (!row) continue;
+      const client = await clientAs(row.email);
+      for (const bucket of ["job-photos", "provider-logos"]) {
+        const objects = runSql(`select name from storage.objects where bucket_id = '${bucket}' and name like '${userId}/%';`);
+        if (objects.length > 0) {
+          await client.storage.from(bucket).remove(objects.map((o) => o.name));
+        }
+      }
+    } catch (e) {
+      console.error(`  (uyarı) ${userId} Storage temizliği başarısız: ${e.message}`);
+    }
+  }
+  const idList = createdUserIds.map((id) => `'${id}'`).join(",");
+  if (idList) {
+    try {
+      runSql(`delete from public.job_activity_events where job_id in (select id from public.jobs where requester_id in (${idList}));`);
+      runSql(`delete from public.offer_status_history where offer_id in (select id from public.offers where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList}));`);
+      runSql(`delete from public.notifications where offer_id in (select id from public.offers where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList}));`);
+      runSql(`delete from public.ratings where provider_id in (${idList}) or rater_id in (${idList});`);
+      runSql(`delete from public.offers where job_id in (select id from public.jobs where requester_id in (${idList})) or provider_id in (${idList});`);
+      runSql(`delete from public.notifications where job_id in (select id from public.jobs where requester_id in (${idList}));`);
+      runSql(`delete from public.recently_viewed_jobs where user_id in (${idList});`);
+      runSql(`delete from public.job_photos where job_id in (select id from public.jobs where requester_id in (${idList}));`);
+      runSql(`update public.jobs set republished_from_job_id = null, republished_to_job_id = null where requester_id in (${idList});`);
+      runSql(`delete from public.jobs where requester_id in (${idList});`);
+      runSql(`delete from public.provider_document_reviews where admin_id in (${idList});`);
+      runSql(`delete from public.provider_documents where provider_id in (${idList});`);
+      runSql(`delete from public.provider_badges where provider_id in (${idList});`);
+      runSql(`delete from public.provider_service_authorizations where provider_id in (${idList});`);
+      runSql(`delete from public.provider_profiles where user_id in (${idList});`);
+      runSql(`delete from public.provider_services where provider_id in (${idList});`);
+    } catch (e) {
+      console.error(`  (uyarı) DB satırları temizlenemedi: ${e.message}`);
+    }
+  }
+  for (const userId of createdUserIds) {
+    try {
+      runSql(`delete from auth.users where id = '${userId}';`);
+    } catch (e) {
+      console.error(`  (uyarı) auth.users ${userId} silinemedi: ${e.message}`);
+    }
+  }
+  const remainingUsers = runSql(`select count(*) as n from auth.users where email ilike 'malsevk-contactviz-%';`)[0]?.n ?? 0;
+  const storageAfter = runSql(`select count(*) as n from storage.objects where bucket_id in ('job-photos', 'provider-logos');`)[0]?.n ?? 0;
+  console.log(`Temizlik sonrası kalan test hesabı: ${remainingUsers}`);
+  console.log(`Storage (job-photos+provider-logos) nesne sayısı: önce=${storageBefore}, sonra=${storageAfter}`);
 }
 
 async function loginAs(page, email) {
@@ -802,6 +866,12 @@ async function run() {
     }
   } finally {
     await browser.close();
+    try {
+      await cleanupAllTestData();
+    } catch (e) {
+      console.error("Cleanup HATA:", e.message);
+      process.exitCode = 1;
+    }
   }
 }
 

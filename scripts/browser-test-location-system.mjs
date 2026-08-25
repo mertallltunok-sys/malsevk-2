@@ -6,14 +6,39 @@
 // CLAUDE.md "Provider job listing" / job-location.ts) — bu script o
 // birleşik akışı test eder. Ön koşul: `npm run dev` http://localhost:3000
 // üzerinde çalışıyor olmalı.
+//
+// "Son Açıkları Kapat" GÖREV 5 düzeltmesi: bu betik eskiden SABİT, artık
+// Supabase Auth'ta var olmayan bir localStorage-seed hesabı (zeynep@test.com)
+// kullanıyordu (bkz. browser-test-regression.mjs'deki aynı kök neden notu).
+// Artık KENDİ gerçek Supabase Auth hesabını (signUp + complete_registration)
+// oluşturuyor ve sonunda temizliyor.
 
 import assert from "node:assert/strict";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
 const BASE_URL = "http://localhost:3000";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const PASSWORD = "TestSifre2026!";
+
+if (!SUPABASE_URL || !/trfnmpihcnriqgikglpu/.test(SUPABASE_URL)) {
+  console.error(`[browser-test-location-system] FAIL: beklenen Development projeyi işaret etmiyor: ${SUPABASE_URL}`);
+  process.exit(1);
+}
+
+const scratchDir = mkdtempSync(path.join(os.tmpdir(), "malsevk-loctest-"));
+function runSql(query) {
+  const file = path.join(scratchDir, `q-${Date.now()}-${Math.random().toString(36).slice(2)}.sql`);
+  writeFileSync(file, query, "utf8");
+  const out = execSync(`npx supabase db query --linked --file ${file} --output json`, { encoding: "utf8" });
+  return JSON.parse(out).rows ?? [];
+}
+
 const PROGRESS_LOG = path.join(os.tmpdir(), "browser-test-location-system-progress.log");
 writeFileSync(PROGRESS_LOG, "");
 let passed = 0;
@@ -25,10 +50,27 @@ function ok(description) {
   appendFileSync(PROGRESS_LOG, line + "\n");
 }
 
-async function login(page) {
+async function createRealTestUser() {
+  const email = `malsevk-loctest-req-${Date.now()}@gmail.com`;
+  const cli = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+  const { data, error } = await cli.auth.signUp({ email, password: PASSWORD });
+  if (error) throw new Error(`signUp failed: ${error.message}`);
+  const userId = data.user.id;
+  if (!data.session) {
+    runSql(`update auth.users set email_confirmed_at = now(), confirmed_at = now() where id = '${userId}';`);
+  }
+  const { error: crError } = await cli.rpc("complete_registration", {
+    p_role: "hizmet-alan", p_full_name: "Lokasyon Test Kullanıcısı", p_phone: "+905551110088",
+    p_company_name: "Lokasyon Test Firma", p_company_type: "bireysel", p_province: "Kocaeli", p_district: "Gebze",
+  });
+  if (crError) throw new Error(`complete_registration failed: ${crError.message}`);
+  return { id: userId, email };
+}
+
+async function login(page, user) {
   await page.goto(`${BASE_URL}/giris-yap?redirect=/hizmet-talebi-olustur`);
-  await page.locator('input[type="email"]').fill("zeynep@test.com");
-  await page.locator('input[type="password"]').fill("Zeynep1!");
+  await page.locator('input[type="email"]').fill(user.email);
+  await page.locator('input[type="password"]').fill(PASSWORD);
   await page.getByRole("button", { name: "Giriş Yap" }).click();
   await page.waitForURL(`${BASE_URL}/hizmet-talebi-olustur`);
 }
@@ -57,19 +99,29 @@ async function getBolgeTesisDisplayValue(page) {
 }
 
 async function main() {
+  const user = await createRealTestUser();
+  console.log(`Gerçek test hesabı oluşturuldu: ${user.email}`);
   const browser = await chromium.launch();
   // Testlerden herhangi biri (assert.*, .waitFor timeout vb.) fırlatırsa
   // bile tarayıcının kapanmasını garanti eder — aksi halde açık kalan bir
   // Chromium bağlantısı Node sürecinin asla çıkmamasına yol açar.
   try {
-    await runTests(browser);
+    await runTests(browser, user);
   } finally {
     await browser.close();
+    console.log("--- Test hesabı temizleniyor ---");
+    try {
+      runSql(`delete from auth.users where id = '${user.id}';`);
+    } catch (e) {
+      console.error(`  (uyarı) ${user.id} temizlenemedi: ${e.message}`);
+    }
+    const remaining = runSql(`select count(*) as n from auth.users where email ilike 'malsevk-loctest-%@gmail.com';`)[0]?.n ?? 0;
+    console.log(`Temizlik sonrası kalan test hesabı: ${remaining}`);
   }
   console.log(`\n[browser-test-location-system] ${passed}/${passed} test geçti.`);
 }
 
-async function runTests(browser) {
+async function runTests(browser, user) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const consoleErrors = [];
@@ -78,8 +130,8 @@ async function runTests(browser) {
   });
   page.on("pageerror", (err) => consoleErrors.push(String(err)));
 
-  await login(page);
-  ok("Giriş başarılı (zeynep@test.com / hizmet-alan)");
+  await login(page, user);
+  ok(`Giriş başarılı (${user.email} / hizmet-alan, gerçek Supabase Auth hesabı)`);
 
   // TEST 1: Kocaeli seç -> Kocaeli ilçeleri görünmeli
   await selectFromSearchable(page, "İl", "Kocaeli");
