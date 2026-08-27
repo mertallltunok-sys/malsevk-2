@@ -68,7 +68,12 @@ export function DemoAccountsPanel({ onSelectAccount }: { onSelectAccount: (email
   const [open, setOpen] = useState(false);
   const contentId = useId();
 
-  if (!isLocalDevHost) return null;
+  // NEXT_PUBLIC_DEMO_ACCOUNT_PASSWORD tanımsız/boşsa (ör. demo hesapları henüz
+  // oluşturulmadığı için .env.local'dan bilerek kaldırıldığında) panel sahte/
+  // boş bir kimlik bilgisiyle render edilmek yerine TAMAMEN gizlenir — hem
+  // localhost hem dev-build kontrolüyle AYNI "ikisinden biri eksikse hiç
+  // render edilmez" ilkesi.
+  if (!isLocalDevHost || !DEMO_PASSWORD) return null;
 
   return (
     <div className="mt-6 rounded-[10px] border border-border bg-background">
