@@ -16,6 +16,7 @@ import { isJobListingExpired } from "./job-publish-window";
 import { isJobManuallyClosed, JOB_ALREADY_CLOSED_MESSAGE, JOB_CLOSURE_BLOCKED_MESSAGE } from "./job-closure";
 import { isJobModerationApproved } from "./job-moderation";
 import { closeJob as closeJobRecord, deleteJob as deleteJobRecord, type DeleteJobResult } from "./job-store";
+import { notifyNewOfferByEmail, notifyOfferAcceptedByEmail } from "./offer-email-notifications";
 import { isProviderAuthorizedToOfferOnJob } from "./job-visibility";
 import { findJobByIdWithRemoteFallback } from "./jobs-lookup";
 import { isJobOpenForOffers } from "./jobs";
@@ -888,6 +889,13 @@ export async function createOffer(
       return { ok: false, error: syncResult.error };
     }
     supabaseOfferId = syncResult.supabaseOfferId;
+    // "Yeni Teklif Geldi" e-postası — YALNIZCA GERÇEK Supabase teklif kaydı
+    // başarıyla yazıldıktan SONRA (yukarıdaki blok başarıyla tamamlandı,
+    // supabaseOfferId artık gerçek bir sunucu satırına işaret ediyor).
+    // Bilerek await edilir ama hiçbir zaman throw/reject etmez ve dönüş
+    // değeri burada hiç kontrol edilmez — e-posta başarısız olsa da teklif
+    // her zaman başarılı sayılır (bkz. offer-email-notifications.ts).
+    await notifyNewOfferByEmail(supabaseOfferId);
   }
 
   const now = new Date().toISOString();
@@ -1070,6 +1078,13 @@ export async function updateOfferStatus(
         : await rejectOfferOnSupabase(offer.supabaseOfferId);
     if (!syncResult.ok) {
       return { ok: false, error: syncResult.error };
+    }
+    if (nextStatus === "accepted") {
+      // "Teklifiniz Kabul Edildi" e-postası — YALNIZCA GERÇEK Supabase kabul
+      // işlemi başarıyla tamamlandıktan SONRA (yukarıdaki satır). "rejected"
+      // için bilerek hiçbir e-posta gönderilmez (görev kapsamı yalnızca yeni
+      // teklif/kabul, ret bildirimi bu görevin dışında).
+      await notifyOfferAcceptedByEmail(offer.supabaseOfferId);
     }
   }
 
