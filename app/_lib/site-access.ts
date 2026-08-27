@@ -11,9 +11,17 @@ export const SITE_ACCESS_COOKIE = "malsevk_site_access";
 /** Cookie 30 gün geçerli — sayfa yenilemede/tarayıcı yeniden açılışında şifre tekrar sorulmasın diye. */
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
-/** Kapı yalnızca `NODE_ENV === "production"`da etkindir — bkz. app/site-erisim/README niyetindeki page.tsx açıklaması. */
+/**
+ * Kapı artık HER ZAMAN devre dışı (koşulsuz `false`) — bu, Vercel Hobby
+ * planındaki dağıtımın herkese açık olmasına karşı GEÇİCİ bir önlemdi;
+ * gerçek `malsevk.com` açılışıyla amacı sona erdi (görev kararı: "erişim
+ * kapısı gerçek açılışta tamamen kaldırılacak"). Bilerek minimal bir
+ * değişiklik: alttaki tüm mekanizma (token/cookie/`app/site-erisim/`)
+ * DOKUNULMADAN kalır — gerektiğinde tek satır geri alınarak yeniden
+ * etkinleştirilebilir, ayrı bir sistem icat edilmedi.
+ */
 export function isSiteAccessGateActive(): boolean {
-  return process.env.NODE_ENV === "production";
+  return false;
 }
 
 function sha256Hex(value: string): Buffer {
