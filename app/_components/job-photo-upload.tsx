@@ -103,13 +103,7 @@ export function JobPhotoUpload({
   errorId?: string;
   /** Bu bileşenin bilmediği, dışarıda zaten sayılan (ör. düzenleme ekranında korunan mevcut) fotoğraf sayısı — maxPhotos sınırına ve kapak fotoğrafı hesabına dahil edilir. */
   existingCount?: number;
-  /**
-   * "Depolama İlan Oluşturma" görevi: Depo Hizmetleri grubu 15'e kadar
-   * fotoğraf kabul eder (bkz. photo-validation.ts#getMaxPhotos) — genel
-   * MAX_PHOTOS (10) burada ARTIK hardcode DEĞİL, çağıran tarafın kategoriye
-   * göre geçtiği bu prop kullanılır. Verilmezse davranış BİREBİR eskisiyle
-   * (MAX_PHOTOS) aynıdır.
-   */
+  /** Verilmezse davranış photo-validation.ts#MAX_PHOTOS ile aynıdır. */
   maxPhotos?: number;
 }) {
   const [items, setItems] = useState<PhotoItem[]>([]);
@@ -171,6 +165,10 @@ export function JobPhotoUpload({
   const handleFiles = useCallback(
     async (fileList: FileList | File[]) => {
       if (disabled) return;
+      // Yeni bir deneme (ör. aynı sunucu hatası sonrası tekrar dosya seçme),
+      // önceki denemeden kalan hata metnini SİLER — aksi halde `uploadErrors`
+      // yalnızca büyür ve aynı hata mesajı deneme başına bir kez daha görünür.
+      setUploadErrors([]);
       const incoming = Array.from(fileList);
       const errors: string[] = [];
       const toQueue: { file: File; hash: string }[] = [];

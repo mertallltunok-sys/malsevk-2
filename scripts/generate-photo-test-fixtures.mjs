@@ -6,10 +6,10 @@ import path from "node:path";
 const dir = os.tmpdir();
 
 async function main() {
-  // 11 GERÇEKTEN FARKLI (içerik/hash bazında) küçük JPEG — dosya sayısı
-  // sınırı testi (TEST 4) mükerrer-dosya tespitiyle karışmasın diye her
-  // birinin rengi (dolayısıyla baytları) farklıdır.
-  for (let i = 1; i <= 11; i++) {
+  // 16 GERÇEKTEN FARKLI (içerik/hash bazında) küçük JPEG — dosya sayısı
+  // sınırı testi (TEST 4, artık MAX_PHOTOS=15) mükerrer-dosya tespitiyle
+  // karışmasın diye her birinin rengi (dolayısıyla baytları) farklıdır.
+  for (let i = 1; i <= 16; i++) {
     const buffer = await sharp({
       create: {
         width: 800,

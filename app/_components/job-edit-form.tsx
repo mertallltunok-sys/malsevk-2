@@ -35,7 +35,6 @@ import {
   toCargoGroupsFields,
   type NakliyeCargoGroupFieldValues,
 } from "../_lib/nakliye-transport-catalog";
-import { getMaxPhotos } from "../_lib/photo-validation";
 import {
   isTonnageRequired,
   parseProductQuantity,
@@ -1110,7 +1109,6 @@ function JobEditFormFields({ job, session, offers }: { job: Job; session: Sessio
             onChange={setPhotoState}
             onBusyChange={setPhotosProcessing}
             errorId={errors.photoCount ? `${photosId}-error` : undefined}
-            maxPhotos={getMaxPhotos(category)}
           />
         </div>
         {errors.photoCount && (
@@ -1587,7 +1585,6 @@ function NakliyeEditCards({
             onChange={setPhotoState}
             onBusyChange={setPhotosProcessing}
             errorId={errors.photoCount ? `${photosId}-error` : undefined}
-            maxPhotos={getMaxPhotos(category)}
           />
         </div>
         {errors.photoCount && (

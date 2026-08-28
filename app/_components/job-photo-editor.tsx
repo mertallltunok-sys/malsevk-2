@@ -46,7 +46,7 @@ export function JobPhotoEditor({
   onChange: (state: { keptPhotoIds: string[]; newPhotos: ReadyJobPhoto[] }) => void;
   onBusyChange?: (busy: boolean) => void;
   errorId?: string;
-  /** Bkz. job-photo-upload.tsx#JobPhotoUpload'daki AYNI "Depolama İlan Oluşturma" notu — verilmezse davranış BİREBİR eskisiyle (MAX_PHOTOS) aynıdır. */
+  /** Verilmezse davranış photo-validation.ts#MAX_PHOTOS ile aynıdır. */
   maxPhotos?: number;
 }) {
   const [keptPhotos, setKeptPhotos] = useState<JobPhoto[]>(

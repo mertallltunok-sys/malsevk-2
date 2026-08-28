@@ -6,7 +6,7 @@ import { isSimplifiedLocationCategory } from "./job-location";
 import { isJobDateInPast } from "./jobs";
 import { isTransportationCategory } from "./nakliye-route";
 import { isNakliyeContainerProductType, isSelectableLoadPreparationTypeId, NAKLIYE_MANUAL_ENTRY_VALUE } from "./nakliye-transport-catalog";
-import { getMinPhotos, getPhotosRequiredMessage } from "./photo-validation";
+import { MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
 import { isStorageGroupCategory, NAKLIYE_SERVICE_CATEGORY_ID } from "./service-catalog";
 import { containsDangerousMarkup } from "./text-sanitization";
 import { isHazardousStorageCategory, isTehlikeliMaddeDepolamaCategory } from "./storage-hazard-catalog";
@@ -1002,8 +1002,8 @@ export function validateJobForm(fields: JobFormFields): JobFormErrors {
   const storageHazardErrors = validateStorageHazardFields(fields);
   if (storageHazardErrors.storageRiskGroups) errors.storageRiskGroups = storageHazardErrors.storageRiskGroups;
 
-  if (fields.photoCount < getMinPhotos(fields.category)) {
-    errors.photoCount = getPhotosRequiredMessage(fields.category);
+  if (fields.photoCount < MIN_PHOTOS) {
+    errors.photoCount = PHOTOS_REQUIRED_MESSAGE;
   }
 
   return errors;
@@ -1303,17 +1303,6 @@ export function findDuplicateServiceCategoryIds(categories: string[]): Set<strin
 export type SharedOperationFields = {
   operationDetails: string;
   photoCount: number;
-  /**
-   * Yalnızca TEK hizmetli bir gönderim için o tek hizmetin kategorisi —
-   * çağıran taraf (job-request-form.tsx) `services.length === 1` iken bunu
-   * geçirir. Gerçek çoklu hizmet operasyonlarında (2+ farklı kategori)
-   * fotoğraflar paylaşılan/kategoriden bağımsız bir havuz olduğu için
-   * BİLEREK geçirilmez (`undefined`) — bu durumda genel 1-10 sınırı
-   * uygulanmaya devam eder (bkz. photo-validation.ts#getMinPhotos/
-   * getMaxPhotos'ın kendi dokümanı, ve job-store.ts#createJobsForOperation'ın
-   * AYNI kapsam sınırı).
-   */
-  singleServiceCategory?: string;
 };
 
 export type SharedOperationErrors = Partial<Record<keyof SharedOperationFields, string>>;
@@ -1321,9 +1310,8 @@ export type SharedOperationErrors = Partial<Record<keyof SharedOperationFields, 
 export function validateSharedOperationFields(fields: SharedOperationFields): SharedOperationErrors {
   const errors: SharedOperationErrors = {};
 
-  const minPhotos = getMinPhotos(fields.singleServiceCategory);
-  if (fields.photoCount < minPhotos) {
-    errors.photoCount = getPhotosRequiredMessage(fields.singleServiceCategory);
+  if (fields.photoCount < MIN_PHOTOS) {
+    errors.photoCount = PHOTOS_REQUIRED_MESSAGE;
   }
 
   return errors;

@@ -196,6 +196,10 @@ export function ProviderDocumentUpload({
   const handleFiles = useCallback(
     async (fileList: FileList | File[]) => {
       if (disabled) return;
+      // job-photo-upload.tsx#handleFiles ile AYNI düzeltme — yeni bir deneme
+      // önceki denemeden kalan hata metnini SİLER, aksi halde aynı hata
+      // mesajı deneme başına bir kez daha birikip görünür.
+      setUploadErrors([]);
       const incoming = Array.from(fileList);
       const errors: string[] = [];
       const toQueue: File[] = [];

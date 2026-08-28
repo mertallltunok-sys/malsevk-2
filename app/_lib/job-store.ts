@@ -11,7 +11,7 @@ import { STORAGE_WRITE_ERROR_MESSAGE, writeJson } from "./local-storage";
 import { isFacilityInProvinceDistrict, isTransportationCategory } from "./nakliye-route";
 import { sanitizeNakliyeCargoGroups, sanitizeNakliyeDetails } from "./nakliye-transport-catalog";
 import { deletePhotoBlob, deletePhotoBlobs, getPhotoBlob, putPhotoBlob } from "./photo-blob-store";
-import { getMaxPhotos, getMinPhotos, getPhotosRequiredMessage, MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
+import { MAX_PHOTOS, MIN_PHOTOS, PHOTOS_REQUIRED_MESSAGE } from "./photo-validation";
 import { requiresProductInfo } from "./product-catalog";
 import { getServiceCategoryLabel, isServiceCategoryId, isStorageGroupCategory } from "./service-catalog";
 import { isContainerStorageCategory, sanitizeStorageContainerGroups } from "./storage-container-catalog";
@@ -1034,20 +1034,14 @@ export async function buildJobForCreation(
   if (session.role !== "hizmet-alan") {
     return { ok: false, error: "Yalnızca Hizmet Alan kullanıcılar ilan oluşturabilir." };
   }
-  // Depolama İlan Oluşturma: Depo Hizmetleri grubu (bkz. service-catalog.ts#
-  // isStorageGroupCategory) için sınırlar 1-10 yerine 4-15'tir (görev
-  // gereksinimi, mevcut genel sınırlarla BİLEREK çelişir — bkz. photo-
-  // validation.ts#getMinPhotos/getMaxPhotos'ın kendi dokümanı, ÇÖZÜM
-  // Depolamaya özel ikinci bir yükleme modülü DEĞİL, bu TEK merkezi
-  // sınırın kategoriye duyarlı hâle getirilmesidir). Diğer TÜM kategoriler
-  // için davranış BİREBİR eskisiyle aynıdır.
-  const jobMinPhotos = getMinPhotos(input.category);
-  const jobMaxPhotos = getMaxPhotos(input.category);
-  if (input.photos.length < jobMinPhotos) {
-    return { ok: false, error: getPhotosRequiredMessage(input.category) };
+  // Fotoğraf sayısı sınırı TÜM kategoriler için tektir (bkz. photo-
+  // validation.ts#MIN_PHOTOS/MAX_PHOTOS) — eski Depo Hizmetleri/Nakliye'ye
+  // özel 4-15 istisnası kaldırıldı.
+  if (input.photos.length < MIN_PHOTOS) {
+    return { ok: false, error: PHOTOS_REQUIRED_MESSAGE };
   }
-  if (input.photos.length > jobMaxPhotos) {
-    return { ok: false, error: `En fazla ${jobMaxPhotos} fotoğraf yükleyebilirsiniz.` };
+  if (input.photos.length > MAX_PHOTOS) {
+    return { ok: false, error: `En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.` };
   }
 
   const photos = await persistPhotosOrRollback(input.photos);
@@ -1634,16 +1628,12 @@ export async function buildJobUpdate(
 
   const keptPhotos = existing.photos.filter((photo) => input.keptPhotoIds.includes(photo.id));
   const totalPhotoCount = keptPhotos.length + input.newPhotos.length;
-  // Bkz. createJob'daki AYNI "Depolama İlan Oluşturma" notu — düzenlenen
-  // ilanın (olası yeni) kategorisi (input.category ?? existing.category)
-  // Depo Hizmetleri grubundaysa sınırlar 4-15'tir, aksi halde 1-10.
-  const editMinPhotos = getMinPhotos(input.category ?? existing.category);
-  const editMaxPhotos = getMaxPhotos(input.category ?? existing.category);
-  if (totalPhotoCount < editMinPhotos) {
-    return { ok: false, error: getPhotosRequiredMessage(input.category ?? existing.category) };
+  // Bkz. createJob'daki AYNI not — fotoğraf sayısı sınırı TÜM kategoriler için tektir.
+  if (totalPhotoCount < MIN_PHOTOS) {
+    return { ok: false, error: PHOTOS_REQUIRED_MESSAGE };
   }
-  if (totalPhotoCount > editMaxPhotos) {
-    return { ok: false, error: `En fazla ${editMaxPhotos} fotoğraf yükleyebilirsiniz.` };
+  if (totalPhotoCount > MAX_PHOTOS) {
+    return { ok: false, error: `En fazla ${MAX_PHOTOS} fotoğraf yükleyebilirsiniz.` };
   }
 
   const newlyPersisted = await persistPhotosOrRollback(input.newPhotos);

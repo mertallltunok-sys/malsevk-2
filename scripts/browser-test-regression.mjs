@@ -59,7 +59,15 @@ async function createRealTestUser(label, role, companyType) {
   const userId = data.user.id;
   createdUserIds.push(userId);
   if (!data.session) {
-    runSql(`update auth.users set email_confirmed_at = now(), confirmed_at = now() where id = '${userId}';`);
+    // `confirmed_at` artık bu Supabase projesinde GENERATED bir sütun
+    // (email_confirmed_at'ten türetiliyor) — doğrudan SET edilemiyor.
+    // email_confirmed_at tek başına yeterli, ama bu da signUp()'ın
+    // döndürdüğü oturumsuz `cli`'ı gerçekten oturum açmış hâle GETİRMEZ
+    // (proje artık e-posta onayını zorunlu kılıyor) — bir sonraki RPC
+    // çağrısının auth.uid()'e sahip olması için gerçek bir giriş şart.
+    runSql(`update auth.users set email_confirmed_at = now() where id = '${userId}';`);
+    const { error: signInError } = await cli.auth.signInWithPassword({ email, password: PASSWORD });
+    if (signInError) throw new Error(`signInWithPassword(${label}) failed: ${signInError.message}`);
   }
   const { error: crError } = await cli.rpc("complete_registration", {
     p_role: role, p_full_name: `Regresyon Test ${label}`, p_phone: "+905551110077",

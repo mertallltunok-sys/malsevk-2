@@ -78,20 +78,20 @@ check("HEIC uzantılı ama gerçek içeriği resim olmayan sahte dosya reddedili
   assert.equal(detectImageFormat(fakeHeic), null);
 });
 
-check("validatePhotoCount: 10 sınırı aşılınca reddedilir", () => {
-  const result = validatePhotoCount(8, 3);
+check("validatePhotoCount: 15 sınırı aşılınca reddedilir", () => {
+  const result = validatePhotoCount(10, 6);
   assert.equal(result.ok, false);
-  assert.match(result.error, /10/);
+  assert.match(result.error, /15/);
 });
 
 check("validatePhotoCount: sınır içinde kabul edilir", () => {
-  assert.deepEqual(validatePhotoCount(5, 5), { ok: true });
+  assert.deepEqual(validatePhotoCount(10, 5), { ok: true });
 });
 
 check("validatePhotosPresent: 0 fotoğraf tam olarak istenen Türkçe mesajla reddedilir", () => {
   const result = validatePhotosPresent(0);
   assert.equal(result.ok, false);
-  assert.equal(result.error, "Devam edebilmek için operasyonu gösteren en az 1 fotoğraf yüklemelisiniz.");
+  assert.equal(result.error, "Devam edebilmek için en az 1 fotoğraf yüklemelisiniz.");
   assert.equal(result.error, PHOTOS_REQUIRED_MESSAGE);
 });
 
@@ -130,8 +130,8 @@ check("hashFileContent: aynı içerik aynı özeti üretir (mükerrer tespiti te
   assert.notEqual(hashA, hashC);
 });
 
-check("Sabitler beklenen değerlerde (MAX_PHOTOS=10, MIN_PHOTOS=1, MAX 10MB)", () => {
-  assert.equal(MAX_PHOTOS, 10);
+check("Sabitler beklenen değerlerde (MAX_PHOTOS=15, MIN_PHOTOS=1, MAX 10MB)", () => {
+  assert.equal(MAX_PHOTOS, 15);
   assert.equal(MIN_PHOTOS, 1);
   assert.equal(MAX_PHOTO_SIZE_BYTES, 10 * 1024 * 1024);
   assert.ok(ACCEPTED_FILE_INPUT.includes("heic"));

@@ -60,7 +60,18 @@ async function createRealTestUser(label, role) {
   if (error) throw new Error(`signUp(${label}) failed: ${error.message}`);
   const userId = data.user.id;
   if (!data.session) {
-    runSql(`update auth.users set email_confirmed_at = now(), confirmed_at = now() where id = '${userId}';`);
+    // `confirmed_at` artık bu Supabase projesinde GENERATED bir sütun
+    // (email_confirmed_at/phone_confirmed_at'ten türetiliyor) — doğrudan
+    // SET edilemiyor, GoTrue şema güncellemesiyle geldi. email_confirmed_at
+    // tek başına yeterli, confirmed_at otomatik türer.
+    runSql(`update auth.users set email_confirmed_at = now() where id = '${userId}';`);
+    // Proje artık e-posta onayını ZORUNLU kılıyor (bkz. Production migration
+    // 0089/mailer_autoconfirm) — signUp() bu yüzden bir oturum DÖNDÜRMEZ,
+    // yukarıdaki zorla-onaylama da `cli`'ı oturum açmış hâle GETİRMEZ. Bir
+    // sonraki `complete_registration` çağrısının `auth.uid()`e sahip olması
+    // için gerçek bir giriş gerekir, yoksa RPC anonim (yetkisiz) çalışır.
+    const { error: signInError } = await cli.auth.signInWithPassword({ email, password: PASSWORD });
+    if (signInError) throw new Error(`signInWithPassword(${label}) failed: ${signInError.message}`);
   }
   const { error: crError } = await cli.rpc("complete_registration", {
     p_role: role, p_full_name: `Foto Test ${label}`, p_phone: "+905551110099",
@@ -269,7 +280,7 @@ async function main() {
   await fillBaseFormFields(page, "1");
   await page.getByRole("button", { name: "İlanı Yayınla" }).click();
   await assert.doesNotReject(
-    page.getByText("Devam edebilmek için operasyonu gösteren en az 1 fotoğraf yüklemelisiniz.").waitFor({
+    page.getByText("Devam edebilmek için en az 1 fotoğraf yüklemelisiniz.").waitFor({
       state: "visible",
       timeout: 5000,
     }),
@@ -280,7 +291,7 @@ async function main() {
   // TEST 2: Tek geçerli fotoğrafla ilan oluştur
   await page.setInputFiles('input[type="file"]', [FIX("fixture-valid-1.jpg")]);
   await waitForPhotosReady(page, 1);
-  await assert.doesNotReject(page.getByText("1 / 10 fotoğraf yüklendi").waitFor({ state: "visible" }));
+  await assert.doesNotReject(page.getByText("1 / 15 fotoğraf yüklendi").waitFor({ state: "visible" }));
   await publishJob(page);
   const firstJobUrl = page.url();
   const firstJobId = firstJobUrl.split("/ilanlar/")[1];
@@ -352,16 +363,16 @@ async function main() {
   assert.equal(thumbnailCount, 1, "Beklenen tam olarak 2 fotoğraf (1 kapak + 1 küçük resim) kalmalı");
   ok("TEST 3: Çoklu fotoğraf yüklendi, sıralandı (valid-2, valid-1), valid-3 silindi; son sıra doğru kaydedildi");
 
-  // TEST 4: 10'dan fazla fotoğraf yüklemeye çalış
+  // TEST 4: 15'ten fazla fotoğraf yüklemeye çalış
   await login(page, requester.email, PASSWORD);
   await fillBaseFormFields(page, "4");
-  const elevenDistinctFiles = Array.from({ length: 11 }, (_, i) => FIX(`fixture-valid-${i + 1}.jpg`));
-  await page.setInputFiles('input[type="file"]', elevenDistinctFiles);
-  await waitForPhotosReady(page, 10);
-  await assert.doesNotReject(page.getByText(/En fazla 10 fotoğraf/).waitFor({ state: "visible", timeout: 5000 }));
-  const cardCountAfter11 = await page.locator('[aria-label$="fotoğrafını sil"]').count();
-  assert.ok(cardCountAfter11 <= 10, `10'dan fazla kart eklendi: ${cardCountAfter11}`);
-  ok(`TEST 4: 11 dosya seçilince en fazla ${cardCountAfter11} kabul edildi (≤10), Türkçe uyarı gösterildi`);
+  const sixteenDistinctFiles = Array.from({ length: 16 }, (_, i) => FIX(`fixture-valid-${i + 1}.jpg`));
+  await page.setInputFiles('input[type="file"]', sixteenDistinctFiles);
+  await waitForPhotosReady(page, 15);
+  await assert.doesNotReject(page.getByText(/En fazla 15 fotoğraf/).waitFor({ state: "visible", timeout: 5000 }));
+  const cardCountAfter16 = await page.locator('[aria-label$="fotoğrafını sil"]').count();
+  assert.ok(cardCountAfter16 <= 15, `15'ten fazla kart eklendi: ${cardCountAfter16}`);
+  ok(`TEST 4: 16 dosya seçilince en fazla ${cardCountAfter16} kabul edildi (≤15), Türkçe uyarı gösterildi`);
 
   // TEST 5: 10MB üzeri dosya
   await login(page, requester.email, PASSWORD);

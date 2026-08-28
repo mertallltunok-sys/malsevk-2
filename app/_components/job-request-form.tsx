@@ -42,7 +42,7 @@ import {
   isNakliyeContainerProductType,
   type NakliyeCargoGroupFieldValues,
 } from "../_lib/nakliye-transport-catalog";
-import { getMaxPhotos, getMinPhotos } from "../_lib/photo-validation";
+import { MIN_PHOTOS } from "../_lib/photo-validation";
 import {
   formatProductQuantity,
   formatProductTonnage,
@@ -697,19 +697,6 @@ function resolveNakliyeYukBilgileriPayload(service: ServiceEntry): {
 }
 
 
-/**
- * "Depolama İlan Oluşturma" görevi: fotoğraf sayısı sınırlarının (bkz.
- * photo-validation.ts#getMinPhotos/getMaxPhotos) yalnızca TEK hizmetli, GERÇEKTEN
- * Depolama olan gönderimlerde genişletilmiş (4-15) aralığa geçmesi için TEK
- * doğruluk kaynağı — çok-hizmetli bir operasyonda fotoğraflar TÜM hizmetler
- * arasında PAYLAŞILDIĞI için (bkz. job-store.ts#createJobsForOperation'ın
- * kendi, kasıtlı olarak DEĞİŞTİRİLMEMİŞ 1-10 kontrolü) bu durumda `undefined`
- * döner, yani genel (1-10) aralık uygulanmaya devam eder.
- */
-function getSingleServiceCategory(services: ServiceEntry[]): string | undefined {
-  return services.length === 1 ? services[0].category : undefined;
-}
-
 export function JobRequestForm() {
   const session = useSession();
   const router = useRouter();
@@ -841,11 +828,7 @@ export function JobRequestForm() {
   // kendi useEffect'inin bağımlılık dizisinde tutuyor (bkz. job-photo-upload.tsx).
   const handlePhotosChange = useCallback((nextPhotos: ReadyJobPhoto[]) => {
     setPhotos(nextPhotos);
-    // Depolama (Depo Hizmetleri grubunun TAMAMI) TEK hizmet olarak
-    // gönderiliyorsa minimum 4 fotoğraf gerekir (bkz. photo-validation.ts#
-    // getMinPhotos) — genel MIN_PHOTOS (1) yalnızca diğer TÜM durumlarda
-    // (farklı kategori, ya da çok-hizmetli operasyon) geçerlidir.
-    if (nextPhotos.length >= getMinPhotos(getSingleServiceCategory(servicesRef.current))) {
+    if (nextPhotos.length >= MIN_PHOTOS) {
       setSharedErrors((current) => {
         if (!("photoCount" in current)) return current;
         const next = { ...current };
@@ -1398,7 +1381,6 @@ export function JobRequestForm() {
     const nextSharedErrors = validateSharedOperationFields({
       operationDetails,
       photoCount: photos.length,
-      singleServiceCategory: getSingleServiceCategory(services),
     });
 
     const duplicateCategoryIds = findDuplicateServiceCategoryIds(services.map((s) => s.category));
@@ -2935,7 +2917,6 @@ export function JobRequestForm() {
                 onBusyChange={setPhotosProcessing}
                 disabled={submitting || photosProcessing}
                 errorId={sharedErrors.photoCount ? `${photosId}-error` : undefined}
-                maxPhotos={getMaxPhotos(getSingleServiceCategory(services))}
               />
             </div>
             {sharedErrors.photoCount && (
@@ -2965,7 +2946,6 @@ export function JobRequestForm() {
                 onBusyChange={setPhotosProcessing}
                 disabled={submitting || photosProcessing}
                 errorId={sharedErrors.photoCount ? `${photosId}-error` : undefined}
-                maxPhotos={getMaxPhotos(getSingleServiceCategory(services))}
               />
             </div>
             {sharedErrors.photoCount && (
