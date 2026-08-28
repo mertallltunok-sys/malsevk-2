@@ -21,13 +21,20 @@ const AUTH_CONFIRM_ERROR_MESSAGES: Record<string, string> = {
 export default async function GirisYapPage({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect?: string; mode?: string; hata?: string; "sifre-guncellendi"?: string }>;
+  searchParams: Promise<{
+    redirect?: string;
+    mode?: string;
+    hata?: string;
+    "sifre-guncellendi"?: string;
+    emailConfirmed?: string;
+  }>;
 }) {
   const params = await searchParams;
   const redirectTo = resolveRedirectTarget(params.redirect);
   const initialMode = params.mode === "kayit" ? "kayit" : "giris";
   const confirmErrorMessage = params.hata ? AUTH_CONFIRM_ERROR_MESSAGES[params.hata] : undefined;
   const passwordUpdated = params["sifre-guncellendi"] === "1";
+  const emailJustConfirmed = params.emailConfirmed === "1";
 
   return (
     <section className="bg-background">
@@ -44,6 +51,7 @@ export default async function GirisYapPage({
             initialMode={initialMode}
             confirmErrorMessage={confirmErrorMessage}
             passwordUpdated={passwordUpdated}
+            emailJustConfirmed={emailJustConfirmed}
           />
         </div>
       </div>

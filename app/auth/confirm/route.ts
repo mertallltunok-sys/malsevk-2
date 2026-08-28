@@ -45,8 +45,22 @@ import { createSupabaseServerClient } from "../../_lib/supabase/server-client";
  * recovery şablonu ileride bu route'a yönlendirilecek şekilde değişse bile
  * doğru dala düşer.
  */
+const DEFAULT_APP_BASE_URL = "http://localhost:3000";
+
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams, origin: requestOrigin } = new URL(request.url);
+  // GERÇEK ÜRETİM BUGU (2026-08-28): `request.url`'in origin'i her zaman
+  // güvenilir DEĞİLDİR — Next.js'in dev sunucusu (ve muhtemelen bazı proxy/
+  // çok-domain'li dağıtım senaryoları) gerçek `Host`/`X-Forwarded-Host`
+  // header'ından FARKLI bir host raporlayabilir (kanıt: yerelde 127.0.0.1
+  // host header'ıyla gelen bir istekte `request.url` "localhost" döndürdü).
+  // Bu route her zaman bir REDIRECT ürettiği için, yanlış origin doğrudan
+  // "oturum çerezleri bir origin'de, yönlendirme başka bir origin'e" —
+  // yani doğrulama BAŞARILI olsa bile sonraki sayfanın oturumu HİÇ
+  // GÖRMEMESİ — sonucunu doğurur (offer-notifications/route.ts'in zaten
+  // kullandığı APP_BASE_URL/DEFAULT_APP_BASE_URL deseniyle AYNI, tek
+  // doğruluk kaynağı burada da kullanılır).
+  const origin = process.env.APP_BASE_URL?.replace(/\/+$/, "") || requestOrigin || DEFAULT_APP_BASE_URL;
   const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
@@ -59,6 +73,19 @@ export async function GET(request: NextRequest) {
   if (code) {
     const { error, data } = await supabase.auth.exchangeCodeForSession(code);
     if (error || !data.user) {
+      // GERÇEK ÜRETİM BUGU (2026-08-28) — canlı e-posta linkiyle kanıtlandı:
+      // `pkce_code_verifier_not_found`, e-posta linkinin signUp()'ı başlatan
+      // TARAYICI/CİHAZDAN FARKLI birinde açıldığı anlamına gelir (ör. masaüstünde
+      // kayıt olup telefonun e-posta uygulamasından linke tıklamak). GoTrue bu
+      // durumda linki YİNE DE gerçekten doğrulamıştır (`/auth/v1/verify` bu
+      // route'a gelmeden ÖNCE, code exchange'den bağımsız olarak email_confirmed_at'i
+      // zaten işaretler) — yalnızca BU tarayıcı, oturumu kurmak için gereken PKCE
+      // code_verifier çerezine sahip değildir. Bu yüzden genel "süresi dolmuş/
+      // kullanılmış" hatası YANLIŞ VE KAFA KARIŞTIRICI olurdu — doğru mesaj
+      // "doğrulandı, şimdi giriş yapın"dır (bkz. login-form.tsx#emailJustConfirmed).
+      if (error?.code === "pkce_code_verifier_not_found") {
+        return NextResponse.redirect(`${origin}/giris-yap?emailConfirmed=1`);
+      }
       return NextResponse.redirect(`${origin}/giris-yap?hata=dogrulama-basarisiz`);
     }
     user = data.user;

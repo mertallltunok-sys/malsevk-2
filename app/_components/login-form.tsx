@@ -88,6 +88,7 @@ export function LoginForm({
   initialMode = "giris",
   confirmErrorMessage,
   passwordUpdated = false,
+  emailJustConfirmed = false,
 }: {
   redirectTo: string;
   initialMode?: Mode;
@@ -95,6 +96,16 @@ export function LoginForm({
   confirmErrorMessage?: string;
   /** app/sifre-guncelle sonrası — "başarı sonrası giriş ekranına yönlendirme" gereksinimi. */
   passwordUpdated?: boolean;
+  /**
+   * app/auth/confirm/route.ts'in `pkce_code_verifier_not_found` dalından —
+   * e-posta doğrulama linki, kaydı başlatandan FARKLI bir tarayıcı/cihazda
+   * açıldığında (ör. masaüstünde kayıt olup telefondan linke tıklamak). E-posta
+   * GERÇEKTEN doğrulanmıştır (GoTrue bunu code exchange'den bağımsız yapar);
+   * yalnızca BU tarayıcının oturumu kurması mümkün değildir — bu yüzden genel
+   * "süresi dolmuş/kullanılmış" hatası DEĞİL, bu net "doğrulandı, giriş yapın"
+   * mesajı gösterilir.
+   */
+  emailJustConfirmed?: boolean;
 }) {
   const router = useRouter();
   // "Kritik Oturum/Kimlik Karışması" görevi — kanıtlanmış kök neden: bu form
@@ -567,6 +578,16 @@ export function LoginForm({
           className="mt-6 rounded-md border border-success/30 bg-success-soft px-4 py-3 text-sm font-medium text-success"
         >
           Şifreniz güncellendi. Yeni şifrenizle giriş yapabilirsiniz.
+        </div>
+      )}
+
+      {mode === "giris" && emailJustConfirmed && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mt-6 rounded-md border border-success/30 bg-success-soft px-4 py-3 text-sm font-medium text-success"
+        >
+          E-posta adresiniz doğrulandı. Devam etmek için giriş yapın.
         </div>
       )}
 
