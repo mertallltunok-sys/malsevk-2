@@ -28,6 +28,23 @@ const nextConfig: NextConfig = {
     // multipart/form-data ek yükünü de karşılayacak şekilde 20MB'a çıkarıldı.
     proxyClientMaxBodySize: "20mb",
   },
+  // "Production Fotoğraf Yükleme Hatası" görevi — gerçek kök neden (Vercel
+  // runtime loglarıyla kanıtlandı): Next.js'in otomatik output file tracing'i
+  // (@vercel/nft, yalnızca statik import/require/fs kullanımını analiz eder)
+  // sharp'ın native binding'inin çalışma zamanında `dlopen()` ile açtığı
+  // @img/sharp-libvips-linux-x64 paketindeki gerçek .so dosyasını KAÇIRIYOR —
+  // bu, sharp sürümünü yükseltmenin (0.35.3 -> 0.35.4) ÇÖZMEDİĞİ, ayrı bir
+  // sorundu (ERR_DLOPEN_FAILED: libvips-cpp.so.<sürüm>: cannot open shared
+  // object file). Next.js'in kendi dokümantasyonu (`output.md`) bu TAM
+  // senaryo için `node_modules/sharp/**/*`'ı örnek olarak verir; sharp'ın
+  // kendi paketi platform-ikili @img/sharp-* paketlerini içermediği için
+  // (ayrı, kardeş paketler) burada AYRICA node_modules/@img de eklenir.
+  // Yalnızca sharp'ı GERÇEKTEN kullanan iki route'a (tüm rotalara değil)
+  // taraması gereksiz büyütülmesin diye taranır.
+  outputFileTracingIncludes: {
+    "/api/job-photos/process": ["node_modules/@img/**/*", "node_modules/sharp/**/*"],
+    "/api/provider-documents/validate": ["node_modules/@img/**/*", "node_modules/sharp/**/*"],
+  },
   async headers() {
     return [
       {
