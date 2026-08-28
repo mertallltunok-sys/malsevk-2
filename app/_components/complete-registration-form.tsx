@@ -82,7 +82,6 @@ export function CompleteRegistrationForm() {
   const phoneId = useId();
   const companyNameId = useId();
   const companyTypeId = useId();
-  const mersisNoId = useId();
   const provinceId = useId();
   const districtId = useId();
   const legalConsentId = useId();
@@ -93,7 +92,6 @@ export function CompleteRegistrationForm() {
   const [phone, setPhone] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [companyType, setCompanyType] = useState<CompanyType | "">("");
-  const [mersisNo, setMersisNo] = useState("");
   const [provinceCode, setProvinceCode] = useState("");
   const [district, setDistrict] = useState("");
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
@@ -123,7 +121,6 @@ export function CompleteRegistrationForm() {
     setPhone(fields.phone);
     setCompanyName(fields.companyName);
     setCompanyType(fields.companyType);
-    setMersisNo(fields.mersisNo ?? "");
     setDistrict(fields.district);
     const matchedProvince = provinces.find((item) => item.name === fields.province);
     if (matchedProvince) setProvinceCode(matchedProvince.code);
@@ -260,22 +257,6 @@ export function CompleteRegistrationForm() {
       setFormError("İl ve ilçe zorunludur.");
       return;
     }
-    // MERSİS / İşletme Tekilliği görevi — login-form.tsx'in register-form-
-    // validation.ts üzerinden yaptığı AYNI kontrol (bu form kendi
-    // doğrulamasını inline yapıyor, o paylaşılan fonksiyonu kullanmıyor).
-    // "Development Kapanış Turu" göreviyle "bireysel" DIŞINDAKİ tiplerde
-    // ZORUNLU hâle geldi (bkz. migration 0083).
-    if (companyType !== "bireysel") {
-      const mersisDigits = mersisNo.replace(/\D/g, "");
-      if (mersisDigits.length === 0) {
-        setFormError("MERSİS numarası zorunludur.");
-        return;
-      }
-      if (mersisDigits.length !== 16) {
-        setFormError("MERSİS numarası 16 haneli bir sayı olmalıdır.");
-        return;
-      }
-    }
     if (!legalConsentAccepted) {
       setFormError("Devam etmek için Gizlilik Politikası, Kullanım Koşulları ve KVKK Aydınlatma Metni'ni kabul etmelisiniz.");
       return;
@@ -291,7 +272,8 @@ export function CompleteRegistrationForm() {
       companyType,
       province: provinceName,
       district,
-      mersisNo: mersisNo.trim() || undefined,
+      // MERSİS artık kayıt sırasında hiç toplanmıyor (bkz. migration 0089).
+      mersisNo: undefined,
       providerServiceCategoryIds: [],
       providerDocuments: [],
       documentDeclarationAccepted: false,
@@ -437,25 +419,6 @@ export function CompleteRegistrationForm() {
           ))}
         </select>
       </div>
-
-      {/* MERSİS / İşletme Tekilliği görevi — login-form.tsx'teki AYNI koşul; "Development Kapanış Turu" göreviyle bu tiplerde ZORUNLU. */}
-      {companyType && companyType !== "bireysel" && (
-        <div>
-          <label htmlFor={mersisNoId} className="text-sm font-medium text-foreground">
-            MERSİS Numarası
-          </label>
-          <input
-            id={mersisNoId}
-            type="text"
-            inputMode="numeric"
-            required
-            value={mersisNo}
-            onChange={(event) => setMersisNo(event.target.value)}
-            placeholder="16 haneli MERSİS numarası"
-            className="mt-2 w-full rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          />
-        </div>
-      )}
 
       <div className="grid gap-6 sm:grid-cols-2">
         <SearchableSelect
