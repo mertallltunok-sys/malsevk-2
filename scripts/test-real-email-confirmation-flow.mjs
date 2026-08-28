@@ -21,6 +21,18 @@
 //      "süresi dolmuş" hatası gösteriyordu. Düzeltme: bu durumu özel olarak
 //      tanıyıp "E-posta adresiniz doğrulandı. Devam etmek için giriş yapın."
 //      gösteriyor (bkz. login-form.tsx#emailJustConfirmed).
+//   3. (Deploy SONRASI, Mert'in gerçek testinde HÂLÂ gözlemlendi — 1-2
+//      yukarıdaki düzeltmeler yetmedi) complete-registration-form.tsx'in
+//      /kayit-tamamla useEffect'inin HİÇ try/catch'i yoktu: getUser()/
+//      profiles sorgusu gerçekten askıda kalırsa (ör. yavaş/kesintili ağ —
+//      Supabase client'ın kendisi bir route.abort()'u ZATEN zarifçe
+//      {data:null,error} olarak çözüyor, YALNIZCA gerçekten hiç yanıt
+//      vermeyen bir istek "checking"te kalıcı olarak sıkışmaya yol açıyordu,
+//      canlı olarak kanıtlandı) `status` başlangıç değerinde SONSUZA KADAR
+//      kalıyor, kullanıcı "Kontrol ediliyor..." spinner'ında takılı
+//      kalıyordu. Düzeltme: try/catch + 15sn zaman aşımı güvenlik ağı, ikisi
+//      de "check-error" durumuna geçip Türkçe hata + Tekrar Dene/Giriş
+//      Sayfasına Dön seçenekleri gösteriyor.
 //
 // Gerçek Mailpit e-postasını (Development/local Docker Supabase, ASLA
 // Production'a dokunmaz) okur, linki OLDUĞU GİBİ (elle yeniden inşa
@@ -294,6 +306,56 @@ async function main() {
   const forgotPasswordFormVisible = await page5.getByLabel("E-posta").first().isVisible().catch(() => false);
   record("6b) /sifre-sifirla sayfası normal render ediliyor (regresyon)", forgotPasswordFormVisible);
   await context5.close();
+
+  // =========================================================================
+  // 7) /kayit-tamamla'nın "checking" güvenlik ağı: profiles sorgusu GERÇEKTEN
+  //    (route.abort() DEĞİL — Supabase client bunu zaten zarifçe
+  //    {data:null,error} olarak çözüyor, "checking"te sıkışmaya yol AÇMIYOR)
+  //    hiç yanıt vermeden askıda bırakılırsa, 15sn içinde "check-error"
+  //    ekranına düşmeli, sonsuza kadar spinner'da kalmamalı.
+  // =========================================================================
+  const email7 = `test-confirm-timeout-${stamp}@example.com`;
+  const context7 = await browser.newContext();
+  const page7 = await context7.newPage();
+  await page7.goto(`${APP_ORIGIN}/giris-yap`);
+  await page7.getByRole("tab", { name: "Kayıt Ol" }).click();
+  await page7.getByRole("radio", { name: "Hizmet Alan", exact: true }).check();
+  await page7.getByLabel("Ad", { exact: true }).fill("Timeout");
+  await page7.getByLabel("Soyad", { exact: true }).fill("Test");
+  await page7.getByLabel("E-posta", { exact: true }).fill(email7);
+  await page7.getByLabel("Telefon Numarası", { exact: true }).fill("+905551119944");
+  await page7.getByLabel("Şifre", { exact: true }).fill(PASSWORD);
+  await page7.getByLabel("Şifre Tekrar", { exact: true }).fill(PASSWORD);
+  await page7.getByLabel("Firma Adı", { exact: true }).fill("Timeout Test Firma");
+  await page7.getByLabel("Kullanıcı Tipi", { exact: true }).selectOption({ label: "Bireysel" });
+  await selectSearchable(page7, "İl", "Kocaeli");
+  await selectSearchable(page7, "İlçe", "Gebze");
+  await page7.locator("label", { hasText: "okudum, anladım ve kabul ediyorum" }).locator('input[type="checkbox"]').check();
+  await page7.getByRole("button", { name: "Hesap Oluştur" }).click();
+  await page7.getByText("E-postanızı Kontrol Edin").waitFor({ state: "visible", timeout: 10000 });
+  const message7 = await getLatestEmailFor(email7);
+  const href7 = message7 ? extractFirstHref(message7.HTML || message7.Text || "") : null;
+  if (href7) {
+    // AYNI context (page7) - signUp()'ı başlatanla linke tıklayan aynı
+    // tarayıcı, PKCE code_verifier eşleşsin ve gerçek bir session kurulsun.
+    await page7.goto(href7, { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+    await page7.waitForTimeout(1000);
+    await page7.evaluate(() => sessionStorage.clear());
+    await context7.route("**/rest/v1/profiles**", () => {
+      /* kasıtlı olarak hiç sonlandırılmıyor - gerçek bir askıda kalma simülasyonu */
+    });
+    await page7.goto(`${APP_ORIGIN}/kayit-tamamla`);
+    await page7.waitForTimeout(17000);
+    const showsCheckError = await page7.getByText("Kaydınız kontrol edilirken bir sorun oluştu").isVisible().catch(() => false);
+    const stillStuckOnChecking = await page7.getByText("Kontrol ediliyor...").isVisible().catch(() => false);
+    const hasRetryButton = await page7.getByRole("button", { name: "Tekrar Dene" }).isVisible().catch(() => false);
+    const hasLoginButton = await page7.getByRole("button", { name: "Giriş Sayfasına Dön" }).isVisible().catch(() => false);
+    record(
+      "7) Gerçekten askıda kalan profiles sorgusu 15sn içinde 'check-error' ekranına düşüyor (sonsuz spinner YOK)",
+      showsCheckError && !stillStuckOnChecking && hasRetryButton && hasLoginButton,
+    );
+    await context7.close();
+  }
 
   await browser.close();
 

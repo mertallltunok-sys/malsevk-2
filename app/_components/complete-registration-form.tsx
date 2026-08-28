@@ -46,7 +46,7 @@ import { SearchableSelect } from "./searchable-select";
  *    girişi) ikisinin de sakıncasını ortadan kaldırır.
  */
 
-type PageStatus = "checking" | "auto-completing" | "form" | "already-complete" | "no-session";
+type PageStatus = "checking" | "auto-completing" | "form" | "already-complete" | "no-session" | "check-error";
 
 function LegalDocumentInlineTrigger({
   documentId,
@@ -136,7 +136,31 @@ export function CompleteRegistrationForm() {
   useEffect(() => {
     let cancelled = false;
 
+    // GERÇEK ÜRETİM BUGU (2026-08-28) — canlı raporlandı: bu useEffect'in
+    // hiçbir try/catch'i YOKTU. `getUser()`/`.from("profiles")` çağrılarından
+    // biri (ağ hatası, beklenmeyen bir istisna) fırlatırsa `run()` sessizce
+    // yarıda kesiliyor, `status` başlangıç değeri "checking"te SONSUZA KADAR
+    // kalıyor ve kullanıcı "Kontrol ediliyor..." spinner'ında takılı
+    // kalıyordu — origin/PKCE düzeltmeleri (route.ts) bu ayrı, kendi başına
+    // yeterli hata kaynağını KAPATMADI. İki katmanlı güvenlik ağı eklendi:
+    // (1) try/catch ile HER exception yakalanıp "check-error" durumuna
+    // geçiliyor, (2) bir zaman aşımı (15sn) — promise'in ne çözülüp ne
+    // reddedildiği, gerçekten asılı kaldığı nadir durumlar için.
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setStatus((current) => (current === "checking" || current === "auto-completing" ? "check-error" : current));
+    }, 15000);
+
     async function run() {
+      try {
+        await runChecks();
+      } catch {
+        if (!cancelled) setStatus("check-error");
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    async function runChecks() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -208,6 +232,7 @@ export function CompleteRegistrationForm() {
     void run();
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- yalnızca mount anında bir kez çalışmalı; supabase/router/provinces stabil referanslardır.
   }, []);
@@ -289,6 +314,32 @@ export function CompleteRegistrationForm() {
     }
     clearPendingRegistrationDraft();
     router.push("/panel");
+  }
+
+  if (status === "check-error") {
+    return (
+      <div className="flex flex-col items-center gap-4 py-10 text-center">
+        <p role="alert" className="text-sm font-medium text-danger">
+          Kaydınız kontrol edilirken bir sorun oluştu. İnternet bağlantınızı kontrol edip tekrar deneyin.
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Tekrar Dene
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/giris-yap")}
+            className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Giriş Sayfasına Dön
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (status === "checking" || status === "auto-completing" || status === "already-complete" || status === "no-session") {
