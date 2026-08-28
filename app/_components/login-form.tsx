@@ -24,6 +24,37 @@ import { SearchableSelect } from "./searchable-select";
 type Mode = "giris" | "kayit";
 
 /**
+ * DÜZELTME (kritik rol/yönlendirme açığı): `redirectTo` (bkz. giris-yap/
+ * page.tsx#resolveRedirectTarget) yalnızca AÇIK YÖNLENDİRME'ye karşı
+ * doğrulanır (site-içi göreli bir yol mu) — ROL'e uygun olup olmadığı hiç
+ * kontrol edilmezdi. `proxy.ts`, oturumsuz bir kullanıcının `/admin`'e
+ * doğrudan gitme denemesini `/giris-yap?redirect=%2Fadmin`e bounce eder;
+ * bu kullanıcı normal (admin OLMAYAN) bir hesapla giriş yaptığında eski kod
+ * `router.push(redirectTo)`u KOŞULSUZ çalıştırıyordu — `/admin`in kendi
+ * sunucu tarafı koruması (`require-admin.ts#requireAdminOrRedirect`,
+ * `is_admin()` RPC'siyle gerçek yetkiyi doğrular) hedefi yine de `notFound()`
+ * ile engelliyordu (VERİ SIZINTISI YOKTU), ama istemci gereksiz yere bu
+ * korumalı rotaya YÖNLENMEYE ÇALIŞIYORDU — hem URL çubuğunda kafa karıştırıcı
+ * bir "/admin" görünümüne hem de "Admin verisi için hiçbir istek atılmasın"
+ * gereksinimine aykırı bir sunucu round-trip'ine yol açıyordu. Artık
+ * `redirectTo` yalnızca GERÇEK rol admin İSE `/admin*`e yönlendirilebiliyor;
+ * aksi halde (admin-olmayan bir rol admin-önekli bir hedefe sahipse) genel,
+ * her rol için güvenli `/panel`e düşülüyor — istemci `/admin`e ASLA
+ * yönlendirme DENEMİYOR bile, bu yüzden o rotanın sunucu tarafı koruması
+ * (dolayısıyla is_admin() RPC'si) normal bir kullanıcı için hiç tetiklenmiyor.
+ */
+function isAdminOnlyPath(path: string): boolean {
+  return path === "/admin" || path.startsWith("/admin/");
+}
+
+function resolveRoleAwareRedirect(redirectTo: string, role: UserRole): string {
+  if (isAdminOnlyPath(redirectTo) && role !== "admin") {
+    return "/panel";
+  }
+  return redirectTo;
+}
+
+/**
  * Kayıt formundaki TEK birleşik onay cümlesi içinde (bkz. bu dosyanın
  * altındaki checkbox bloğu) üç hukuki metin adının HER BİRİ ayrı ayrı
  * tıklanabilir olmalı ve kendi modalını açmalı (bkz. görev gereksinimi).
@@ -276,7 +307,11 @@ export function LoginForm({
         return;
       }
 
-      router.push(redirectTo);
+      // `resolveRoleAwareRedirect` üstündeki doküman — `redirectTo` GERÇEK
+      // rolle uyuşmayan bir `/admin*` hedefiyse (ör. proxy.ts bounce'u ya da
+      // elle oluşturulmuş bir `?redirect=` parametresi), istemci ORAYA HİÇ
+      // yönlendirme DENEMEZ; genel `/panel`e düşülür.
+      router.push(resolveRoleAwareRedirect(redirectTo, profile.role));
       return;
     }
 
@@ -442,7 +477,11 @@ export function LoginForm({
           setFormError(result.error);
           return;
         }
-        router.push(redirectTo);
+        // Kayıt formu "admin"i hiçbir zaman seçilebilir bir Hesap Türü olarak
+        // sunmaz (bkz. types.ts#UserRole dokümanı) — ama `redirectTo` yine de
+        // `resolveRoleAwareRedirect` üstündeki AYNI, doğrulanmamış `?redirect=`
+        // parametresidir; aynı düzeltme burada da uygulanır.
+        router.push(resolveRoleAwareRedirect(redirectTo, completionInput.role));
         return;
       }
 
@@ -505,7 +544,7 @@ export function LoginForm({
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
           <button
             type="button"
-            onClick={() => router.push(redirectTo)}
+            onClick={() => router.push(resolveRoleAwareRedirect(redirectTo, session.role))}
             className="rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Mevcut Hesaba Dön
