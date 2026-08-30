@@ -84,10 +84,29 @@ export type SessionProfileDetails = {
 
 const listeners = new Set<() => void>();
 const profileDetailsListeners = new Set<() => void>();
+const loadingListeners = new Set<() => void>();
 let cachedSession: Session | null = null;
 let cachedProfileDetails: SessionProfileDetails | null = null;
 let initialized = false;
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
+
+/**
+ * "Yavaş Ağda Yanlış CTA" düzeltme görevi — `useSession()`in `null` dönüşü
+ * hem "gerçekten ziyaretçi" hem "oturum HENÜZ çözülmedi" anlamına geldiği
+ * için (yukarıdaki doküman notu), rol-bazlı bir arayüz (ör. services-
+ * section.tsx) bu ikisini ayırt edemiyordu — yavaş ağda GERÇEK CDP ağ
+ * kısıtlamasıyla ölçülen, giriş yapmış bir kullanıcıya ~3,4-3,8 saniye
+ * yanlış (ziyaretçi) CTA gösterilmesi buradan kaynaklanıyordu. `hasResolvedOnce`
+ * yalnızca "bu sayfa yüklemesinde İLK gerçek Supabase kontrolü (`getUser`+
+ * `profiles`) tamamlandı mı" sorusuna cevap verir — `use-my-service-
+ * authorizations.ts`in kendi `loading` bayrağıyla AYNI ilke: yalnızca
+ * `false`tan `true`ya, BİR KEZ geçer, sonra asla sıfırlanmaz (bir sonraki
+ * giriş/çıkış/token yenileme burayı TEKRAR "yükleniyor" yapmaz — yalnızca
+ * ilk çözülme bekleniyor). `Session`/`sessionStore`/`useSession()` sözleşmesi
+ * BİLEREK dokunulmadı — bu TAMAMEN AYRI, isteğe bağlı bir kanal (services-
+ * section.tsx dışında hiçbir mevcut tüketici bunu okumuyor).
+ */
+let hasResolvedOnce = false;
 
 function getBrowserClient() {
   if (!browserClient) browserClient = createSupabaseBrowserClient();
@@ -100,6 +119,17 @@ function notify(): void {
 
 function notifyProfileDetails(): void {
   for (const listener of profileDetailsListeners) listener();
+}
+
+function notifyLoading(): void {
+  for (const listener of loadingListeners) listener();
+}
+
+/** Yalnızca İLK çözülmede bir kez `false`tan `true`ya geçer (bkz. `hasResolvedOnce`'ın üstündeki doküman) — sonraki her çağrı no-op'tur. */
+function markResolvedOnce(): void {
+  if (hasResolvedOnce) return;
+  hasResolvedOnce = true;
+  notifyLoading();
 }
 
 /** Yalnızca içerik gerçekten değiştiyse yeni referans üretir — useSyncExternalStore'un gereksiz re-render'ını önler. */
@@ -205,6 +235,7 @@ async function refreshSessionCache(): Promise<void> {
  */
 export async function refreshSession(): Promise<void> {
   await refreshSessionCache();
+  markResolvedOnce();
 }
 
 /**
@@ -230,9 +261,13 @@ function ensureInitialized(): void {
 
   const supabase = getBrowserClient();
   supabase.auth.onAuthStateChange(() => {
-    void refreshSessionCache();
+    void refreshSessionCache().finally(markResolvedOnce);
   });
-  void refreshSessionCache();
+  // `.finally(markResolvedOnce)` — fonksiyonun GÖVDESİNE dokunmadan (birden
+  // fazla erken `return`i olduğu için minimal fark için çağrı noktasında
+  // sarılır): bu, sayfa yüklemesindeki İLK gerçek Supabase kontrolünün ne
+  // zaman tamamlandığını (başarılı/başarısız fark etmez) işaretler.
+  void refreshSessionCache().finally(markResolvedOnce);
 }
 
 function readSessionSnapshot(): Session | null {
@@ -284,4 +319,34 @@ export const sessionProfileDetailsStore = {
   subscribe: subscribeToProfileDetails,
   getSnapshot: readProfileDetailsSnapshot,
   getServerSnapshot: getServerProfileDetailsSnapshot,
+};
+
+function readIsSessionLoadingSnapshot(): boolean {
+  ensureInitialized();
+  return !hasResolvedOnce;
+}
+
+/** Sunucu/ilk hidrasyon anında da "yükleniyor" (`true`) — `getServerSnapshot` bu üçünün (sessionStore/sessionProfileDetailsStore ile) tek FARKLI olanı, çünkü diğer ikisinin sunucu değeri her zaman `null`/veri-yok'tur, bunun ise "henüz bilmiyoruz". */
+function getServerIsSessionLoadingSnapshot(): boolean {
+  return true;
+}
+
+function subscribeToLoading(onStoreChange: () => void): () => void {
+  ensureInitialized();
+  loadingListeners.add(onStoreChange);
+  return () => {
+    loadingListeners.delete(onStoreChange);
+  };
+}
+
+/**
+ * `use-session.ts#useIsSessionLoading()`in bağlandığı store — `sessionStore`
+ * ile AYNI `useSyncExternalStore` sözleşmesi, TAMAMEN AYRI bir kanal.
+ * `Session`/`sessionStore`/`useSession()` sözleşmesine hiçbir şekilde
+ * dokunulmadı; bu yalnızca EKLENEN, isteğe bağlı bir bilgidir.
+ */
+export const sessionLoadingStore = {
+  subscribe: subscribeToLoading,
+  getSnapshot: readIsSessionLoadingSnapshot,
+  getServerSnapshot: getServerIsSessionLoadingSnapshot,
 };
