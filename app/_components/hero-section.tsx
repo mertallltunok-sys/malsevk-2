@@ -1,179 +1,116 @@
 "use client";
 
-import {
-  Check,
-  Clock,
-  MapPin,
-  Scale,
-  Search,
-  ShieldCheck,
-  TrendingUp,
-  type LucideIcon,
-} from "lucide-react";
 import { ButtonLink } from "./button-link";
-import { HeroVisualPanel } from "./hero-visual-panel";
+import { HeroMotionVideo } from "./hero-motion-video";
 import { PageContainer } from "./page-container";
-import { useSession } from "../_lib/use-session";
-
-const trustPoints = [
-  "Profesyonel hizmet verenler",
-  "Türkiye genelinde hizmet",
-  "Kolay teklif karşılaştırma",
-];
-
-type HeroFeature = { title: string; description: string; icon: LucideIcon };
+import { useIsSessionLoading, useSession } from "../_lib/use-session";
 
 /**
- * Oturum açmış roller için CTA altındaki avantaj alanı — visitor'daki sade
- * yeşil-tik listesinin yerini alır. Hizmet Alan ve Hizmet Veren AYNI render
- * yapısını (bkz. HeroSection içindeki <ul>) paylaşır, yalnızca bu veri
- * dizisi değişir.
+ * "Hero rol bazlı buton" görevi — bir önceki görev (hero sadeleştirme) iki
+ * butonu HER rolde birlikte gösteriyordu; bu görev bunu geri alıp gerçek rol
+ * bazlı görünürlüğe döndürüyor: Ziyaretçi iki buton, Hizmet Alan yalnız
+ * "Hizmet Talebi Oluştur", Hizmet Veren yalnız "İş İlanlarını Görüntüle".
+ * Rol çözümü İKİNCİ bir auth/rol sistemi İCAT ETMİYOR — `useSession()` +
+ * `useIsSessionLoading()` (`session.ts`/`use-session.ts`, services-
+ * section.tsx'in "yavaş ağda yanlış CTA" düzeltmesinde zaten kanıtlanmış AYNI
+ * merkezi kaynak) yeniden kullanılıyor; rol asla URL/kullanıcı adı/
+ * localStorage'dan TAHMİN EDİLMİYOR. Rol bazlı buton mantığı BİLEREK
+ * `HeroMotionVideo`nun (görselin/videonun kendisi) İÇİNE gömülmedi — o
+ * bileşen tamamen değişmeden, oturumdan bağımsız kaldı; tüm rol dallanması
+ * bu (session-aware) üst bileşende çözülüyor.
  */
-const heroFeatures: Record<"hizmet-alan" | "hizmet-veren", HeroFeature[]> = {
-  "hizmet-veren": [
-    {
-      title: "Güvenilir İş Fırsatları",
-      description: "Uygun lojistik hizmet ilanlarını inceleyin ve güvenle teklif verin.",
-      icon: ShieldCheck,
-    },
-    {
-      title: "Türkiye Genelinde İlanlar",
-      description: "Farklı şehirlerdeki iş fırsatlarına tek platformdan ulaşın.",
-      icon: MapPin,
-    },
-    {
-      title: "İşinizi Büyütün",
-      description: "Yeni müşterilere ulaşın, düzenli iş alın ve operasyon hacminizi artırın.",
-      icon: TrendingUp,
-    },
-  ],
-  "hizmet-alan": [
-    {
-      title: "İhtiyacınıza Uygun Hizmet",
-      description: "Hizmet ihtiyacınızı tanımlayın ve uygun firmalardan teklif alın.",
-      icon: Search,
-    },
-    {
-      title: "Teklifleri Karşılaştırın",
-      description: "Gelen teklifleri fiyat, süre ve firma bilgilerine göre değerlendirin.",
-      icon: Scale,
-    },
-    {
-      title: "Güvenli ve Şeffaf Süreç",
-      description: "Tekliften iş tamamlanana kadar süreci tek platformdan takip edin.",
-      icon: ShieldCheck,
-    },
-    {
-      title: "Zamandan Tasarruf Edin",
-      description: "Doğru hizmet verene hızlıca ulaşarak operasyonunuzu aksatmayın.",
-      icon: Clock,
-    },
-  ],
-};
-
-/**
- * Rol bazlı Hero metni/CTA'sı. Oturum yokken (ya da sunucu snapshot'ı olan
- * `null` ile ilk hidrasyon anında) "visitor" içeriği gösterilir — bu,
- * RoleCardsSection'daki useSession/useSyncExternalStore deseniyle aynıdır,
- * bu yüzden ayrı bir hydration mismatch riski oluşturmaz.
- */
-const heroCopy = {
-  visitor: {
-    title: "Lojistik operasyonlarınız için doğru hizmeti tek platformda bulun.",
-    description:
-      "MALSEVK, hizmet alan firmalar ile uzman hizmet verenleri güvenli, hızlı ve şeffaf şekilde buluşturan profesyonel lojistik hizmet platformudur.",
-  },
-  "hizmet-alan": {
-    title: "Lojistik hizmet ihtiyacınızı kolayca karşılayın",
-    description:
-      "İhtiyacınıza uygun hizmet talebi oluşturun, gelen teklifleri karşılaştırın ve doğru hizmet vereni seçin.",
-  },
-  "hizmet-veren": {
-    title: "Uzmanlığınıza uygun iş fırsatlarını keşfedin",
-    description:
-      "Size uygun lojistik hizmet ilanlarını inceleyin, teklif verin ve yeni müşterilere ulaşın.",
-  },
-} as const;
-
 export function HeroSection() {
   const session = useSession();
-  // "admin" bu pazarlama bölümünün hedef kitlesi değildir (bkz.
-  // heroCopy/heroFeatures'ın yalnızca visitor/hizmet-alan/hizmet-veren
-  // içermesi) — admin oturumu "visitor" içeriğiyle aynı, jenerik hâle döner.
-  const audience =
-    session?.role === "hizmet-alan" || session?.role === "hizmet-veren" ? session.role : "visitor";
-  const copy = heroCopy[audience];
+  const isSessionLoading = useIsSessionLoading();
+
+  // "Yavaş Ağda/Yüklemede Yanlış CTA" — services-section.tsx'teki AYNI ilke:
+  // rol henüz çözülmemişken (isSessionLoading === true) `resolvedRole`
+  // `undefined` kalır, bu da aşağıdaki HeroCtaRow'un HİÇBİR butonu (ne
+  // ziyaretçininkini ne rolünkini) GÖSTERMEDEN, yalnızca ölçüyü koruyan boş
+  // bir alanla beklemesini sağlar — "göz kırpma"/yanlış rol butonunun kısa
+  // süreliğine görünmesi ihtimalini yapısal olarak ORTADAN KALDIRIR.
+  const resolvedRole: "hizmet-alan" | "hizmet-veren" | "guest" | undefined = isSessionLoading
+    ? undefined
+    : session === null
+      ? "guest"
+      : session.role === "hizmet-alan" || session.role === "hizmet-veren"
+        ? session.role
+        : "guest"; // admin: bu bölümün hedef kitlesi değil, ziyaretçiyle aynı genel görünüm.
 
   return (
     <section className="border-b border-border bg-background">
-      <PageContainer className="grid gap-12 py-16 sm:py-20 lg:grid-cols-2 lg:items-center">
-        <div>
+      <PageContainer className="py-10 sm:py-12">
+        <div className="mx-auto max-w-2xl text-center">
           <span className="inline-flex items-center rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted-foreground">
             Türkiye&apos;nin lojistik hizmet platformu
           </span>
-          <h1 className="mt-5 max-w-xl text-4xl font-bold leading-tight tracking-heading text-foreground sm:text-5xl">
-            {copy.title}
+          <h1 className="mt-4 text-3xl font-bold leading-tight tracking-heading text-foreground sm:text-4xl">
+            Lojistik operasyonunuz tek platformda
           </h1>
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-            {copy.description}
+          <p className="mt-3 text-base leading-relaxed text-muted-foreground">
+            İhtiyacınızı yayınlayın, uzman firmalardan teklif alın ve tüm süreci tek ekrandan yönetin.
           </p>
-          <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-            {audience === "hizmet-alan" && (
-              <ButtonLink href="/hizmet-talebi-olustur" variant="primary">
-                Hizmet Talebi Oluştur
-              </ButtonLink>
-            )}
-            {audience === "hizmet-veren" && (
-              <ButtonLink href="/ilanlar" variant="primary">
-                İş İlanlarını İncele
-              </ButtonLink>
-            )}
-            {audience === "visitor" && (
-              <>
-                <ButtonLink href="/hizmet-talebi-olustur" variant="primary">
-                  Hizmet Talebi Oluştur
-                </ButtonLink>
-                <ButtonLink href="/ilanlar" variant="secondary">
-                  İş İlanlarını İncele
-                </ButtonLink>
-              </>
-            )}
-          </div>
-          {audience === "visitor" ? (
-            <ul className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
-              {trustPoints.map((point) => (
-                <li
-                  key={point}
-                  className="flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <Check className="h-4 w-4 shrink-0 text-success" aria-hidden="true" />
-                  {point}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul className="mt-8 flex max-w-xl flex-col divide-y divide-border">
-              {heroFeatures[audience].map((feature) => (
-                <li key={feature.title} className="flex items-start gap-4 py-4">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
-                    <feature.icon className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-base font-bold tracking-heading leading-tight text-foreground">
-                      {feature.title}
-                    </p>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                      {feature.description}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+
+          <HeroCtaRow role={resolvedRole} />
         </div>
 
-        <HeroVisualPanel />
+        {/* Sayfanın TEK operasyon akışı anlatımı — bkz. hero-motion-video.tsx
+            (bu görevde HİÇ değiştirilmedi: dosya yolu/animasyon/oran aynı). */}
+        <div className="mt-8 sm:mt-10">
+          <HeroMotionVideo />
+        </div>
       </PageContainer>
     </section>
+  );
+}
+
+const CTA_BASE_CLASSNAME = "w-full sm:w-auto";
+
+/**
+ * Üç oturum durumuna göre TAM olarak görev talimatının tablosunu uygular.
+ * `role === undefined` (oturum henüz çözülmedi) HİÇBİR buton göstermez —
+ * yanlış CTA'nın kısa süreli görünmesini engelleyen tek yer burasıdır.
+ * Yükleme yer tutucusunun yüksekliği (`h-[46px]`), gerçek buton
+ * yüksekliğiyle (`ButtonLink`'in `py-3` + metin) eşleşecek şekilde
+ * services-section.tsx'teki AYNI değerle seçildi — layout shift önlenir.
+ */
+function HeroCtaRow({
+  role,
+}: {
+  role: "hizmet-alan" | "hizmet-veren" | "guest" | undefined;
+}) {
+  if (role === undefined) {
+    return <div className="mt-8 h-[46px]" aria-hidden="true" />;
+  }
+
+  if (role === "hizmet-alan") {
+    return (
+      <div className="mt-8 flex justify-center">
+        <ButtonLink href="/hizmet-talebi-olustur" variant="primary" className={CTA_BASE_CLASSNAME}>
+          Hizmet Talebi Oluştur
+        </ButtonLink>
+      </div>
+    );
+  }
+
+  if (role === "hizmet-veren") {
+    return (
+      <div className="mt-8 flex justify-center">
+        <ButtonLink href="/ilanlar" variant="primary" className={CTA_BASE_CLASSNAME}>
+          İş İlanlarını Görüntüle
+        </ButtonLink>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+      <ButtonLink href="/hizmet-talebi-olustur" variant="primary" className={CTA_BASE_CLASSNAME}>
+        Hizmet Talebi Oluştur
+      </ButtonLink>
+      <ButtonLink href="/ilanlar" variant="secondary" className={CTA_BASE_CLASSNAME}>
+        İş İlanlarını İncele
+      </ButtonLink>
+    </div>
   );
 }
