@@ -1,3 +1,4 @@
+import { isDemoJobDataAllowed } from "./demo-job-data";
 import type { Job, JobStatus } from "./types";
 
 export const SERVICE_CATEGORIES = [
@@ -93,11 +94,19 @@ const jobs: Job[] = [
   },
 ];
 
+/**
+ * Statik örnek/demo ilanlar yalnızca Local ve Development'ta döner —
+ * Production'da (bkz. demo-job-data.ts#isDemoJobDataAllowed) her zaman boş
+ * dizi/`null` döner, böylece bu iki fonksiyonun TÜM çağıranları (jobs-lookup.ts,
+ * use-jobs.ts, reset-demo-data.ts, app/ilanlar/[id]/page.tsx) tek bir
+ * değişiklikle otomatik olarak kapsanır.
+ */
 export function getJobs(): Job[] {
-  return jobs;
+  return isDemoJobDataAllowed() ? jobs : [];
 }
 
 export function getJobById(id: string): Job | null {
+  if (!isDemoJobDataAllowed()) return null;
   return jobs.find((job) => job.id === id) ?? null;
 }
 

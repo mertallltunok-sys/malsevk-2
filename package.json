@@ -12,6 +12,7 @@
     "locations:report": "node scripts/locations/report.mjs",
     "locations:test-filter": "node scripts/locations/test-filter.mjs",
     "test:photo-feature": "node scripts/test-photo-feature.mjs",
+    "test:demo-job-data": "node scripts/test-demo-job-data.mjs",
     "test:photo-api": "node scripts/test-photo-api.mjs",
     "test:photo-browser": "node scripts/browser-test-job-photos.mjs",
     "test:regression": "node scripts/browser-test-regression.mjs",
